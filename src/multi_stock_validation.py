@@ -268,6 +268,8 @@ def run_validation(
                             risk_per_trade=risk_per_trade,
                             minimum_net_risk_reward=minimum_net_risk_reward,
                             slippage_bps_per_side=float(bps),
+                            entry_cutoff=configured_risk.entry_cutoff_ist,
+                            square_off_time=configured_risk.square_off_time_ist,
                             charge_rates=charge_rates,
                         )
                         trades, summary = backtest_strategy(

@@ -336,7 +336,12 @@ def backtest_fixed_levels(
         gross_rr = reward_per_share / risk_per_share
         candidate_gross_rr.append(gross_rr)
         risk_qty = floor(config.risk_per_trade / risk_per_share)
-        cash_qty = floor(config.initial_capital / entry)
+        # Cash-only sizing uses current realised equity, not the original account
+        # size on every trade. This avoids reusing capital already lost in earlier
+        # closed trades; unrealised P&L is not counted because only one position is open.
+        realised_equity = config.initial_capital + sum(trade.net_pnl for trade in trades)
+        available_cash = max(0.0, realised_equity)
+        cash_qty = floor(available_cash / entry)
         qty = min(risk_qty, cash_qty)
         candidate_qty.append(qty)
         if qty < 1:

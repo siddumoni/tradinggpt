@@ -229,7 +229,7 @@ def run_repricing(
             frame,
             slippage_values=slippage_values,
             charge_rates=charge_rates,
-            source_label=path.name,
+            source_label=str(path.resolve()),
         ))
     detail = pd.concat(detail_frames, ignore_index=True) if detail_frames else pd.DataFrame()
     summary = summarize_repricing(

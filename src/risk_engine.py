@@ -220,6 +220,7 @@ def load_phase2_settings(
             require_margin_verification=bool(risk.get("require_margin_verification", True)),
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
+            slippage_bps_per_side=float(risk.get("slippage_bps_per_side", 5.0)),
         )
         rates = ChargeRates(
             brokerage_rate=Decimal(str(cost.get("brokerage_rate", "0.0003"))),

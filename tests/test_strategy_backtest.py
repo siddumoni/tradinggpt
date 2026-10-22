@@ -54,3 +54,21 @@ def test_backtest_strategy_returns_summary_for_historical_frame():
 def test_backtest_strategy_rejects_empty_data():
     with pytest.raises(ValueError, match="No candles"):
         backtest_strategy("TEST", pd.DataFrame(), "vwap_trend")
+
+
+
+def test_candles_to_frame_rejects_invalid_timestamp():
+    with pytest.raises(ValueError, match="invalid timestamp"):
+        candles_to_frame([{
+            "date": "not-a-date",
+            "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000,
+        }])
+
+
+def test_candles_to_frame_preserves_invalid_ohlc_for_quality_filter():
+    frame = candles_to_frame([{
+        "date": pd.Timestamp("2026-10-12 09:15", tz="Asia/Kolkata"),
+        "open": 100, "high": 101, "low": 99, "close": float("nan"), "volume": 1000,
+    }])
+    assert len(frame) == 1
+    assert pd.isna(frame.iloc[0]["close"])

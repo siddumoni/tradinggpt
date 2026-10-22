@@ -44,3 +44,25 @@ def test_vwap_resets_each_session():
     assert out.iloc[3]["vwap"] == pytest.approx(
         (out.iloc[3]["high"] + out.iloc[3]["low"] + out.iloc[3]["close"]) / 3
     )
+
+
+
+def test_non_finite_ohlc_raises():
+    df = make_candles()
+    df.iloc[5, df.columns.get_loc("close")] = np.inf
+    with pytest.raises(ValueError, match="present and finite"):
+        add_indicators(df)
+
+
+def test_invalid_ohlc_relationship_raises():
+    df = make_candles()
+    df.iloc[5, df.columns.get_loc("high")] = 90
+    with pytest.raises(ValueError, match="inconsistent"):
+        add_indicators(df)
+
+
+def test_missing_volume_raises():
+    df = make_candles()
+    df.iloc[5, df.columns.get_loc("volume")] = np.nan
+    with pytest.raises(ValueError, match="Volume must be present"):
+        add_indicators(df)

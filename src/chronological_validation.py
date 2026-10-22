@@ -22,6 +22,7 @@ import pandas as pd
 from src.backtest import BacktestConfig, backtest_fixed_levels
 from src.indicators import add_indicators
 from src.strategy_backtest import (
+    SUPPORTED_STRATEGIES,
     candles_to_frame,
     filter_incomplete_sessions,
     make_signal_callback,
@@ -69,17 +70,18 @@ def load_csv(path: Path) -> pd.DataFrame:
 def split_by_session(
     frame: pd.DataFrame, train_fraction: float
 ) -> tuple[pd.Timestamp, pd.Timestamp, list, list]:
-    """Split only the already quality-filtered, complete sessions chronologically."""
+    """Split complete sessions chronologically, requiring at least 10 per partition."""
     sessions = sorted(pd.Index(frame.index.date).unique())
-    if len(sessions) < 10:
-        raise ValueError(
-            "Need at least 10 complete sessions after data-quality filtering; "
-            f"found {len(sessions)}"
-        )
     split_idx = int(len(sessions) * train_fraction)
     split_idx = min(max(split_idx, 1), len(sessions) - 1)
     train_sessions = sessions[:split_idx]
     test_sessions = sessions[split_idx:]
+    if len(train_sessions) < 10 or len(test_sessions) < 10:
+        raise ValueError(
+            "Chronological validation needs at least 10 complete sessions in both "
+            f"partitions; found development={len(train_sessions)}, test={len(test_sessions)}. "
+            "Use more data or a smaller --train-fraction."
+        )
     tz = frame.index.tz
     test_start = pd.Timestamp(test_sessions[0]).tz_localize(tz)
     test_end = pd.Timestamp(test_sessions[-1]).tz_localize(tz) + pd.Timedelta(days=1)
@@ -98,6 +100,7 @@ def run_one(
     quality_report: dict,
     train_sessions: list,
     test_sessions: list,
+    minimum_test_trades: int = 30,
 ) -> dict:
     # `frame` contains only complete sessions. Compute indicators over the
     # quality-filtered timeline so incomplete days cannot contribute signals or
@@ -118,6 +121,14 @@ def run_one(
     )
     trades, summary = backtest_fixed_levels(symbol, test_indicators, callback, config)
     result = dict(summary)
+    test_trade_count = int(summary.get("trades", len(trades)))
+    test_session_count = int(pd.Index(test_indicators.index.date).nunique())
+    if test_session_count < 10:
+        sample_assessment = "INSUFFICIENT_TEST_SESSIONS"
+    elif test_trade_count < minimum_test_trades:
+        sample_assessment = "INSUFFICIENT_TEST_TRADES"
+    else:
+        sample_assessment = "TRADE_THRESHOLD_MET_REQUIRES_REPLICATION"
     result.update({
         "symbol": symbol,
         "strategy": strategy,
@@ -126,8 +137,15 @@ def run_one(
         "test_start": str(test_indicators.index.min()),
         "test_end": str(test_indicators.index.max()),
         "test_bars": int(len(test_indicators)),
-        "test_sessions": int(pd.Index(test_indicators.index.date).nunique()),
+        "test_sessions": test_session_count,
         "train_sessions": len(train_sessions),
+        "minimum_test_trades_for_review": minimum_test_trades,
+        "sample_assessment": sample_assessment,
+        "selection_bias_warning": (
+            "Not an untouched holdout if this symbol/strategy or any parameters were "
+            "selected after inspecting overlapping dates. Treat as diagnostic and "
+            "confirm prospectively on unseen sessions."
+        ),
         "total_complete_sessions": int(pd.Index(frame.index.date).nunique()),
         "sessions_seen_before_filter": quality_report["sessions_seen"],
         "sessions_kept": quality_report["sessions_kept"],
@@ -150,23 +168,45 @@ def main() -> None:
     parser.add_argument("--data-dir", default="reports/backtests/candle_cache", help="Directory containing saved 5-minute CSVs")
     parser.add_argument("--output-dir", default="reports/backtests/chronological_validation")
     parser.add_argument("--days-label", default="30d", help="CSV filename suffix, e.g. 30d")
-    parser.add_argument("--train-fraction", type=float, default=0.70, help="Fraction of sessions before the test partition; default 0.70")
-    parser.add_argument("--risk-per-trade", type=float, default=200.0)
+    parser.add_argument("--train-fraction", type=float, default=0.70, help="Fraction of sessions in the earlier development partition; default 0.70")
+    parser.add_argument("--risk-per-trade", type=float, default=200.0, help="Positive planned loss budget in INR; no arbitrary upper cap")
     parser.add_argument("--min-net-rr", type=float, default=1.5)
+    parser.add_argument("--minimum-test-trades", type=int, default=30, help="Trade count threshold for a sample review; it does not prove profitability")
+    parser.add_argument("--candidates", default="INFY:vwap_pullback,HDFCBANK:vwap_trend", help="Comma-separated SYMBOL:STRATEGY pairs; freeze choices before looking at test results")
     args = parser.parse_args()
     if not 0.50 <= args.train_fraction <= 0.85:
         parser.error("--train-fraction must be between 0.50 and 0.85")
-    if not 0 < args.risk_per_trade <= 400:
-        parser.error("--risk-per-trade must be > 0 and <= 400")
-    if args.min_net_rr <= 0:
-        parser.error("--min-net-rr must be positive")
+    if not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0:
+        parser.error("--risk-per-trade must be finite and greater than 0")
+    if not math.isfinite(args.min_net_rr) or args.min_net_rr <= 0:
+        parser.error("--min-net-rr must be finite and positive")
+    if args.minimum_test_trades < 1:
+        parser.error("--minimum-test-trades must be at least 1")
+    candidates = []
+    for item in args.candidates.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        parts = item.split(":", maxsplit=1)
+        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+            parser.error(f"Invalid candidate {item!r}; use SYMBOL:STRATEGY")
+        symbol, strategy = parts[0].strip().upper(), parts[1].strip()
+        if strategy not in SUPPORTED_STRATEGIES:
+            parser.error(
+                f"Unsupported strategy {strategy!r}; choose from {SUPPORTED_STRATEGIES}"
+            )
+        candidates.append((symbol, strategy))
+    if not candidates:
+        parser.error("--candidates must contain at least one SYMBOL:STRATEGY pair")
+    if not 0.50 <= args.train_fraction <= 0.85:
+        parser.error("--train-fraction must be between 0.50 and 0.85")
 
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
 
-    for symbol, strategy in CANDIDATES:
+    for symbol, strategy in candidates:
         path = data_dir / f"{symbol}_{args.days_label}_5minute.csv"
         try:
             raw_frame = load_csv(path)
@@ -194,7 +234,7 @@ def main() -> None:
                     row = run_one(
                         symbol, strategy, frame, test_start, test_end, slippage,
                         args.risk_per_trade, args.min_net_rr, quality_report,
-                        train_sessions, test_sessions,
+                        train_sessions, test_sessions, args.minimum_test_trades,
                     )
                     row["total_sessions"] = len(train_sessions) + len(test_sessions)
                     row["source_csv"] = str(path)
@@ -222,6 +262,7 @@ def main() -> None:
     print(result.to_string(index=False))
     print(f"\nSummary CSV: {csv_path}")
     print(f"Detailed JSON files: {output_dir}")
+    print("Interpretation: a passing trade-count threshold is not proof of profitability; inspect net costs, drawdown, and the selection-bias warning.")
 
 
 if __name__ == "__main__":

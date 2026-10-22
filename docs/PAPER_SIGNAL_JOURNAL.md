@@ -6,6 +6,18 @@ This journal preserves directional candidates from saved scanner snapshots so fu
 
 It is **not a trade log**: entries in this CSV are observations, not fills. The module never places, modifies or cancels orders, and does not invent realised P&L or assume that the reference close was an executable fill.
 
+## Select a market-data source
+
+The scanner defaults to Yahoo Finance development data. For stock quotes and 5/15-minute candles from the authenticated, read-only Kite Connect API, first use the project's manual session flow and then select `--provider kite`:
+
+```powershell
+python -m src.main login
+python -m src.main check
+python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv
+```
+
+Kite symbol data is marked verified only when a positive quote and timestamp are present and the quote timestamp is within 15 minutes of the scan time. A stale/missing quote fails closed. The NIFTY regime context still uses unofficial Yahoo Finance index data, and the scanner does not verify MIS margin. Consequently this change does not approve trades; paper/journal use remains the safe mode.
+
 ## Capture during a scanner run
 
 Optionally pass the journal path to the scanner. Each saved scan writes its JSON as before; directional candidates from that report are also appended to the journal:

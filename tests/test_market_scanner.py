@@ -166,3 +166,61 @@ def test_high_company_headline_does_not_raise_market_context_dimension_to_high()
     _, _, _, market_risk, _, company_risk, _ = _news_risk_breakdown("RELIANCE", items)
     assert company_risk == "HIGH"
     assert market_risk == "MEDIUM"
+
+
+
+def test_scanner_candle_normalizer_rejects_invalid_timestamp():
+    rows = sample_candles(2)
+    rows[1]["date"] = "not-a-date"
+    with pytest.raises(ValueError, match="invalid timestamps"):
+        candles_to_frame(rows)
+
+
+def test_scanner_candle_normalizer_rejects_duplicate_timestamp():
+    rows = sample_candles(3)
+    rows[1]["date"] = rows[0]["date"]
+    with pytest.raises(ValueError, match="Duplicate candle timestamps"):
+        candles_to_frame(rows)
+
+
+def test_scanner_candle_normalizer_rejects_non_finite_ohlcv():
+    rows = sample_candles(3)
+    rows[1]["close"] = float("inf")
+    with pytest.raises(ValueError, match="present and finite"):
+        candles_to_frame(rows)
+
+
+def test_scanner_candle_normalizer_rejects_inconsistent_ohlc():
+    rows = sample_candles(3)
+    rows[1]["high"] = rows[1]["open"] - 1
+    with pytest.raises(ValueError, match="inconsistent"):
+        candles_to_frame(rows)
+
+
+def test_scanner_refuses_new_entries_at_configured_cutoff():
+    now = datetime(2026, 10, 16, 14, 45, tzinfo=IST)
+    bundle = {
+        "provider": "test",
+        "candles_5m": sample_candles(60),
+        "candles_15m": sample_candles(24),
+    }
+    result = evaluate_symbol_bundle("RELIANCE", bundle, now=now)
+    assert result.action == "NO_TRADE"
+    assert result.quantity == 0
+    assert any("No new entries are evaluated at or after 14:45 IST" in reason for reason in result.reasons)
+
+
+def test_scanner_refuses_invalid_configured_cutoff():
+    from src.risk_engine import RiskSettings
+
+    now = datetime(2026, 10, 16, 11, 0, tzinfo=IST)
+    bundle = {
+        "provider": "test",
+        "candles_5m": sample_candles(60),
+        "candles_15m": sample_candles(24),
+    }
+    result = evaluate_symbol_bundle(
+        "RELIANCE", bundle, settings=RiskSettings(entry_cutoff_ist="25:99"), now=now
+    )
+    assert result.action == "NO_TRADE"
+    assert any("cutoff is invalid" in reason for reason in result.reasons)

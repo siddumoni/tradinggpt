@@ -119,6 +119,8 @@ def run_one(
         risk_per_trade=risk,
         minimum_net_risk_reward=min_rr,
         slippage_bps_per_side=slippage,
+        entry_cutoff=configured_risk.entry_cutoff_ist,
+        square_off_time=configured_risk.square_off_time_ist,
         charge_rates=charge_rates,
     )
     trades, summary = backtest_fixed_levels(symbol, test_indicators, callback, config)

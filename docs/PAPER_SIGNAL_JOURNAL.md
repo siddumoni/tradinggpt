@@ -32,7 +32,7 @@ Or import an existing report manually:
 python -m src.paper_journal --scan reports/phase6_scan_20261022_103000.json --journal logs/paper_signals.csv
 ```
 
-Run it prospectively and archive the journal with its source scan reports. Do not backfill it by looking at historical charts and pretending those were live observations.
+When `--paper-journal` is enabled, the scanner also archives completed 5-minute candles under `data/paper_candles` by default. Override the location with `--candle-archive-dir`. Each per-symbol file is tagged with `provider_mode`; switching from Yahoo to Kite (or vice versa) in the same archive deliberately fails instead of mixing feeds. Keep the scan reports, journal, and candle archive together for auditability. Run it prospectively and archive the journal with its source scan reports. Do not backfill it by looking at historical charts and pretending those were live observations.
 
 ## Meaning of paper status
 

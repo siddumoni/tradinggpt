@@ -54,6 +54,10 @@ Do not randomly shuffle intraday candles. Split by complete session/date, not in
 
 If a candidate was selected after reviewing the full period (including the later portion), that later portion is contaminated for that candidate. A chronological split of the same reviewed dataset does not remove that selection bias.
 
+### Prospective observations
+
+Capture scanner observations as they happen with the [paper-signal journal](PAPER_SIGNAL_JOURNAL.md). Preserve source scan files, signal timestamp, provider verification and the exact rules in use. The journal is not a fill ledger; do not calculate realised performance from reference prices unless a separate outcome evaluator has defined and recorded the fill convention. Do not backfill a prospective journal from historical charts.
+
 ### Shared-account allocation check
 
 After validating individual symbol trade logs, run a shared-capital replay using one selected baseline trade log per candidate stream. Use the replay to expose simultaneous-signal conflicts, cash constraints, quantity reductions, same-symbol overlap, and capital/risk rejections. It is only an allocation diagnostic if it reuses per-symbol saved trades; it does not regenerate signals when capital is occupied and it omits intratrade mark-to-market drawdown. Freeze the candidate order for same-time signals and never combine alternative slippage or regime-filter variants as if they were independent trades. See [the shared-capital replay guide](PORTFOLIO_REPLAY.md).

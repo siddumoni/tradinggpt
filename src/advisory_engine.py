@@ -20,6 +20,7 @@ import yaml
 from src.market_scanner import evaluate_symbol_bundle, rank_candidates
 from src.news_events import DEFAULT_FEEDS, fetch_news, google_news_search_url
 from src.risk_engine import load_phase2_settings
+from src.paper_journal import append_scan_report
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -198,11 +199,15 @@ def main() -> int:
     parser.add_argument("--watchlist", type=Path, default=Path("config/watchlist.yaml"))
     parser.add_argument("--news-feeds", type=Path, default=Path("config/news_feeds.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
+    parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
     symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()] if args.symbols else load_watchlist(args.watchlist)
     report = run_scan(symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist, news_feeds_path=args.news_feeds, output_dir=args.output_dir)
+    if args.paper_journal is not None and report.get("report_path"):
+        journal_result = append_scan_report(Path(report["report_path"]), args.paper_journal)
+        print(f"Paper journal: {journal_result['journal_path']} (new events: {journal_result['new_events']}, duplicates skipped: {journal_result['duplicates_skipped']})")
     print(f"Status: {report['status']}")
     print(f"As of: {report['as_of']}")
     if report.get("report_path"):

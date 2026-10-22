@@ -242,7 +242,7 @@ def test_backtest_rejects_inconsistent_ohlc_values():
 
 
 def test_backtest_rejects_non_finite_price_values():
-    candles = make_candles()
+    candles = make_candles().astype(float)
     candles.iloc[2, candles.columns.get_loc("close")] = np.inf
     with pytest.raises(ValueError, match="non-finite prices"):
         backtest_fixed_levels("TEST", candles, one_signal)

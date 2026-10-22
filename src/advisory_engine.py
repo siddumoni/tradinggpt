@@ -166,6 +166,8 @@ def run_scan(
             "capital_inr": risk_settings.capital_inr,
             "risk_per_trade_inr": risk_settings.risk_per_trade_inr,
             "minimum_net_risk_reward": risk_settings.minimum_net_risk_reward,
+            "slippage_bps_per_side": risk_settings.slippage_bps_per_side,
+            "entry_cutoff_ist": risk_settings.entry_cutoff_ist,
             "require_margin_verification": risk_settings.require_margin_verification,
         },
         "symbols_requested": selected,

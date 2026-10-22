@@ -111,8 +111,9 @@ def _candidate_event(
     if side == "SHORT" and not target_2 <= target_1 < reference_entry < stop_loss:
         raise ValueError("SHORT candidate levels must satisfy target_2 <= target_1 < entry < stop")
 
-    data_verified = bool(candidate.get("data_verified_live", False))
-    margin_verified = bool(candidate.get("margin_verified", False))
+    # Fail closed: only JSON boolean true is accepted as verification. A string such as "False" must not become truthy.
+    data_verified = candidate.get("data_verified_live") is True
+    margin_verified = candidate.get("margin_verified") is True
     if not data_verified:
         paper_status = "WATCH_ONLY_UNVERIFIED_DATA"
         status_note = "Data source is not verified as live exchange data; no execution or performance claim."
@@ -202,8 +203,14 @@ def append_scan_report(
         except OSError as exc:
             raise ValueError(f"Could not read existing journal {journal_path}: {exc}") from exc
 
-    new_rows = [event for event in events if event["signal_id"] not in existing_ids]
-    new_ids = {row["signal_id"] for row in new_rows}
+    new_rows: list[dict[str, Any]] = []
+    seen_ids = set(existing_ids)
+    for event in events:
+        signal_id = event["signal_id"]
+        if signal_id in seen_ids:
+            continue
+        new_rows.append(event)
+        seen_ids.add(signal_id)
     journal_path.parent.mkdir(parents=True, exist_ok=True)
     with journal_path.open("a", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=JOURNAL_FIELDS, extrasaction="ignore")

@@ -29,7 +29,7 @@ def signal_row(**overrides):
         "signal_time": SIGNAL_TIME.isoformat(),
         "reference_entry": 100.0,
         "stop_loss": 99.0,
-        "target_1": 102.0,
+        "target_1": 103.0,
         "target_2": 104.0,
         "data_verified_live": "False",
         "paper_status": "WATCH_ONLY_UNVERIFIED_DATA",
@@ -114,6 +114,16 @@ def test_opening_gap_through_stop_rejects_hypothetical_entry(tmp_path):
     result = evaluate(signal_row(), frame, tmp_path)
 
     assert result["outcome_status"] == "ENTRY_OPEN_INVALIDATED_LEVELS"
+    assert result["net_pnl"] is None
+
+
+def test_too_small_net_reward_to_risk_is_rejected(tmp_path):
+    frame = make_session()
+    row = signal_row(target_1=100.1, target_2=100.2)
+
+    result = evaluate(row, frame, tmp_path)
+
+    assert result["outcome_status"] == "ENTRY_REJECTED_BY_RISK_FILTER"
     assert result["net_pnl"] is None
 
 

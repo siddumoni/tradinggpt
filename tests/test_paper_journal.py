@@ -89,6 +89,36 @@ def test_journal_deduplicates_same_signal_candle_across_reports(tmp_path):
     assert len(read_rows(journal)) == 1
 
 
+def test_journal_deduplicates_duplicate_signal_rows_in_one_report(tmp_path):
+    report = write_report(tmp_path / "scan.json", [candidate(), candidate()])
+    journal = tmp_path / "journal.csv"
+
+    result = append_scan_report(report, journal)
+
+    assert result["directional_candidates"] == 2
+    assert result["new_events"] == 1
+    assert result["duplicates_skipped"] == 1
+    assert len(read_rows(journal)) == 1
+
+
+def test_journal_treats_string_true_as_unverified(tmp_path):
+    report = write_report(tmp_path / "scan.json", [
+        candidate(
+            action="CONDITIONAL_BUY",
+            data_verified_live="True",
+            margin_verified="True",
+            news_status="CHECKED_NO_MATCH",
+        ),
+    ])
+    journal = tmp_path / "journal.csv"
+    append_scan_report(report, journal)
+    row = read_rows(journal)[0]
+
+    assert row["data_verified_live"] == "False"
+    assert row["margin_verified"] == "False"
+    assert row["paper_status"] == "WATCH_ONLY_UNVERIFIED_DATA"
+
+
 def test_journal_marks_approved_candidate_paper_only_never_filled(tmp_path):
     report = write_report(tmp_path / "scan.json", [
         candidate(

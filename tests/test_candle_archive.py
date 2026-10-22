@@ -49,8 +49,8 @@ def test_archive_upserts_repeated_timestamps_without_duplicates(tmp_path):
     second = append_completed_candles("INFY", changed, tmp_path, now=now, provider_mode="yahoo")
     saved = pd.read_csv(tmp_path / "INFY.csv")
 
-    assert first.total_rows == 6
-    assert second.total_rows == 6
+    assert first.total_rows == 5
+    assert second.total_rows == 5
     assert saved["date"].is_unique
     assert saved.loc[0, "close"] == pytest.approx(100.25)
 

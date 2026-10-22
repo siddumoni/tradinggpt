@@ -26,6 +26,7 @@ class RiskSettings:
     skip_if_margin_unavailable: bool = True
     slippage_bps_per_side: float = 5.0
     entry_cutoff_ist: str = "14:45"
+    square_off_time_ist: str = "15:15"
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,7 @@ def load_phase2_settings(
             require_margin_verification=bool(risk.get("require_margin_verification", True)),
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
+            square_off_time_ist=str(schedule.get("intended_square_off_by", "15:15")),
             slippage_bps_per_side=float(risk.get("slippage_bps_per_side", 5.0)),
         )
         rates = ChargeRates(
@@ -230,7 +232,7 @@ def load_phase2_settings(
             sebi_rate=Decimal(str(cost.get("sebi_rate", "0.000001"))),
             gst_rate=Decimal(str(cost.get("gst_rate", "0.18"))),
             stamp_buy_rate=Decimal(str(cost.get("stamp_buy_rate", "0.00003"))),
-            ipft_rate=Decimal(str(cost.get("ipft_rate", "0"))),
+            ipft_rate=Decimal(str(cost.get("ipft_rate", "0.000000001"))),
         )
         return settings, rates
     except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:

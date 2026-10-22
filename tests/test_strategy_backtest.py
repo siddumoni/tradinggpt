@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -72,3 +74,45 @@ def test_candles_to_frame_preserves_invalid_ohlc_for_quality_filter():
     }])
     assert len(frame) == 1
     assert pd.isna(frame.iloc[0]["close"])
+
+
+
+def test_single_backtest_cli_accepts_configured_defaults(monkeypatch):
+    from src import strategy_backtest as module
+
+    captured = {}
+    monkeypatch.setattr(
+        sys, "argv",
+        ["strategy_backtest", "--symbol", "RELIANCE", "--strategy", "vwap_trend"],
+    )
+    monkeypatch.setattr(module, "run_yahoo_backtest", lambda *args: captured.setdefault("args", args))
+
+    module.main()
+
+    args = captured["args"]
+    assert args[4] is None  # risk budget comes from settings.yaml
+    assert args[5] is None  # minimum net R:R comes from settings.yaml
+    assert args[8] is None  # slippage comes from settings.yaml
+
+
+def test_slippage_sensitivity_cli_accepts_configured_defaults(monkeypatch):
+    from src import strategy_backtest as module
+
+    captured = {}
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "strategy_backtest", "--symbol", "RELIANCE",
+            "--strategy", "vwap_trend", "--slippage-sensitivity",
+        ],
+    )
+    monkeypatch.setattr(
+        module, "run_slippage_sensitivity",
+        lambda *args: captured.setdefault("args", args),
+    )
+
+    module.main()
+
+    args = captured["args"]
+    assert args[4] is None  # risk budget comes from settings.yaml
+    assert args[5] is None  # minimum net R:R comes from settings.yaml

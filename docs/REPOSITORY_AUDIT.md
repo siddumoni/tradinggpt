@@ -22,6 +22,7 @@ This audit prioritizes trustworthy input, execution, and evaluation before strat
 - Validate risk/cost settings and charge-model inputs, including finite values, integer positive quantity, and non-negative finite charge rates.
 - Load a configured 14:45 IST no-new-entry cutoff into the advisory risk settings and enforce it in scanner evaluation.
 - Allow chronological candidates to be specified explicitly, require at least 10 complete sessions in both partitions, and label insufficient test samples/possible selection bias instead of treating a pass as proof of profitability.
+- Read common capital, risk, charge-rate and configured slippage settings in the single-strategy, multi-stock, chronological and advisory paths, while keeping scenario-specific slippage overrides explicit.
 - Add regression tests, explicit runtime dependencies, a Windows/Python 3.13 CI workflow, current workflow action versions, a refreshed README, and a research protocol.
 
 ### Still open / intentionally not promoted to live use
@@ -33,7 +34,7 @@ This audit prioritizes trustworthy input, execution, and evaluation before strat
 5. **Execution estimates are still approximations.** OHLC bars cannot reveal precise intrabar order; stop-first is deliberately conservative when stop and target are both touched. Slippage is an assumption, and actual fills/charges/order splits can differ. A planned risk budget is not a cap on realised loss after gaps.
 6. **Live advisory is deliberately fail-closed.** The scanner uses unverified Yahoo research data and currently supplies no validated margin-per-share estimate. It should not emit an approved entry until a verified exchange/broker data path, quote freshness/spread checks, and a reliable margin check exist. This branch does not add order placement.
 7. **News checks are triage only.** RSS keyword matching can miss events or misclassify a headline; a no-match means no match in the supplied feeds, not that no material news exists. Original exchange/company sources and publication times should be checked.
-8. **Configuration consistency needs an integration pass.** Cost/risk settings should be loaded from the same configuration path by every CLI research runner, rather than depending on Python defaults. Verify this end-to-end before interpreting reported net P&L.
+8. **Cost and risk configuration is shared across research paths in this branch.** The single-strategy, multi-stock, chronological and advisory flows read the common settings file. Explicit CLI overrides remain possible; every output should retain the effective values so comparisons are reproducible.
 
 ## Research protocol recommended for the next milestone
 

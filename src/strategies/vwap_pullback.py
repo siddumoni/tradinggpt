@@ -17,8 +17,34 @@ def vwap_pullback_signal(
     heuristic; it does not estimate probability of profit.
     """
     required = {"open", "high", "low", "close", "vwap", "ema_9", "ema_21", "atr_14"}
-    if len(candles) < 2 or not required.issubset(candles.columns):
+    if (
+        len(candles) < 2
+        or not required.issubset(candles.columns)
+        or not isinstance(candles.index, pd.DatetimeIndex)
+        or candles.index.has_duplicates
+        or not candles.index.is_monotonic_increasing
+    ):
         return None
+
+    # A pullback must be formed by two consecutive candles in the same NSE
+    # session. Without this guard, the prior day's closing candle can be paired
+    # with today's opening candle after VWAP resets at the session boundary.
+    previous_stamp = pd.Timestamp(candles.index[-2])
+    current_stamp = pd.Timestamp(candles.index[-1])
+    if previous_stamp.tzinfo is None:
+        previous_stamp = previous_stamp.tz_localize("Asia/Kolkata")
+    else:
+        previous_stamp = previous_stamp.tz_convert("Asia/Kolkata")
+    if current_stamp.tzinfo is None:
+        current_stamp = current_stamp.tz_localize("Asia/Kolkata")
+    else:
+        current_stamp = current_stamp.tz_convert("Asia/Kolkata")
+    if (
+        previous_stamp.date() != current_stamp.date()
+        or current_stamp - previous_stamp != pd.Timedelta(minutes=5)
+    ):
+        return None
+
     prev, row = candles.iloc[-2], candles.iloc[-1]
     if pd.isna(prev[list(required)]).any() or pd.isna(row[list(required)]).any():
         return None

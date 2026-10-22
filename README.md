@@ -10,7 +10,7 @@ TradingGPT is a Python research and advisory project for NSE equities. It combin
 - **Market-data adapters:** Kite-related fetch helpers and a Yahoo Finance historical-data adapter.
 - **Indicators and strategies:** EMA, RSI, MACD, ATR, session VWAP, VWAP trend/pullback, and opening-range logic.
 - **Risk and costs:** risk assessment, cash-only notional sizing in the backtester, and estimated NSE intraday charges.
-- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, shared-capital portfolio replay, candle data-quality audit, and chronological validation.
+- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, shared-capital portfolio replay, prospective paper-signal journal, candle data-quality audit, and chronological validation.
 - **Tests:** offline unit and regression tests. Tests should not require a live brokerage session.
 
 The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge.
@@ -92,6 +92,16 @@ The runner requires at least 10 complete sessions in both chronological partitio
 **Important selection-bias rule:** if you chose a stock, strategy, or parameter after inspecting the same period's backtest results, a later split of those same dates is not an untouched out-of-sample test. Treat it as a diagnostic. Freeze the candidate list and settings, then test them prospectively on unseen sessions before considering real-money use.
 
 Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
+
+## Capture prospective paper observations
+
+To append directional candidates from each scan to an idempotent CSV journal (without pretending candidates are filled trades), add `--paper-journal`:
+
+```powershell
+python -m src.advisory_engine --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv
+```
+
+The journal records scanner timestamp, signal levels, provider-verification flags and a watch-only/paper-only status. The current Yahoo development feed and missing margin estimate are intentionally not trade-approved. The journal does not calculate outcomes yet. See [the paper signal journal guide](docs/PAPER_SIGNAL_JOURNAL.md).
 
 ## Replay selected signals with shared capital
 

@@ -224,3 +224,32 @@ def test_cash_only_notional_limit_is_respected():
         notional = trades["entry"] * trades["quantity"]
         assert (notional <= config.initial_capital).all()
 
+
+
+
+def test_backtest_rejects_duplicate_candle_timestamps():
+    candles = make_candles()
+    duplicated = pd.concat([candles, candles.iloc[[0]]]).sort_index()
+    with pytest.raises(ValueError, match="Duplicate candle timestamps"):
+        backtest_fixed_levels("TEST", duplicated, one_signal)
+
+
+def test_backtest_rejects_inconsistent_ohlc_values():
+    candles = make_candles()
+    candles.iloc[2, candles.columns.get_loc("high")] = 98.0
+    with pytest.raises(ValueError, match="OHLC values are inconsistent"):
+        backtest_fixed_levels("TEST", candles, one_signal)
+
+
+def test_backtest_rejects_non_finite_price_values():
+    candles = make_candles()
+    candles.iloc[2, candles.columns.get_loc("close")] = np.inf
+    with pytest.raises(ValueError, match="non-finite prices"):
+        backtest_fixed_levels("TEST", candles, one_signal)
+
+
+def test_backtest_rejects_invalid_slippage_configuration():
+    candles = make_candles()
+    config = BacktestConfig(slippage_bps_per_side=float("nan"))
+    with pytest.raises(ValueError, match="must be finite"):
+        backtest_fixed_levels("TEST", candles, one_signal)

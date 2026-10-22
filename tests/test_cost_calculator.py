@@ -1,9 +1,10 @@
+from decimal import Decimal
 
 from __future__ import annotations
 
 import pytest
 
-from src.cost_calculator import estimate_intraday_round_trip_cost
+from src.cost_calculator import ChargeRates, estimate_intraday_round_trip_cost
 
 
 def test_round_trip_costs_are_positive_and_include_required_heads() -> None:
@@ -74,3 +75,29 @@ def test_short_trade_applies_buy_stamp_duty_to_exit_turnover() -> None:
 def test_invalid_cost_inputs_raise(kwargs: dict) -> None:
     with pytest.raises(ValueError):
         estimate_intraday_round_trip_cost(**kwargs)
+
+
+
+@pytest.mark.parametrize("rate", [Decimal("-0.1"), Decimal("NaN"), float("inf")])
+def test_invalid_charge_rate_configuration_is_rejected(rate):
+    with pytest.raises(ValueError, match="brokerage_rate"):
+        ChargeRates(brokerage_rate=rate)
+
+
+@pytest.mark.parametrize(
+    "entry,exit_price,quantity",
+    [
+        (float("nan"), 100.0, 1),
+        (100.0, float("inf"), 1),
+        (100.0, 101.0, 1.5),
+        (100.0, 101.0, float("nan")),
+    ],
+)
+def test_non_finite_prices_and_fractional_quantity_are_rejected(entry, exit_price, quantity):
+    with pytest.raises(ValueError):
+        estimate_intraday_round_trip_cost(
+            side="LONG",
+            entry_price=entry,
+            exit_price=exit_price,
+            quantity=quantity,
+        )

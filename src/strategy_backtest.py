@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
 from src.backtest import BacktestConfig, backtest_fixed_levels
@@ -98,6 +99,8 @@ def filter_incomplete_sessions(
     else:
         frame.index = frame.index.tz_convert(IST)
     frame = frame.sort_index()
+    for column in required_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
     start_hour, start_minute = map(int, session_start.split(":"))
     end_hour, end_minute = map(int, required_last_bar.split(":"))
@@ -135,13 +138,34 @@ def filter_incomplete_sessions(
         actual = set(group.index.strftime("%H:%M"))
         missing_times = [time for time in required_times if time not in actual]
         missing_values = group[required_columns].isna().any(axis=1)
-        if missing_times or missing_values.any() or len(group) != required_count:
+        prices = group[["open", "high", "low", "close"]]
+        finite_prices = pd.Series(
+            np.isfinite(prices.to_numpy(dtype=float)).all(axis=1), index=group.index
+        )
+        positive_prices = (prices > 0).all(axis=1)
+        valid_ohlc = (
+            (group["high"] >= group[["open", "close", "low"]].max(axis=1))
+            & (group["low"] <= group[["open", "close", "high"]].min(axis=1))
+        )
+        volume = group["volume"]
+        valid_volume = pd.Series(
+            np.isfinite(volume.to_numpy(dtype=float)) & (volume >= 0).to_numpy(),
+            index=group.index,
+        )
+        invalid_rows = ~(finite_prices & positive_prices & valid_ohlc & valid_volume)
+        if (
+            missing_times
+            or missing_values.any()
+            or invalid_rows.any()
+            or len(group) != required_count
+        ):
             excluded.append({
                 "session": str(day),
                 "actual_bars": int(len(group)),
                 "required_bars": required_count,
                 "missing_bars": missing_times,
                 "rows_with_missing_ohlcv": int(missing_values.sum()),
+                "rows_with_invalid_ohlcv": int(invalid_rows.sum()),
                 "reason": "missing_or_invalid_required_candles",
             })
         else:

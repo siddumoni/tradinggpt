@@ -20,6 +20,7 @@ import pandas as pd
 
 from src.backtest import BacktestConfig, backtest_fixed_levels
 from src.indicators import add_indicators
+from src.risk_engine import load_phase2_settings
 from src.strategy_backtest import (
     SUPPORTED_STRATEGIES,
     candles_to_frame,
@@ -112,10 +113,13 @@ def run_one(
     # Callback sees only test-period bars; pre-test data is used for indicator warm-up,
     # not for test-period trade entries. This avoids training-period trades leaking in.
     callback = make_signal_callback(symbol, strategy)
+    configured_risk, charge_rates = load_phase2_settings()
     config = BacktestConfig(
+        initial_capital=configured_risk.capital_inr,
         risk_per_trade=risk,
         minimum_net_risk_reward=min_rr,
         slippage_bps_per_side=slippage,
+        charge_rates=charge_rates,
     )
     trades, summary = backtest_fixed_levels(symbol, test_indicators, callback, config)
     result = dict(summary)
@@ -167,11 +171,20 @@ def main() -> None:
     parser.add_argument("--output-dir", default="reports/backtests/chronological_validation")
     parser.add_argument("--days-label", default="30d", help="CSV filename suffix, e.g. 30d")
     parser.add_argument("--train-fraction", type=float, default=0.70, help="Fraction of sessions in the earlier development partition; default 0.70")
-    parser.add_argument("--risk-per-trade", type=float, default=200.0, help="Positive planned loss budget in INR; no arbitrary upper cap")
-    parser.add_argument("--min-net-rr", type=float, default=1.5)
+    parser.add_argument("--risk-per-trade", type=float, default=None, help="Positive planned loss budget in INR; defaults to config/settings.yaml")
+    parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")
     parser.add_argument("--minimum-test-trades", type=int, default=30, help="Trade count threshold for a sample review; it does not prove profitability")
     parser.add_argument("--candidates", default="INFY:vwap_pullback,HDFCBANK:vwap_trend", help="Comma-separated SYMBOL:STRATEGY pairs; freeze choices before looking at test results")
     args = parser.parse_args()
+    configured_risk, _configured_charges = load_phase2_settings()
+    args.risk_per_trade = (
+        configured_risk.risk_per_trade_inr
+        if args.risk_per_trade is None else args.risk_per_trade
+    )
+    args.min_net_rr = (
+        configured_risk.minimum_net_risk_reward
+        if args.min_net_rr is None else args.min_net_rr
+    )
     if not 0.50 <= args.train_fraction <= 0.85:
         parser.error("--train-fraction must be between 0.50 and 0.85")
     if not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0:

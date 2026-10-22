@@ -1,6 +1,6 @@
-from decimal import Decimal
-
 from __future__ import annotations
+
+from decimal import Decimal
 
 import pytest
 

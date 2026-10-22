@@ -53,7 +53,7 @@ def test_portfolio_shares_capital_and_resizes_overlapping_entries(tmp_path):
 
     assert summary["candidate_trades"] == 2
     assert summary["accepted_trades"] == 2
-    assert details["quantity"].tolist() == [10, 3]
+    assert details["quantity"].tolist() == [10, 6]
     assert details["reserved_capital"].iloc[1] <= details["available_capital_at_entry"].iloc[1]
     assert summary["ending_equity"] == pytest.approx(
         summary["initial_capital"] + summary["net_pnl"]

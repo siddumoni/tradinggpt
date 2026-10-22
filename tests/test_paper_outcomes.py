@@ -191,6 +191,18 @@ def test_ambiguous_candle_files_fail_instead_of_choosing_arbitrarily(tmp_path):
         resolve_candle_file("INFY", tmp_path)
 
 
+def test_outcome_evaluator_rejects_candle_source_mismatch(tmp_path):
+    frame = make_session()
+    frame["provider_mode"] = "kite"
+    row = signal_row(provider="Yahoo Finance unofficial; not verified live exchange data")
+
+    result = evaluate(row, frame, tmp_path)
+
+    assert result["outcome_status"] == "CANDLE_PROVIDER_MISMATCH"
+    assert result["candle_provider_mode"] == "kite"
+    assert result["net_pnl"] is None
+
+
 def test_csv_verification_flag_fails_closed():
     assert strict_csv_bool("True") is True
     assert strict_csv_bool("true") is True

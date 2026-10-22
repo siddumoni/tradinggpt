@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 from datetime import datetime, time as dtime, timedelta
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,6 +22,7 @@ from src.market_scanner import evaluate_symbol_bundle, rank_candidates
 from src.news_events import DEFAULT_FEEDS, fetch_news, google_news_search_url
 from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_report
+from src.candle_archive import append_completed_candles
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -104,6 +106,7 @@ def run_scan(
     *, symbols: list[str], now: datetime | None = None, max_symbols: int | None = None,
     watchlist_path: Path | None = None, news_feeds_path: Path | None = None,
     output_dir: Path | None = None, data_provider: str = "yahoo",
+    candle_archive_dir: Path | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)

@@ -18,6 +18,7 @@ schedule:
 risk:
   require_margin_verification: true
   skip_if_margin_unavailable: true
+  slippage_bps_per_side: 5       # assumed slippage per side, in basis points
 
 paths:
   token_cache: .local/kite_token.json

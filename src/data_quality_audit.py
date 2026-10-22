@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import numpy as np
 import pandas as pd
 
 SYMBOLS = ("INFY", "HDFCBANK")
@@ -41,10 +42,10 @@ def load_candles(path: Path) -> pd.DataFrame:
     raw = raw.dropna(subset=[time_col]).set_index(time_col).sort_index()
     rename = {c: c.title() for c in raw.columns if c.lower() in {"open", "high", "low", "close", "volume"}}
     raw = raw.rename(columns=rename)
-    missing = [c for c in OHLC if c not in raw.columns]
+    missing = [c for c in (*OHLC, "Volume") if c not in raw.columns]
     if missing:
-        raise ValueError(f"Missing required OHLC columns: {missing}")
-    for col in (*OHLC, *(("Volume",) if "Volume" in raw.columns else ())):
+        raise ValueError(f"Missing required OHLCV columns: {missing}")
+    for col in (*OHLC, "Volume"):
         raw[col] = pd.to_numeric(raw[col], errors="coerce")
     return raw
 
@@ -53,16 +54,24 @@ def audit_symbol(symbol: str, path: Path, required_until: str, session_end: str)
     frame = load_candles(path)
     idx = frame.index
     duplicated = int(idx.duplicated(keep=False).sum())
-    invalid_rows = frame[list(OHLC)].isna().any(axis=1)
-    nonpositive = (frame[list(OHLC)] <= 0).any(axis=1)
+    price_frame = frame[list(OHLC)]
+    missing_ohlc = price_frame.isna().any(axis=1)
+    nonfinite_ohlc = ~pd.Series(
+        np.isfinite(price_frame.to_numpy(dtype=float)).all(axis=1), index=frame.index
+    )
+    invalid_rows = missing_ohlc | nonfinite_ohlc
+    nonpositive = (price_frame <= 0).any(axis=1)
     bad_ohlc = (
         (frame["High"] < frame[["Open", "Close", "Low"]].max(axis=1))
         | (frame["Low"] > frame[["Open", "Close", "High"]].min(axis=1))
         | (frame["High"] < frame["Low"])
     )
-    volume_bad = pd.Series(False, index=frame.index)
-    if "Volume" in frame.columns:
-        volume_bad = frame["Volume"].isna() | (frame["Volume"] < 0)
+    volume_values = frame["Volume"]
+    volume_bad = (
+        volume_values.isna()
+        | ~pd.Series(np.isfinite(volume_values.to_numpy(dtype=float)), index=frame.index)
+        | (volume_values < 0)
+    )
 
     session_rows: list[dict] = []
     for day, group in frame.groupby(frame.index.date, sort=True):
@@ -105,7 +114,8 @@ def audit_symbol(symbol: str, path: Path, required_until: str, session_end: str)
         "last_timestamp": str(idx.max()) if len(idx) else "",
         "distinct_sessions": int(pd.Index(idx.date).nunique()),
         "duplicate_timestamp_rows": duplicated,
-        "rows_with_missing_ohlc": int(invalid_rows.sum()),
+        "rows_with_missing_ohlc": int(missing_ohlc.sum()),
+        "rows_with_nonfinite_ohlc": int(nonfinite_ohlc.sum()),
         "rows_with_nonpositive_ohlc": int(nonpositive.sum()),
         "rows_with_invalid_ohlc_relationships": int(bad_ohlc.sum()),
         "rows_with_invalid_volume": int(volume_bad.sum()),

@@ -10,6 +10,10 @@ The project is **not yet ready for live trade recommendations or a claim of prof
 
 This audit prioritizes trustworthy input, execution, and evaluation before strategy tuning.
 
+## Current data-provider boundary
+
+The advisory scanner has an explicit `--provider yahoo|kite` option. `kite` uses the existing authenticated, read-only Kite market-data adapter for NSE equity stock candles and requires a recent, valid quote for the stock-data verification flag. The NIFTY 50 regime history still comes from unofficial Yahoo Finance, and no live MIS margin estimator is wired into the scanner; therefore this is not a live-readiness milestone. Keep signals in watch/paper mode until stock and index source provenance, margin, execution costs, and paper outcomes are independently checked.
+
 ## Findings and changes on the research branch
 
 ### Addressed in this branch

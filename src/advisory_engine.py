@@ -302,11 +302,19 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
     parser.add_argument("--provider", choices=("yahoo", "kite"), default="yahoo", help="Market-data source; kite uses the authenticated read-only Kite Connect API and cached daily session")
     parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
+    parser.add_argument("--candle-archive-dir", type=Path, default=None, help="Optional directory for a provider-pure archive of completed 5-minute candles; enabled automatically at data/paper_candles when --paper-journal is set")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
     symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()] if args.symbols else load_watchlist(args.watchlist)
-    report = run_scan(symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist, news_feeds_path=args.news_feeds, output_dir=args.output_dir, data_provider=args.provider)
+    candle_archive_dir = args.candle_archive_dir
+    if args.paper_journal is not None and candle_archive_dir is None:
+        candle_archive_dir = Path("data/paper_candles")
+    report = run_scan(
+        symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist,
+        news_feeds_path=args.news_feeds, output_dir=args.output_dir,
+        data_provider=args.provider, candle_archive_dir=candle_archive_dir,
+    )
     if args.paper_journal is not None and report.get("report_path"):
         journal_result = append_scan_report(Path(report["report_path"]), args.paper_journal)
         print(f"Paper journal: {journal_result['journal_path']} (new events: {journal_result['new_events']}, duplicates skipped: {journal_result['duplicates_skipped']})")

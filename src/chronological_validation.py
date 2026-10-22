@@ -1,4 +1,4 @@
-"""Chronological train/test validation for two candidate NSE intraday strategies.
+"""Chronological holdout validation for configured NSE intraday strategy candidates.
 
 Research only: no orders are submitted. Uses saved OHLCV CSVs so every scenario
 is reproducible and does not silently fetch different data between runs.
@@ -6,8 +6,7 @@ is reproducible and does not silently fetch different data between runs.
 Place at src/chronological_validation.py and run from repository root:
   python -m src.chronological_validation --data-dir reports/backtests/candle_cache
 
-Expected CSV names: INFY_30d_5minute.csv and HDFCBANK_30d_5minute.csv.
-If your files are elsewhere, pass --data-dir with that directory.
+Expected CSV names follow SYMBOL_{days-label}_5minute.csv. Candidate strategies should be frozen before test results are reviewed.
 """
 from __future__ import annotations
 
@@ -29,7 +28,6 @@ from src.strategy_backtest import (
 )
 
 LOGGER = logging.getLogger(__name__)
-CANDIDATES = (("INFY", "vwap_pullback"), ("HDFCBANK", "vwap_trend"))
 SLIPPAGE_BPS = (2.0, 5.0, 8.0)
 
 
@@ -198,9 +196,6 @@ def main() -> None:
         candidates.append((symbol, strategy))
     if not candidates:
         parser.error("--candidates must contain at least one SYMBOL:STRATEGY pair")
-    if not 0.50 <= args.train_fraction <= 0.85:
-        parser.error("--train-fraction must be between 0.50 and 0.85")
-
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

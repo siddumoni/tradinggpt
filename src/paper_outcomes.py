@@ -88,6 +88,8 @@ def load_candles(path: Path) -> pd.DataFrame:
 
     timestamps = [to_ist_timestamp(value, label=f"{path} candle") for value in raw[timestamp_col]]
     frame = raw.loc[:, list(OHLCV)].copy()
+    if "provider_mode" in raw.columns:
+        frame["provider_mode"] = raw["provider_mode"].astype(str).to_numpy()
     frame.index = pd.DatetimeIndex(timestamps, name="timestamp")
     if frame.index.has_duplicates:
         duplicates = frame.index[frame.index.duplicated(keep=False)].astype(str).tolist()
@@ -159,6 +161,7 @@ def _base_result(row: pd.Series, *, candle_path: Path | None) -> dict[str, Any]:
     result = row.to_dict()
     result.update({
         "candle_file": str(candle_path) if candle_path else "",
+        "candle_provider_mode": "UNVERIFIED_EXTERNAL_FILE",
         "outcome_status": "NOT_EVALUATED",
         "outcome_note": "",
         "entry_time": "",
@@ -201,6 +204,34 @@ def evaluate_signal(
     if side not in ("LONG", "SHORT"):
         result.update(outcome_status="INVALID_SIDE", outcome_note=f"Unsupported side: {side}")
         return result
+
+    if "provider_mode" in candles.columns:
+        modes = sorted({
+            str(value).strip().lower()
+            for value in candles["provider_mode"].dropna().unique()
+            if str(value).strip()
+        })
+        if len(modes) > 1:
+            result.update(
+                outcome_status="CANDLE_PROVIDER_MIXED",
+                outcome_note=f"Selected candle file mixes provider modes: {modes}; outcomes are not scored.",
+                candle_provider_mode=",".join(modes),
+            )
+            return result
+        mode = modes[0] if modes else "unknown"
+        result["candle_provider_mode"] = mode
+        journal_provider = str(row.get("provider", "")).strip().lower()
+        expected_mode = (
+            "kite" if "kite connect" in journal_provider
+            else "yahoo" if "yahoo" in journal_provider
+            else None
+        )
+        if expected_mode and mode != expected_mode:
+            result.update(
+                outcome_status="CANDLE_PROVIDER_MISMATCH",
+                outcome_note=f"Signal source expects {expected_mode!r}, but candle archive is {mode!r}; outcomes are not scored.",
+            )
+            return result
 
     try:
         signal_ts = to_ist_timestamp(row["signal_time"], label=f"signal {signal_id}")

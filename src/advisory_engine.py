@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 from datetime import datetime, time as dtime, timedelta
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,6 +22,7 @@ from src.market_scanner import evaluate_symbol_bundle, rank_candidates
 from src.news_events import DEFAULT_FEEDS, fetch_news, google_news_search_url
 from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_report
+from src.candle_archive import append_completed_candles
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -104,6 +106,7 @@ def run_scan(
     *, symbols: list[str], now: datetime | None = None, max_symbols: int | None = None,
     watchlist_path: Path | None = None, news_feeds_path: Path | None = None,
     output_dir: Path | None = None, data_provider: str = "yahoo",
+    candle_archive_dir: Path | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
@@ -183,6 +186,21 @@ def run_scan(
             fetch_errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
             LOGGER.warning("Skipping %s after data error: %s", symbol, exc)
 
+    archive_results: list[dict[str, Any]] = []
+    archive_errors: list[str] = []
+    if candle_archive_dir is not None:
+        for symbol, bundle in bundles.items():
+            try:
+                archived = append_completed_candles(
+                    symbol, bundle.get("candles_5m", []), candle_archive_dir,
+                    now=current, provider_mode=provider_name,
+                )
+                archive_results.append(asdict(archived))
+            except Exception as exc:
+                message = f"{symbol}: {type(exc).__name__}: {exc}"
+                archive_errors.append(message)
+                LOGGER.warning("Could not archive paper candles for %s: %s", symbol, exc)
+
     general_news = list(news_result.get("items", []))
     candidates = [
         evaluate_symbol_bundle(
@@ -236,6 +254,12 @@ def run_scan(
         "stock_data_provider": stock_provider_label,
         "index_regime_provider": "Yahoo Finance unofficial NIFTY 50 index history; not verified live exchange data",
         "data_provider_mode": provider_name,
+        "candle_archive": ({
+            "directory": str(candle_archive_dir),
+            "results": archive_results,
+            "errors": archive_errors,
+            "provider_pure": True,
+        } if candle_archive_dir is not None else {"enabled": False}),
         "advisory_only": True,
         "orders_placed_or_modified": False,
         "risk_settings": {
@@ -278,11 +302,19 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
     parser.add_argument("--provider", choices=("yahoo", "kite"), default="yahoo", help="Market-data source; kite uses the authenticated read-only Kite Connect API and cached daily session")
     parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
+    parser.add_argument("--candle-archive-dir", type=Path, default=None, help="Optional directory for a provider-pure archive of completed 5-minute candles; enabled automatically at data/paper_candles when --paper-journal is set")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
     symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()] if args.symbols else load_watchlist(args.watchlist)
-    report = run_scan(symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist, news_feeds_path=args.news_feeds, output_dir=args.output_dir, data_provider=args.provider)
+    candle_archive_dir = args.candle_archive_dir
+    if args.paper_journal is not None and candle_archive_dir is None:
+        candle_archive_dir = Path("data/paper_candles")
+    report = run_scan(
+        symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist,
+        news_feeds_path=args.news_feeds, output_dir=args.output_dir,
+        data_provider=args.provider, candle_archive_dir=candle_archive_dir,
+    )
     if args.paper_journal is not None and report.get("report_path"):
         journal_result = append_scan_report(Path(report["report_path"]), args.paper_journal)
         print(f"Paper journal: {journal_result['journal_path']} (new events: {journal_result['new_events']}, duplicates skipped: {journal_result['duplicates_skipped']})")

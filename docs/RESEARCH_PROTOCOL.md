@@ -31,6 +31,10 @@ Signals must use only candles completed at the time of the signal. Entry is the 
 
 The planned-risk budget is not a hard cap on realized loss. Gaps and real fills can exceed it. Compare results at multiple plausible slippage rates and examine whether the accepted-trade set changes as costs rise.
 
+### Separate the two slippage questions
+
+The standard cost-aware sensitivity runner changes both estimated costs and, because minimum net reward/risk is evaluated after costs, which trades are accepted. Keep that analysis, but do not interpret it as a pure repricing of a fixed trade set. Use [the frozen-trade-set repricer](FROZEN_TRADE_SLIPPAGE_REPRICING.md) as a second diagnostic: freeze symbol, side, timestamps, fill prices and quantity from a saved trade log, then recalculate charges and slippage without rerunning signals or reapplying the acceptance gate. Both reports are useful, but they answer different questions and neither substitutes for prospective unseen-data validation.
+
 ## 4. Report a complete result, not only P&L
 
 Every run should preserve:

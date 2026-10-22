@@ -10,7 +10,7 @@ TradingGPT is a Python research and advisory project for NSE equities. It combin
 - **Market-data adapters:** Kite-related fetch helpers and a Yahoo Finance historical-data adapter.
 - **Indicators and strategies:** EMA, RSI, MACD, ATR, session VWAP, VWAP trend/pullback, and opening-range logic.
 - **Risk and costs:** risk assessment, cash-only notional sizing in the backtester, and estimated NSE intraday charges.
-- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, candle data-quality audit, and chronological validation.
+- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, candle data-quality audit, and chronological validation.
 - **Tests:** offline unit and regression tests. Tests should not require a live brokerage session.
 
 The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge.
@@ -92,6 +92,16 @@ The runner requires at least 10 complete sessions in both chronological partitio
 **Important selection-bias rule:** if you chose a stock, strategy, or parameter after inspecting the same period's backtest results, a later split of those same dates is not an untouched out-of-sample test. Treat it as a diagnostic. Freeze the candidate list and settings, then test them prospectively on unseen sessions before considering real-money use.
 
 Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
+
+## Isolate slippage cost from trade selection
+
+The ordinary multi-stock sensitivity runner reruns the strategy for each slippage assumption; the minimum-net-R:R rule can therefore change the accepted trade set. To price the **same saved trades** at multiple slippage values, use the frozen-trade-set repricer:
+
+```powershell
+python -m src.slippage_repricing --trades reports/backtests/BASELINE_trades.csv --slippage-bps 2,5,8
+```
+
+It produces a summary CSV and a trade-level details CSV. Each source file is reported independently; alternative scenario logs often overlap and must not be summed as a portfolio. See [the frozen-trade repricing guide](docs/FROZEN_TRADE_SLIPPAGE_REPRICING.md).
 
 ## Current default backtest assumptions
 

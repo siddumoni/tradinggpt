@@ -20,7 +20,7 @@ Target 1 is an entry viability gate; the simulated full exit is at target 2. Thi
 
 The evaluator expects one 5-minute OHLCV CSV per symbol. Its timestamp column can be named `date`, `timestamp`, `datetime`, or `time`; required price columns are `open, high, low, close, volume`. Timestamps are interpreted in Asia/Kolkata if timezone-naive and converted to IST if timezone-aware.
 
-A file named `INFY.csv` is preferred. A unique file such as `INFY_60d_5minute.csv` can be used if it is the only `INFY_*.csv` file in the directory. If there are multiple matching caches, the tool fails rather than guessing which version to use. Copy the explicitly chosen cache into a clean paper-candles directory with the simple symbol filename, for example:
+The scanner can build this archive automatically during paper-journal runs: use `--paper-journal logs/paper_signals.csv` and optionally `--candle-archive-dir data/paper_candles`. The archive contains only completed 5-minute candles, is deduplicated by timestamp, and records `provider_mode`. The evaluator rejects mixed-provider or mismatched-provider archives for a journal row. A file named `INFY.csv` is preferred. A unique file such as `INFY_60d_5minute.csv` can be used if it is the only `INFY_*.csv` file in the directory. If there are multiple matching caches, the tool fails rather than guessing which version to use. Copy the explicitly chosen cache into a clean paper-candles directory with the simple symbol filename, for example:
 
 ```powershell
 New-Item -ItemType Directory -Force data\paper_candles | Out-Null

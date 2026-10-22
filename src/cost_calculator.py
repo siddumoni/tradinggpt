@@ -26,7 +26,7 @@ class ChargeRates:
     sebi_rate: Decimal = Decimal("0.000001")
     gst_rate: Decimal = Decimal("0.18")
     stamp_buy_rate: Decimal = Decimal("0.00003")
-    ipft_rate: Decimal = Decimal("0")
+    ipft_rate: Decimal = Decimal("0.000000001")  # ₹0.01 per crore of turnover
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,7 @@ def estimate_intraday_round_trip_cost(
     stt = sell_turnover * rates.stt_sell_rate
     exchange = (entry_turnover + exit_turnover) * rates.nse_transaction_rate
     sebi = (entry_turnover + exit_turnover) * rates.sebi_rate
-    gst = (brokerage + exchange + sebi) * rates.gst_rate
+    gst = (brokerage + exchange + sebi + (entry_turnover + exit_turnover) * rates.ipft_rate) * rates.gst_rate
     stamp = buy_turnover * rates.stamp_buy_rate
     ipft = (entry_turnover + exit_turnover) * rates.ipft_rate
 

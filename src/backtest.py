@@ -167,7 +167,7 @@ def backtest_fixed_levels(
         config.minimum_net_risk_reward,
         config.slippage_bps_per_side,
     )
-    if not all(isfinite(value) for value in finite_config_values):
+    if not np.isfinite(np.asarray(finite_config_values, dtype=float)).all():
         raise ValueError("Capital, risk, net R:R, and slippage settings must be finite")
     if config.initial_capital <= 0 or config.risk_per_trade <= 0:
         raise ValueError("Capital and risk must be positive")

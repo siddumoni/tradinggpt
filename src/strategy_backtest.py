@@ -398,7 +398,7 @@ def run_yahoo_backtest(
 
 def run_slippage_sensitivity(
     symbol: str, strategy_name: str, days: int = 30,
-    output_dir: str | Path = "reports/backtests", risk_per_trade: float = 200.0,
+    output_dir: str | Path = "reports/backtests", risk_per_trade: float | None = None,
     minimum_net_risk_reward: float | None = None, target_atr_multiple: float = 2.5,
     reject_nontrending_regimes: bool = False,
     slippage_values: tuple[float, ...] = (2.0, 5.0, 8.0),
@@ -485,14 +485,24 @@ def main() -> None:
     parser.add_argument("--slippage-sensitivity", action="store_true", help="Compare 2, 5, and 8 bps per side on identical candles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    if not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0:
+    if args.risk_per_trade is not None and (
+        not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0
+    ):
         parser.error("--risk-per-trade must be a finite value greater than 0")
-    if args.min_net_rr <= 0:
-        parser.error("--min-net-rr must be positive")
-    if args.target_atr_multiple <= 1.0 or args.target_atr_multiple > 10.0:
+    if args.min_net_rr is not None and (
+        not math.isfinite(args.min_net_rr) or args.min_net_rr <= 0
+    ):
+        parser.error("--min-net-rr must be finite and positive")
+    if (
+        not math.isfinite(args.target_atr_multiple)
+        or args.target_atr_multiple <= 1.0
+        or args.target_atr_multiple > 10.0
+    ):
         parser.error("--target-atr-multiple must be greater than 1.0 and no more than 10.0")
-    if args.slippage_bps < 0 or args.slippage_bps > 100:
-        parser.error("--slippage-bps must be between 0 and 100")
+    if args.slippage_bps is not None and (
+        not math.isfinite(args.slippage_bps) or args.slippage_bps < 0 or args.slippage_bps > 100
+    ):
+        parser.error("--slippage-bps must be finite and between 0 and 100")
     if args.slippage_sensitivity:
         run_slippage_sensitivity(
             args.symbol, args.strategy, args.days, args.output_dir,

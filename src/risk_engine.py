@@ -25,6 +25,7 @@ class RiskSettings:
     require_margin_verification: bool = True
     skip_if_margin_unavailable: bool = True
     slippage_bps_per_side: float = 5.0
+    entry_cutoff_ist: str = "14:45"
 
 
 @dataclass(frozen=True)
@@ -77,12 +78,20 @@ def assess_trade(
         raise ValueError("side must be 'LONG' or 'SHORT'")
     if not all(isfinite(p) and p > 0 for p in prices):
         raise ValueError("all prices must be finite and greater than zero")
+    settings_values = (
+        settings.capital_inr,
+        settings.risk_per_trade_inr,
+        settings.minimum_net_risk_reward,
+        settings.slippage_bps_per_side,
+    )
+    if not all(isfinite(value) for value in settings_values):
+        raise ValueError("capital, risk, net R:R, and slippage settings must be finite")
     if settings.capital_inr <= 0 or settings.risk_per_trade_inr <= 0:
         raise ValueError("capital and risk_per_trade_inr must be positive")
     if settings.minimum_net_risk_reward <= 0:
         raise ValueError("minimum_net_risk_reward must be positive")
-    if not isfinite(settings.slippage_bps_per_side) or settings.slippage_bps_per_side < 0:
-        raise ValueError("slippage_bps_per_side must be finite and non-negative")
+    if not 0 <= settings.slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be between 0 and 100")
 
     if side == "LONG":
         valid_levels = stop_loss < entry_price < target_1 <= target_2
@@ -202,6 +211,7 @@ def load_phase2_settings(
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         account = raw.get("account", {})
         risk = raw.get("risk", {})
+        schedule = raw.get("schedule", {})
         cost = raw.get("costs", {})
         settings = RiskSettings(
             capital_inr=float(account.get("capital_inr", 20_000)),
@@ -209,6 +219,7 @@ def load_phase2_settings(
             minimum_net_risk_reward=float(account.get("minimum_net_risk_reward", 1.5)),
             require_margin_verification=bool(risk.get("require_margin_verification", True)),
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
+            entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
         )
         rates = ChargeRates(
             brokerage_rate=Decimal(str(cost.get("brokerage_rate", "0.0003"))),

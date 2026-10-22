@@ -186,6 +186,21 @@ def run_scan(
             fetch_errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
             LOGGER.warning("Skipping %s after data error: %s", symbol, exc)
 
+    archive_results: list[dict[str, Any]] = []
+    archive_errors: list[str] = []
+    if candle_archive_dir is not None:
+        for symbol, bundle in bundles.items():
+            try:
+                archived = append_completed_candles(
+                    symbol, bundle.get("candles_5m", []), candle_archive_dir,
+                    now=current, provider_mode=provider_name,
+                )
+                archive_results.append(asdict(archived))
+            except Exception as exc:
+                message = f"{symbol}: {type(exc).__name__}: {exc}"
+                archive_errors.append(message)
+                LOGGER.warning("Could not archive paper candles for %s: %s", symbol, exc)
+
     general_news = list(news_result.get("items", []))
     candidates = [
         evaluate_symbol_bundle(
@@ -239,6 +254,12 @@ def run_scan(
         "stock_data_provider": stock_provider_label,
         "index_regime_provider": "Yahoo Finance unofficial NIFTY 50 index history; not verified live exchange data",
         "data_provider_mode": provider_name,
+        "candle_archive": ({
+            "directory": str(candle_archive_dir),
+            "results": archive_results,
+            "errors": archive_errors,
+            "provider_pure": True,
+        } if candle_archive_dir is not None else {"enabled": False}),
         "advisory_only": True,
         "orders_placed_or_modified": False,
         "risk_settings": {

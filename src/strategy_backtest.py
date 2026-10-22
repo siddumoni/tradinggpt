@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import numpy as np
 import logging
 import math
 from datetime import datetime, timedelta
@@ -14,7 +15,6 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Callable
 
-import numpy as np
 import pandas as pd
 
 from src.backtest import BacktestConfig, backtest_fixed_levels

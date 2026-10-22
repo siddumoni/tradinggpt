@@ -392,10 +392,18 @@ def run_portfolio_replay(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path = output_path.with_suffix(".json")
     details_path = output_path.with_name(f"{output_path.stem}_trade_details.csv")
-    summary_path.write_text(__import__("json").dumps(
-        summary, indent=2, allow_nan=False,
-        default=lambda value: None if isinstance(value, float) and not math.isfinite(value) else value,
-    ), encoding="utf-8")
+    # JSON has no standard Infinity value. Preserve an explicit status alongside
+    # null so a no-loss sample is not confused with a zero profit factor.
+    safe_summary = dict(summary)
+    if isinstance(safe_summary.get("profit_factor"), float) and not math.isfinite(safe_summary["profit_factor"]):
+        safe_summary["profit_factor"] = None
+        safe_summary["profit_factor_status"] = "infinite_no_losing_trades"
+    else:
+        safe_summary["profit_factor_status"] = "finite_or_not_available"
+    summary_path.write_text(
+        __import__("json").dumps(safe_summary, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
     details.to_csv(details_path, index=False)
     print(f"Portfolio replay summary: {summary_path}")
     print(f"Trade-level allocations: {details_path}")

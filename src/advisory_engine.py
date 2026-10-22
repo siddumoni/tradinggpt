@@ -66,21 +66,53 @@ def _load_feeds(path: Path | None) -> list[str]:
     return [str(url).strip() for url in feeds if str(url).strip()] or list(DEFAULT_FEEDS)
 
 
+def _kite_quote_verification(quote: Any, now: datetime, max_age_minutes: float = 15.0) -> tuple[bool, str]:
+    """Verify a fresh Kite quote snapshot before setting the stock-data trust flag.
+
+    A valid session alone is not enough: the quote must include a positive last
+    price and a recent timestamp. This checks data freshness, not margin or a
+    profitable edge.
+    """
+    if not isinstance(quote, dict):
+        return False, "Kite quote snapshot is missing; stock data cannot be marked verified."
+    try:
+        last_price = float(quote.get("last_price"))
+        timestamp_value = quote.get("timestamp")
+        if timestamp_value is None:
+            timestamp_value = quote.get("last_trade_time")
+        if isinstance(timestamp_value, datetime):
+            quote_time = timestamp_value
+        elif isinstance(timestamp_value, str) and timestamp_value.strip():
+            quote_time = datetime.fromisoformat(timestamp_value.strip().replace("Z", "+00:00"))
+        else:
+            raise ValueError("quote timestamp is missing")
+        if not (last_price > 0 and last_price < float("inf")):
+            raise ValueError("last price is not a positive finite value")
+        quote_time = quote_time.replace(tzinfo=IST) if quote_time.tzinfo is None else quote_time.astimezone(IST)
+        current = now.replace(tzinfo=IST) if now.tzinfo is None else now.astimezone(IST)
+        age_minutes = (current - quote_time).total_seconds() / 60.0
+    except (TypeError, ValueError, OverflowError) as exc:
+        return False, f"Kite quote failed basic freshness validation: {exc}."
+    if age_minutes < -1.0:
+        return False, f"Kite quote timestamp is in the future ({age_minutes:.1f} minutes); verification failed."
+    if age_minutes > max_age_minutes:
+        return False, f"Kite quote is stale ({age_minutes:.1f} minutes old); verification failed."
+    return True, ""
+
+
 def run_scan(
     *, symbols: list[str], now: datetime | None = None, max_symbols: int | None = None,
     watchlist_path: Path | None = None, news_feeds_path: Path | None = None,
-    output_dir: Path | None = None,
+    output_dir: Path | None = None, data_provider: str = "yahoo",
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
     if current.weekday() >= 5 or current.time() < dtime(9, 15) or current.time() > dtime(15, 30):
         return {"status": "MARKET_CLOSED", "as_of": current.isoformat(), "message": "NSE cash-market hours are normally 09:15–15:30 IST on weekdays. No intraday scan was run.", "candidates": [], "news": {"items": [], "errors": []}}
 
-    try:
-        from src.yahoo_data_fetcher import YahooFinanceMarketData
-    except ImportError as exc:
-        raise RuntimeError("Yahoo provider module is missing from src/yahoo_data_fetcher.py.") from exc
-    provider = YahooFinanceMarketData()
+    provider_name = str(data_provider).strip().lower()
+    if provider_name not in {"yahoo", "kite"}:
+        raise ValueError("data_provider must be 'yahoo' or 'kite'")
     selected = list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
     if max_symbols is not None:
         selected = selected[:max_symbols]
@@ -90,6 +122,32 @@ def run_scan(
             selected = selected[:max_symbols]
     if not selected:
         raise ValueError("No symbols supplied and no usable watchlist was found")
+
+    instruments_by_symbol: dict[str, dict[str, Any]] = {}
+    if provider_name == "yahoo":
+        try:
+            from src.yahoo_data_fetcher import YahooFinanceMarketData
+        except ImportError as exc:
+            raise RuntimeError("Yahoo provider module is missing from src/yahoo_data_fetcher.py.") from exc
+        provider: Any = YahooFinanceMarketData()
+        stock_provider_label = "Yahoo Finance unofficial; not verified live exchange data"
+    else:
+        try:
+            from src.data_fetcher import KiteMarketData
+            provider = KiteMarketData.from_cached_session()
+            instrument_rows = provider.instruments(now=current)
+            instruments_by_symbol = {
+                str(row.get("tradingsymbol", "")).upper(): row
+                for row in instrument_rows
+                if row.get("segment") == "NSE" and row.get("instrument_type") == "EQ"
+                and row.get("tradingsymbol")
+            }
+            stock_provider_label = "Zerodha Kite Connect authenticated NSE equity API; quote freshness checked"
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not initialise the read-only Kite data provider. Run 'python -m src.main login' "
+                f"and check credentials/session, instrument access and connectivity. Details: {type(exc).__name__}: {exc}"
+            ) from exc
 
     news_result = fetch_news(_load_feeds(news_feeds_path), timeout_seconds=5.0)
     # Headlines are triage inputs only. Per-symbol company RSS queries are added for
@@ -106,7 +164,21 @@ def run_scan(
     fetch_errors: list[str] = []
     for symbol in selected:
         try:
-            bundles[symbol] = provider.fetch_symbol_bundle(symbol, now=current)
+            if provider_name == "kite":
+                instrument = instruments_by_symbol.get(symbol)
+                if instrument is None:
+                    fetch_errors.append(f"{symbol}: not found as an NSE equity in the current Kite instrument list")
+                    continue
+                bundle = provider.fetch_symbol_bundle(instrument, now=current)
+                verified, quote_warning = _kite_quote_verification(bundle.get("quote"), current)
+                bundle["provider"] = stock_provider_label
+                bundle["verified_live_data"] = verified
+                bundle["data_quality_warning"] = quote_warning
+            else:
+                bundle = provider.fetch_symbol_bundle(symbol, now=current)
+                bundle["provider"] = stock_provider_label
+                bundle["verified_live_data"] = False
+            bundles[symbol] = bundle
         except Exception as exc:
             fetch_errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
             LOGGER.warning("Skipping %s after data error: %s", symbol, exc)
@@ -160,7 +232,10 @@ def run_scan(
     report = {
         "status": "RESEARCH_SCAN_ONLY",
         "as_of": current.isoformat(),
-        "provider": "Yahoo Finance unofficial; not verified live exchange data",
+        "provider": stock_provider_label,
+        "stock_data_provider": stock_provider_label,
+        "index_regime_provider": "Yahoo Finance unofficial NIFTY 50 index history; not verified live exchange data",
+        "data_provider_mode": provider_name,
         "advisory_only": True,
         "orders_placed_or_modified": False,
         "risk_settings": {
@@ -178,7 +253,9 @@ def run_scan(
         "news": news_result,
         "candidates": [item.to_dict() for item in ranked],
         "limitations": [
-            "Yahoo Finance data is unofficial and may be delayed or incomplete; it is not approved for live trade decisions.",
+            ("Yahoo Finance stock data is unofficial and may be delayed or incomplete; it is not verified for live decisions."
+             if provider_name == "yahoo" else
+             "Kite stock quote freshness is checked against its timestamp, but index-regime context still uses unofficial Yahoo Finance data."),
             "Margin was not verified, so the risk engine is fail-closed and no candidate can be approved for entry.",
             "RSS keyword triage is not a sentiment model and does not replace original company filings or human verification.",
             "This report is advisory-only and never submits, modifies, or cancels orders.",
@@ -199,12 +276,13 @@ def main() -> int:
     parser.add_argument("--watchlist", type=Path, default=Path("config/watchlist.yaml"))
     parser.add_argument("--news-feeds", type=Path, default=Path("config/news_feeds.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
+    parser.add_argument("--provider", choices=("yahoo", "kite"), default="yahoo", help="Market-data source; kite uses the authenticated read-only Kite Connect API and cached daily session")
     parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
     symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()] if args.symbols else load_watchlist(args.watchlist)
-    report = run_scan(symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist, news_feeds_path=args.news_feeds, output_dir=args.output_dir)
+    report = run_scan(symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist, news_feeds_path=args.news_feeds, output_dir=args.output_dir, data_provider=args.provider)
     if args.paper_journal is not None and report.get("report_path"):
         journal_result = append_scan_report(Path(report["report_path"]), args.paper_journal)
         print(f"Paper journal: {journal_result['journal_path']} (new events: {journal_result['new_events']}, duplicates skipped: {journal_result['duplicates_skipped']})")

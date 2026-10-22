@@ -194,14 +194,14 @@ def simulate_portfolio(
             position for position in active
             if at_time is None or position["_exit_ts"] <= at_time
         ]
-        due.sort(key=lambda p: (p["_exit_ts"], p["_entry_ts"], p["file_order"], p["row_order"]))
+        due.sort(key=lambda p: (p["_exit_ts"], p["_entry_ts"], p["_file_order"], p["_row_order"]))
         for position in due:
             equity += position["net_pnl"]
             closed.append({
                 "exit_ts": position["_exit_ts"],
                 "entry_ts": position["_entry_ts"],
-                "file_order": position["file_order"],
-                "row_order": position["row_order"],
+                "file_order": position["_file_order"],
+                "row_order": position["_row_order"],
                 "net_pnl": position["net_pnl"],
             })
             active.remove(position)

@@ -168,6 +168,7 @@ def run_scan(
             "minimum_net_risk_reward": risk_settings.minimum_net_risk_reward,
             "slippage_bps_per_side": risk_settings.slippage_bps_per_side,
             "entry_cutoff_ist": risk_settings.entry_cutoff_ist,
+            "square_off_time_ist": risk_settings.square_off_time_ist,
             "require_margin_verification": risk_settings.require_margin_verification,
         },
         "symbols_requested": selected,

@@ -26,7 +26,7 @@ A directory can also be supplied; the tool finds `*_trades.csv` files recursivel
 python -m src.slippage_repricing --trades reports/backtests/phase9 --slippage-bps 2,5,8
 ```
 
-The tool writes a summary CSV and a sibling `*_trade_details.csv` containing per-trade costs and P&L. Summary rows are separated by source filename and slippage. **Do not add separate source files together as if they formed one portfolio**; many files may be alternative scenarios over overlapping dates.
+The tool writes a summary CSV and a sibling `*_trade_details.csv` containing per-trade costs and P&L. Summary rows are separated by source path and slippage. **Do not add separate source files together as if they formed one portfolio**; many files may be alternative scenarios over overlapping dates.
 
 ## Guardrails and interpretation
 

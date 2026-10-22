@@ -111,7 +111,7 @@ The scanner now accepts `--provider kite` for read-only stock quotes and 5/15-mi
 ```powershell
 python -m src.main login
 python -m src.main check
-python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv
+python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv --candle-archive-dir data/paper_candles
 ```
 
 This option needs valid Kite credentials and a same-day session. A quote must include a positive last price and timestamp no more than 15 minutes old for the stock-data trust flag to pass. Missing/stale quotes fail closed. **The NIFTY 50 index regime still comes from unofficial Yahoo Finance data, and margin is not verified**, so conditional entry approval remains blocked. Use this for research/paper journaling, not live trade decisions.
@@ -124,7 +124,7 @@ To append directional candidates from each scan to an idempotent CSV journal (wi
 python -m src.advisory_engine --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv
 ```
 
-The journal records scanner timestamp, signal levels, provider-verification flags and a watch-only/paper-only status. The current Yahoo development feed and missing margin estimate are intentionally not trade-approved. The journal does not calculate outcomes yet. See [the paper signal journal guide](docs/PAPER_SIGNAL_JOURNAL.md).
+When `--paper-journal` is enabled, completed 5-minute candles are also archived automatically to `data/paper_candles` unless `--candle-archive-dir` is specified. The archive records `provider_mode` and refuses to mix Yahoo and Kite history for the same symbol. The journal records scanner timestamp, signal levels, provider-verification flags and a watch-only/paper-only status. The current Yahoo development feed and missing margin estimate are intentionally not trade-approved. The journal does not calculate outcomes yet. See [the paper signal journal guide](docs/PAPER_SIGNAL_JOURNAL.md).
 
 ## Replay selected signals with shared capital
 

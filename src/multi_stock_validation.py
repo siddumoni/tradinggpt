@@ -45,13 +45,26 @@ def _load_or_fetch_candles(
 
     if cache_path.exists() and not refresh_data:
         frame = pd.read_csv(cache_path, parse_dates=["date"])
+        if "date" not in frame.columns:
+            raise RuntimeError(f"Saved candle cache lacks the date column: {cache_path}")
+        if frame["date"].isna().any():
+            invalid_count = int(frame["date"].isna().sum())
+            raise RuntimeError(
+                f"Saved candle cache has {invalid_count} invalid timestamp(s): {cache_path}"
+            )
         frame = frame.set_index("date").sort_index()
-        for column in ("open", "high", "low", "close", "volume"):
-            if column in frame:
-                frame[column] = pd.to_numeric(frame[column], errors="coerce")
-        frame = frame.dropna(subset=["open", "high", "low", "close"])
+        required = ("open", "high", "low", "close", "volume")
+        missing = set(required).difference(frame.columns)
+        if missing:
+            raise RuntimeError(
+                f"Saved candle cache is missing columns {sorted(missing)}: {cache_path}"
+            )
+        for column in required:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
         if frame.empty:
             raise RuntimeError(f"Saved candle cache is empty/invalid: {cache_path}")
+        # Keep malformed OHLCV rows for the session filter to reject and report;
+        # dropping them here would conceal whether the provider supplied bad data.
         return frame, cache_path, "loaded_cache"
 
     now = datetime.now(IST)

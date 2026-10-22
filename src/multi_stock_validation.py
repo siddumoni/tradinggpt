@@ -24,6 +24,7 @@ import pandas as pd
 from src.backtest import BacktestConfig
 from src.strategy_backtest import backtest_strategy, candles_to_frame, SUPPORTED_STRATEGIES
 from src.yahoo_data_fetcher import YahooFinanceMarketData
+from src.risk_engine import load_phase2_settings
 
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -105,9 +106,10 @@ def filter_complete_sessions(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
     clean = frame.copy()
     idx = pd.DatetimeIndex(pd.to_datetime(clean.index, errors="coerce"))
-    valid_idx = ~idx.isna()
-    clean = clean.loc[valid_idx].copy()
-    idx = idx[valid_idx]
+    if idx.isna().any():
+        invalid_count = int(idx.isna().sum())
+        raise ValueError(f"Candle data contains {invalid_count} invalid timestamp(s)")
+    clean = clean.copy()
     if idx.tz is None:
         idx = idx.tz_localize(IST, ambiguous="NaT", nonexistent="NaT")
     else:
@@ -179,8 +181,8 @@ def run_validation(
     strategies: tuple[str, ...] = DEFAULT_STRATEGIES,
     days: int = 30,
     output_dir: str | Path = "reports/backtests",
-    risk_per_trade: float = 200.0,
-    minimum_net_risk_reward: float = 1.5,
+    risk_per_trade: float | None = None,
+    minimum_net_risk_reward: float | None = None,
     target_atr_multiple: float = 2.5,
     slippage_values: tuple[float, ...] = DEFAULT_SLIPPAGE_BPS,
     reject_nontrending_regimes: bool = False,
@@ -194,14 +196,22 @@ def run_validation(
     invalid = set(strategies).difference(SUPPORTED_STRATEGIES)
     if invalid:
         raise ValueError(f"Unsupported strategies: {sorted(invalid)}")
+    configured_risk, charge_rates = load_phase2_settings()
+    risk_per_trade = (
+        configured_risk.risk_per_trade_inr if risk_per_trade is None else risk_per_trade
+    )
+    minimum_net_risk_reward = (
+        configured_risk.minimum_net_risk_reward
+        if minimum_net_risk_reward is None else minimum_net_risk_reward
+    )
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         raise ValueError("risk_per_trade must be a finite positive INR amount")
-    if minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be positive")
-    if target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
-        raise ValueError("target_atr_multiple must be > 1.0 and <= 10.0")
-    if any(bps < 0 or bps > 100 for bps in slippage_values):
-        raise ValueError("slippage values must be between 0 and 100 bps per side")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
+        raise ValueError("minimum_net_risk_reward must be finite and positive")
+    if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+        raise ValueError("target_atr_multiple must be finite, > 1.0 and <= 10.0")
+    if any(not math.isfinite(bps) or bps < 0 or bps > 100 for bps in slippage_values):
+        raise ValueError("slippage values must be finite and between 0 and 100 bps per side")
 
     out = Path(output_dir)
     cache_dir = out / "candle_cache"
@@ -254,9 +264,11 @@ def run_validation(
                 for filter_enabled in (False, True):
                     try:
                         config = BacktestConfig(
+                            initial_capital=configured_risk.capital_inr,
                             risk_per_trade=risk_per_trade,
                             minimum_net_risk_reward=minimum_net_risk_reward,
                             slippage_bps_per_side=float(bps),
+                            charge_rates=charge_rates,
                         )
                         trades, summary = backtest_strategy(
                             symbol, frame, strategy, config=config,
@@ -304,7 +316,10 @@ def run_validation(
 
                         rows.append({
                         "symbol": symbol,
+                        "initial_capital": configured_risk.capital_inr,
                         "risk_per_trade": risk_per_trade,
+                        "minimum_net_risk_reward": minimum_net_risk_reward,
+                        "target_atr_multiple": target_atr_multiple,
                         "strategy": strategy,
                         "slippage_bps_per_side": float(bps),
                         "bars": int(len(frame)),
@@ -335,7 +350,9 @@ def run_validation(
                     except Exception as exc:
                         LOGGER.exception("Scenario failed: %s %s %.1f bps filter=%s", symbol, strategy, bps, filter_enabled)
                         rows.append({
-                            "symbol": symbol, "risk_per_trade": risk_per_trade, "strategy": strategy,
+                            "symbol": symbol, "initial_capital": configured_risk.capital_inr,
+                            "risk_per_trade": risk_per_trade, "minimum_net_risk_reward": minimum_net_risk_reward,
+                            "target_atr_multiple": target_atr_multiple, "strategy": strategy,
                             "slippage_bps_per_side": float(bps), "bars": int(len(frame)),
                             "trades": 0, "win_rate_pct": None, "net_pnl": None,
                             "profit_factor": None, "expectancy_per_trade": None,
@@ -371,8 +388,8 @@ def main() -> None:
     parser.add_argument("--strategies", default=",".join(DEFAULT_STRATEGIES))
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--output-dir", default="reports/backtests")
-    parser.add_argument("--risk-per-trade", type=float, default=200.0, help="Configurable positive planned loss budget per trade in INR; no arbitrary upper cap")
-    parser.add_argument("--min-net-rr", type=float, default=1.5)
+    parser.add_argument("--risk-per-trade", type=float, default=None, help="Positive planned loss budget in INR; defaults to config/settings.yaml")
+    parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")
     parser.add_argument("--target-atr-multiple", type=float, default=2.5)
     parser.add_argument("--slippage-bps", default="2,5,8", help="Comma-separated per-side slippage scenarios")
     parser.add_argument("--refresh-data", action="store_true", help="Redownload candle data instead of using saved cache")

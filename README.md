@@ -1,84 +1,123 @@
-# NSE Advisory-Only Intraday Assistant — Phase 1
+# TradingGPT — NSE Advisory-Only Intraday Research Assistant
 
-A manually run Python assistant for NSE equities using Zerodha Kite Connect. The system is **advisory-only**: it must never place, modify, or cancel orders. Phase 1 implements configuration and authentication only; market-data retrieval and signals come in later phases.
+TradingGPT is a Python research and advisory project for NSE equities. It combines market-data helpers, technical indicators, candidate intraday strategies, risk checks, news/context helpers, historical backtesting, and validation reports.
+
+**Safety boundary:** the project is advisory-only. It must not place, modify, or cancel orders. Backtests and scanner signals are research outputs, not promises of profit or recommendations to trade.
+
+## What is in the repository
+
+- **Authentication and session checks:** Zerodha Kite Connect login/session helpers.
+- **Market-data adapters:** Kite-related fetch helpers and a Yahoo Finance historical-data adapter.
+- **Indicators and strategies:** EMA, RSI, MACD, ATR, session VWAP, VWAP trend/pullback, and opening-range logic.
+- **Risk and costs:** risk assessment, cash-only notional sizing in the backtester, and estimated NSE intraday charges.
+- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, candle data-quality audit, and chronological validation.
+- **Tests:** offline unit and regression tests. Tests should not require a live brokerage session.
+
+The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge.
 
 ## Requirements
 
 - Windows 11
 - Python 3.13 (64-bit recommended)
 - VS Code with the Python extension
-- A valid Kite Connect app with API key and API secret
+- Optional Zerodha Kite Connect app credentials for authentication/API workflows
 
-## Setup in the VS Code PowerShell terminal
+## Setup in PowerShell
 
-From the directory where you want the project:
+Run from the cloned repository root:
 
 ```powershell
-cd path\to\nse_advisory_assistant
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Open `.env` in VS Code and replace both placeholder values with your Kite Connect credentials. Do not put credentials in source code, screenshots, chat messages, or Git commits.
+Add your Kite API credentials to `.env` only if you use the Kite login flow. Never commit `.env`, API secrets, access tokens, or screenshots containing them.
 
-If PowerShell blocks virtual-environment activation, use this only for the current terminal session:
+If PowerShell blocks activation, use this only in the current terminal session:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-## Configure the Kite Connect redirect URL
-
-In the Kite developer console, configure the redirect URL for your app. When login completes, Kite redirects to that URL with a `request_token` query parameter. This project uses a manual redirect flow: you copy only the `request_token` value and paste it into the terminal. The request token is short-lived and single-use; do not reuse an old one.
-
-## Daily login
+## Authentication commands
 
 ```powershell
 python -m src.main login
-```
-
-1. Open the printed login URL in your browser.
-2. Sign in to Zerodha and complete any required authentication.
-3. From the registered redirect URL, copy the value of `request_token` (not the full URL).
-4. Paste it into the terminal prompt.
-5. The app exchanges it for an access token and stores the token in `.local\kite_token.json`.
-
-Kite access tokens expire at 06:00 IST the following day (unless invalidated earlier). The local cache cutoff is conservative; the actual API may reject a session sooner. Re-run login if the session check fails.
-
-## Check the cached session
-
-```powershell
 python -m src.main check
 ```
 
-This makes a read-only profile request to verify the cached token. It does not fetch market data or access order endpoints.
+The login flow opens the broker login URL, then asks you to paste the short-lived request-token value from your registered redirect URL. The session check is intended to verify the cached session through a read-only profile request.
 
-## Run unit tests
+The token cache is plaintext under `.local\kite_token.json`; treat it like a password. The `.env` and `.local/` paths are excluded by `.gitignore`. If a secret is ever committed, rotate/revoke it—the later deletion of a file does not remove it from Git history.
+
+## Run the test suite
 
 ```powershell
 python -m pytest -q
+python -m compileall -q src tests
 ```
 
-The tests use dummy values and local temporary files. They do not require a Zerodha login or a live API call.
+Unit tests are expected to use dummy values and local data. Do not add tests that submit real orders or require live market access.
 
-## Security notes
+## Historical research workflow
 
-- `.env` and `.local\kite_token.json` contain secrets and are excluded by `.gitignore`.
-- The token cache is plaintext. Treat it as a password: keep your Windows account protected, do not sync/share the `.local` folder, and delete the cache if you suspect exposure. On Windows, ensure the file is accessible only to your user account using NTFS permissions.
-- Never commit `.env` or the token cache. If a secret is accidentally committed, rotate it in the Kite developer console; deleting the file in a later commit is not enough.
-- Never paste API secrets or access tokens into ChatGPT, issues, screenshots, or logs.
-- This phase contains no order-placement, order-modification, or order-cancellation calls.
+### 1. Run a reproducible multi-stock baseline
 
-## Phase 1 scope
+```powershell
+python -m src.multi_stock_validation --days 59 --risk-per-trade 200 --output-dir reports/backtests/phase9
+```
 
-Included: project layout, YAML defaults, credential loading, manual daily login, local token caching, session verification, unit tests.
+The script caches the downloaded candle set and uses it for the scenarios in that run. If you intentionally want new data, pass `--refresh-data`; record that choice because refreshing changes the sample. The provider's returned coverage can be shorter than the requested calendar-day window.
 
-Not included yet: instruments, quotes, historical candles, indicators, strategy signals, cost calculations, margin estimates, news, backtesting, report generation, or scheduling.
+### 2. Audit the cached candles
 
-## Default risk configuration
+```powershell
+python -m src.data_quality_audit --data-dir reports/backtests/phase9/candle_cache --days-label 59d --symbols RELIANCE,HDFCBANK,ICICIBANK,SBIN,INFY
+```
 
-`config/settings.yaml` records the requested starting values: ₹20,000 capital, ₹100 risk per trade, 1:1.5 minimum net R:R, MIS intent, margin verification required, no new entries after 14:45 IST, and intended square-off by 15:15 IST. These are configuration values only; Phase 1 does not create or manage trades.
+Inspect both summary and per-session reports. Missing candles are not reconstructed. A session with a missing required bar or invalid OHLCV must not quietly enter the backtest.
+
+### 3. Run a chronological holdout diagnostic
+
+```powershell
+python -m src.chronological_validation --data-dir reports/backtests/phase9/candle_cache --days-label 59d --candidates HDFCBANK:vwap_trend,INFY:vwap_pullback --train-fraction 0.70 --risk-per-trade 200
+```
+
+The runner requires at least 10 complete sessions in both chronological partitions and reports when the test sample has fewer than 30 trades (configurable with `--minimum-test-trades`). This threshold is a warning label, not proof of statistical significance or profitability.
+
+**Important selection-bias rule:** if you chose a stock, strategy, or parameter after inspecting the same period's backtest results, a later split of those same dates is not an untouched out-of-sample test. Treat it as a diagnostic. Freeze the candidate list and settings, then test them prospectively on unseen sessions before considering real-money use.
+
+Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
+
+## Current default backtest assumptions
+
+- Starting capital: ₹20,000.
+- Planned loss budget per trade: ₹200 by default; configurable to any finite positive amount.
+- Minimum net reward/risk: 1.5 by default after estimated charges and configured slippage.
+- Entry cutoff: 14:45 IST.
+- Intended square-off: 15:15 IST.
+- Maximum three entries per day in the fixed-level backtester.
+- Cash-only notional sizing; the backtest does **not** assume MIS leverage.
+- When a stop and target are both touched in the same OHLC bar, stop-loss is assumed first.
+- Estimated costs and slippage are approximations; actual executed fills, gaps, order count, charges, and contract notes can differ. Realized loss can exceed the planned risk budget.
+
+These are research-model assumptions, not guarantees about actual execution. Check `config/settings.yaml` and the backtest configuration before interpreting any report.
+
+## Data and cost limitations
+
+Yahoo Finance is an unofficial data source, is not endorsed by Yahoo, and is intended for personal use under its applicable terms. Its intraday history can be incomplete or limited, and it does not provide exchange-grade market depth. Do not treat a latest candle as a guaranteed live quote.
+
+Transaction-charge rates are configurable estimates. Verify the current broker/exchange charges and applicable statutory levies before relying on net P&L estimates.
+
+## Development principles
+
+1. Preserve advisory-only behavior—no order placement, modification, or cancellation.
+2. Never synthesize missing candles to make a backtest pass.
+3. Keep all candidate selection and parameter tuning separate from final holdout evaluation.
+4. Report net-of-cost metrics, sample size, drawdown, exclusions, and slippage sensitivity.
+5. Prefer robust performance across unseen time periods and symbols over the highest in-sample P&L.
+6. Do not promote a candidate to live trading on the basis of this tool's backtest alone.

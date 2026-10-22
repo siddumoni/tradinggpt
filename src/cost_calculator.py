@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+from math import isfinite
 from typing import Literal
 
 TradeSide = Literal["LONG", "SHORT"]
@@ -26,7 +27,35 @@ class ChargeRates:
     sebi_rate: Decimal = Decimal("0.000001")
     gst_rate: Decimal = Decimal("0.18")
     stamp_buy_rate: Decimal = Decimal("0.00003")
-    ipft_rate: Decimal = Decimal("0")
+    ipft_rate: Decimal = Decimal("0.000000001")  # ₹0.01 per crore of turnover
+
+    def __post_init__(self) -> None:
+        """Normalize rate inputs and reject invalid tariff configuration."""
+        rate_fields = (
+            "brokerage_rate",
+            "stt_sell_rate",
+            "nse_transaction_rate",
+            "sebi_rate",
+            "gst_rate",
+            "stamp_buy_rate",
+            "ipft_rate",
+        )
+        for field_name in rate_fields:
+            try:
+                value = Decimal(str(getattr(self, field_name)))
+            except Exception as exc:
+                raise ValueError(f"{field_name} must be a finite non-negative decimal") from exc
+            if not value.is_finite() or value < 0:
+                raise ValueError(f"{field_name} must be a finite non-negative decimal")
+            object.__setattr__(self, field_name, value)
+
+        try:
+            cap = Decimal(str(self.brokerage_cap_per_order))
+        except Exception as exc:
+            raise ValueError("brokerage_cap_per_order must be a finite positive decimal") from exc
+        if not cap.is_finite() or cap <= 0:
+            raise ValueError("brokerage_cap_per_order must be a finite positive decimal")
+        object.__setattr__(self, "brokerage_cap_per_order", cap)
 
 
 @dataclass(frozen=True)
@@ -71,14 +100,25 @@ def estimate_intraday_round_trip_cost(
     """
     if side not in ("LONG", "SHORT"):
         raise ValueError("side must be 'LONG' or 'SHORT'")
-    if entry_price <= 0 or exit_price <= 0:
-        raise ValueError("entry_price and exit_price must be positive")
-    if quantity <= 0:
+    try:
+        entry_float = float(entry_price)
+        exit_float = float(exit_price)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("entry_price and exit_price must be finite and positive") from exc
+    if not isfinite(entry_float) or not isfinite(exit_float) or entry_float <= 0 or exit_float <= 0:
+        raise ValueError("entry_price and exit_price must be finite and positive")
+    if isinstance(quantity, bool):
+        raise ValueError("quantity must be a positive integer")
+    try:
+        quantity_float = float(quantity)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("quantity must be a positive integer") from exc
+    if not isfinite(quantity_float) or quantity_float < 1 or not quantity_float.is_integer():
         raise ValueError("quantity must be a positive integer")
 
     entry = Decimal(str(entry_price))
     exit_ = Decimal(str(exit_price))
-    qty = Decimal(quantity)
+    qty = Decimal(int(quantity_float))
 
     entry_turnover = entry * qty
     exit_turnover = exit_ * qty
@@ -104,7 +144,7 @@ def estimate_intraday_round_trip_cost(
     stt = sell_turnover * rates.stt_sell_rate
     exchange = (entry_turnover + exit_turnover) * rates.nse_transaction_rate
     sebi = (entry_turnover + exit_turnover) * rates.sebi_rate
-    gst = (brokerage + exchange + sebi) * rates.gst_rate
+    gst = (brokerage + exchange + sebi + (entry_turnover + exit_turnover) * rates.ipft_rate) * rates.gst_rate
     stamp = buy_turnover * rates.stamp_buy_rate
     ipft = (entry_turnover + exit_turnover) * rates.ipft_rate
 

@@ -15,6 +15,7 @@ from math import isfinite
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
 from src.risk_engine import RiskSettings, TradeAssessment, assess_trade
@@ -62,47 +63,71 @@ class ScanCandidate:
 
 
 def candles_to_frame(candles: Iterable[dict[str, Any]] | pd.DataFrame | None) -> pd.DataFrame:
-    """Normalize provider candles to an indexed OHLCV frame."""
+    """Normalize and validate provider OHLCV candles; never silently discard bad rows."""
     if candles is None:
         return pd.DataFrame(columns=OHLCV)
+
     if isinstance(candles, pd.DataFrame):
         frame = candles.copy()
+        if frame.empty:
+            return pd.DataFrame(columns=OHLCV)
         if "date" in frame.columns and not isinstance(frame.index, pd.DatetimeIndex):
-            frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-            frame = frame.dropna(subset=["date"]).set_index("date")
+            parsed_dates = pd.to_datetime(frame["date"], errors="coerce")
+            if parsed_dates.isna().any():
+                raise ValueError("Candles contain invalid timestamps")
+            frame = frame.drop(columns=["date"]).set_index(parsed_dates)
+        elif not isinstance(frame.index, pd.DatetimeIndex):
+            raise ValueError("Candle DataFrame must have a DatetimeIndex or date column")
     else:
         rows = list(candles)
         if not rows:
             return pd.DataFrame(columns=OHLCV)
         frame = pd.DataFrame(rows)
-        time_col = next((c for c in ("date", "timestamp", "time") if c in frame.columns), None)
+        time_col = next((col for col in ("date", "timestamp", "time") if col in frame.columns), None)
         if time_col is None:
             raise ValueError("Candles must include a date, timestamp, or time field")
-        frame[time_col] = pd.to_datetime(frame[time_col], errors="coerce")
-        frame = frame.dropna(subset=[time_col]).set_index(time_col)
-    rename = {c: c.lower() for c in frame.columns if c.lower() in OHLCV}
+        parsed_dates = pd.to_datetime(frame[time_col], errors="coerce")
+        if parsed_dates.isna().any():
+            raise ValueError("Candles contain invalid timestamps")
+        frame = frame.drop(columns=[time_col]).set_index(pd.DatetimeIndex(parsed_dates))
+
+    rename = {col: col.lower() for col in frame.columns if col.lower() in OHLCV}
     frame = frame.rename(columns=rename)
     missing = set(OHLCV).difference(frame.columns)
     if missing:
         raise ValueError(f"Candles are missing OHLCV columns: {sorted(missing)}")
     frame = frame[OHLCV].copy()
-    frame.index = pd.to_datetime(frame.index, errors="coerce")
-    frame = frame.loc[~frame.index.isna()].sort_index()
+
+    parsed_index = pd.to_datetime(frame.index, errors="coerce")
+    frame.index = pd.DatetimeIndex(parsed_index)
+    if frame.index.hasnans:
+        raise ValueError("Candles contain invalid timestamps")
+    if frame.index.has_duplicates:
+        duplicates = frame.index[frame.index.duplicated(keep=False)].astype(str).tolist()
+        raise ValueError(f"Duplicate candle timestamps found: {duplicates[:5]}")
+    frame = frame.sort_index()
     if frame.index.tz is None:
         frame.index = frame.index.tz_localize(IST)
     else:
         frame.index = frame.index.tz_convert(IST)
+
     for col in OHLCV:
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    frame = frame.dropna(subset=["open", "high", "low", "close", "volume"])
-    if frame.empty:
-        return frame
-    if (frame[["open", "high", "low", "close"]] <= 0).any().any():
+    values = frame[OHLCV]
+    if values.isna().any().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+        raise ValueError("Candle OHLCV values must be present and finite")
+    prices = frame[["open", "high", "low", "close"]]
+    if (prices <= 0).any().any():
         raise ValueError("OHLC prices must be positive")
+    valid_ohlc = (
+        (frame["high"] >= frame[["open", "close", "low"]].max(axis=1))
+        & (frame["low"] <= frame[["open", "close", "high"]].min(axis=1))
+    )
+    if not valid_ohlc.all():
+        raise ValueError("OHLC values are inconsistent: high/low must contain open and close")
     if (frame["volume"] < 0).any():
         raise ValueError("Volume cannot be negative")
-    return frame[~frame.index.duplicated(keep="last")]
-
+    return frame
 
 def add_scanner_indicators(candles: pd.DataFrame) -> pd.DataFrame:
     """Compute the initial indicator set using pandas only (no external TA library)."""
@@ -110,6 +135,26 @@ def add_scanner_indicators(candles: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
     df = candles.copy().sort_index()
+    if not isinstance(df.index, pd.DatetimeIndex) or df.index.has_duplicates:
+        raise ValueError("Scanner indicators require unique DatetimeIndex timestamps")
+    values = df[OHLCV].apply(pd.to_numeric, errors="coerce")
+    if (
+        values.isna().any().any()
+        or not np.isfinite(values.to_numpy(dtype=float)).all()
+    ):
+        raise ValueError("Scanner OHLCV values must be present and finite")
+    prices = values[["open", "high", "low", "close"]]
+    if (prices <= 0).any().any():
+        raise ValueError("OHLC prices must be positive")
+    valid_ohlc = (
+        (values["high"] >= values[["open", "close", "low"]].max(axis=1))
+        & (values["low"] <= values[["open", "close", "high"]].min(axis=1))
+    )
+    if not valid_ohlc.all():
+        raise ValueError("OHLC values are inconsistent: high/low must contain open and close")
+    if (values["volume"] < 0).any():
+        raise ValueError("Volume cannot be negative")
+    df[OHLCV] = values
     close = df["close"].astype(float)
     high = df["high"].astype(float)
     low = df["low"].astype(float)
@@ -344,6 +389,25 @@ def evaluate_symbol_bundle(
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
             company_specific_risk=company_specific_risk)
+    try:
+        cutoff = dtime.fromisoformat(settings.entry_cutoff_ist)
+    except (TypeError, ValueError):
+        reasons.append("Configured no-new-entry cutoff is invalid; entry evaluation fails closed.")
+        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+            market_context_status=market_context_status,
+            market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status,
+            company_specific_risk=company_specific_risk)
+    if current.time() >= cutoff:
+        reasons.append(
+            f"No new entries are evaluated at or after {settings.entry_cutoff_ist} IST."
+        )
+        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+            market_context_status=market_context_status,
+            market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status,
+            company_specific_risk=company_specific_risk)
+
     if c5.empty or c15.empty:
         reasons.append("No completed 5-minute and 15-minute candles are available.")
         return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,

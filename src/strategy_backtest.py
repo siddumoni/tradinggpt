@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import numpy as np
 import logging
 import math
 from datetime import datetime, timedelta
@@ -25,6 +26,7 @@ from src.strategies.signal_planner import plan_atr_levels
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
 from src.yahoo_data_fetcher import YahooFinanceMarketData
+from src.risk_engine import load_phase2_settings
 
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -44,14 +46,19 @@ def candles_to_frame(candles: list[dict]) -> pd.DataFrame:
     if "date" not in frame:
         raise ValueError("Candle data must contain a 'date' field")
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-    frame = frame.dropna(subset=["date"]).set_index("date").sort_index()
+    if frame["date"].isna().any():
+        invalid_count = int(frame["date"].isna().sum())
+        raise ValueError(f"Candle data contains {invalid_count} invalid timestamp(s)")
+    frame = frame.set_index("date").sort_index()
     required = ["open", "high", "low", "close", "volume"]
     missing = set(required).difference(frame.columns)
     if missing:
         raise ValueError(f"Missing candle columns: {sorted(missing)}")
     for col in required:
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    return frame.dropna(subset=["open", "high", "low", "close"])
+    # Preserve invalid OHLCV rows so session-level quality checks can reject and
+    # report the affected session instead of silently deleting evidence of a gap.
+    return frame
 
 
 
@@ -98,6 +105,8 @@ def filter_incomplete_sessions(
     else:
         frame.index = frame.index.tz_convert(IST)
     frame = frame.sort_index()
+    for column in required_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
     start_hour, start_minute = map(int, session_start.split(":"))
     end_hour, end_minute = map(int, required_last_bar.split(":"))
@@ -135,13 +144,34 @@ def filter_incomplete_sessions(
         actual = set(group.index.strftime("%H:%M"))
         missing_times = [time for time in required_times if time not in actual]
         missing_values = group[required_columns].isna().any(axis=1)
-        if missing_times or missing_values.any() or len(group) != required_count:
+        prices = group[["open", "high", "low", "close"]]
+        finite_prices = pd.Series(
+            np.isfinite(prices.to_numpy(dtype=float)).all(axis=1), index=group.index
+        )
+        positive_prices = (prices > 0).all(axis=1)
+        valid_ohlc = (
+            (group["high"] >= group[["open", "close", "low"]].max(axis=1))
+            & (group["low"] <= group[["open", "close", "high"]].min(axis=1))
+        )
+        volume = group["volume"]
+        valid_volume = pd.Series(
+            np.isfinite(volume.to_numpy(dtype=float)) & (volume >= 0).to_numpy(),
+            index=group.index,
+        )
+        invalid_rows = ~(finite_prices & positive_prices & valid_ohlc & valid_volume)
+        if (
+            missing_times
+            or missing_values.any()
+            or invalid_rows.any()
+            or len(group) != required_count
+        ):
             excluded.append({
                 "session": str(day),
                 "actual_bars": int(len(group)),
                 "required_bars": required_count,
                 "missing_bars": missing_times,
                 "rows_with_missing_ohlcv": int(missing_values.sum()),
+                "rows_with_invalid_ohlcv": int(invalid_rows.sum()),
                 "reason": "missing_or_invalid_required_candles",
             })
         else:
@@ -289,15 +319,34 @@ def run_yahoo_backtest(
     strategy_name: str,
     days: int = 30,
     output_dir: str | Path = "reports/backtests",
-    risk_per_trade: float = 200.0,
-    minimum_net_risk_reward: float = 1.5,
+    risk_per_trade: float | None = None,
+    minimum_net_risk_reward: float | None = None,
     target_atr_multiple: float = 2.5,
     reject_nontrending_regimes: bool = False,
-    slippage_bps_per_side: float = 5.0,
+    slippage_bps_per_side: float | None = None,
 ) -> dict:
     """Fetch historical 5-minute Yahoo candles, run one strategy and save CSV/JSON."""
     if days < 5 or days > 59:
         raise ValueError("days must be between 5 and 59 for this intraday research workflow")
+    configured_risk, charge_rates = load_phase2_settings()
+    risk_per_trade = configured_risk.risk_per_trade_inr if risk_per_trade is None else risk_per_trade
+    minimum_net_risk_reward = (
+        configured_risk.minimum_net_risk_reward
+        if minimum_net_risk_reward is None else minimum_net_risk_reward
+    )
+    slippage_bps_per_side = (
+        configured_risk.slippage_bps_per_side
+        if slippage_bps_per_side is None else slippage_bps_per_side
+    )
+    if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
+        raise ValueError("risk_per_trade must be finite and positive")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
+        raise ValueError("minimum_net_risk_reward must be finite and positive")
+    if not math.isfinite(slippage_bps_per_side) or not 0 <= slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be finite and between 0 and 100")
+    if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+        raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
+
     now = datetime.now(IST)
     start = now - timedelta(days=days)
     provider = YahooFinanceMarketData()
@@ -305,15 +354,15 @@ def run_yahoo_backtest(
     frame = candles_to_frame(raw)
     if frame.empty:
         raise RuntimeError(f"No historical candles returned for {symbol}; no backtest was run.")
-    if slippage_bps_per_side < 0 or slippage_bps_per_side > 100:
-        raise ValueError("slippage_bps_per_side must be between 0 and 100")
     config = BacktestConfig(
+        initial_capital=configured_risk.capital_inr,
         risk_per_trade=risk_per_trade,
         minimum_net_risk_reward=minimum_net_risk_reward,
         slippage_bps_per_side=slippage_bps_per_side,
+        entry_cutoff=configured_risk.entry_cutoff_ist,
+        square_off_time=configured_risk.square_off_time_ist,
+        charge_rates=charge_rates,
     )
-    if target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
-        raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
     trades, summary = backtest_strategy(
         symbol, frame, strategy_name, config=config,
         target_atr_multiple=target_atr_multiple,
@@ -351,17 +400,27 @@ def run_yahoo_backtest(
 
 def run_slippage_sensitivity(
     symbol: str, strategy_name: str, days: int = 30,
-    output_dir: str | Path = "reports/backtests", risk_per_trade: float = 200.0,
-    minimum_net_risk_reward: float = 1.5, target_atr_multiple: float = 2.5,
+    output_dir: str | Path = "reports/backtests", risk_per_trade: float | None = None,
+    minimum_net_risk_reward: float | None = None, target_atr_multiple: float = 2.5,
     reject_nontrending_regimes: bool = False,
     slippage_values: tuple[float, ...] = (2.0, 5.0, 8.0),
 ) -> pd.DataFrame:
     """Compare slippage assumptions using one identical downloaded candle dataset."""
     if days < 5 or days > 59:
         raise ValueError("days must be between 5 and 59 for this intraday research workflow")
-    if not slippage_values or any(value < 0 or value > 100 for value in slippage_values):
-        raise ValueError("slippage values must be between 0 and 100 bps per side")
-    if target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+    configured_risk, charge_rates = load_phase2_settings()
+    risk_per_trade = configured_risk.risk_per_trade_inr if risk_per_trade is None else risk_per_trade
+    minimum_net_risk_reward = (
+        configured_risk.minimum_net_risk_reward
+        if minimum_net_risk_reward is None else minimum_net_risk_reward
+    )
+    if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
+        raise ValueError("risk_per_trade must be finite and positive")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
+        raise ValueError("minimum_net_risk_reward must be finite and positive")
+    if not slippage_values or any(not math.isfinite(value) or value < 0 or value > 100 for value in slippage_values):
+        raise ValueError("slippage values must be finite and between 0 and 100 bps per side")
+    if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
         raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
     now = datetime.now(IST)
     provider = YahooFinanceMarketData()
@@ -373,9 +432,13 @@ def run_slippage_sensitivity(
     rows: list[dict] = []
     for bps in slippage_values:
         config = BacktestConfig(
+            initial_capital=configured_risk.capital_inr,
             risk_per_trade=risk_per_trade,
             minimum_net_risk_reward=minimum_net_risk_reward,
             slippage_bps_per_side=float(bps),
+            entry_cutoff=configured_risk.entry_cutoff_ist,
+            square_off_time=configured_risk.square_off_time_ist,
+            charge_rates=charge_rates,
         )
         trades, summary = backtest_strategy(
             symbol, frame, strategy_name, config=config,
@@ -418,22 +481,32 @@ def main() -> None:
     parser.add_argument("--strategy", choices=SUPPORTED_STRATEGIES, required=True)
     parser.add_argument("--days", type=int, default=30, help="Calendar-day lookback (5–59)")
     parser.add_argument("--output-dir", default="reports/backtests")
-    parser.add_argument("--risk-per-trade", type=float, default=200.0, help="Configurable planned loss budget per trade in INR; must be positive")
-    parser.add_argument("--min-net-rr", type=float, default=1.5, help="Minimum net reward/risk after estimated charges and slippage")
+    parser.add_argument("--risk-per-trade", type=float, default=None, help="Planned loss budget per trade in INR; defaults to config/settings.yaml")
+    parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")
     parser.add_argument("--target-atr-multiple", type=float, default=2.5, help="Target distance in ATR multiples (test values such as 3.5 or 4.0; does not relax the net R:R filter)")
     parser.add_argument("--filter-choppy-regimes", action="store_true", help="Experimental: reject entries when regime is CHOPPY or UNKNOWN")
-    parser.add_argument("--slippage-bps", type=float, default=5.0, help="Assumed slippage per side in basis points (default: 5)")
+    parser.add_argument("--slippage-bps", type=float, default=None, help="Assumed slippage per side in basis points; defaults to config/settings.yaml")
     parser.add_argument("--slippage-sensitivity", action="store_true", help="Compare 2, 5, and 8 bps per side on identical candles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    if not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0:
+    if args.risk_per_trade is not None and (
+        not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0
+    ):
         parser.error("--risk-per-trade must be a finite value greater than 0")
-    if args.min_net_rr <= 0:
-        parser.error("--min-net-rr must be positive")
-    if args.target_atr_multiple <= 1.0 or args.target_atr_multiple > 10.0:
+    if args.min_net_rr is not None and (
+        not math.isfinite(args.min_net_rr) or args.min_net_rr <= 0
+    ):
+        parser.error("--min-net-rr must be finite and positive")
+    if (
+        not math.isfinite(args.target_atr_multiple)
+        or args.target_atr_multiple <= 1.0
+        or args.target_atr_multiple > 10.0
+    ):
         parser.error("--target-atr-multiple must be greater than 1.0 and no more than 10.0")
-    if args.slippage_bps < 0 or args.slippage_bps > 100:
-        parser.error("--slippage-bps must be between 0 and 100")
+    if args.slippage_bps is not None and (
+        not math.isfinite(args.slippage_bps) or args.slippage_bps < 0 or args.slippage_bps > 100
+    ):
+        parser.error("--slippage-bps must be finite and between 0 and 100")
     if args.slippage_sensitivity:
         run_slippage_sensitivity(
             args.symbol, args.strategy, args.days, args.output_dir,

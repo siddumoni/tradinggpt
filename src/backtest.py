@@ -18,6 +18,7 @@ import statistics
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
 from src.cost_calculator import ChargeRates, estimate_intraday_round_trip_cost
@@ -160,10 +161,20 @@ def backtest_fixed_levels(
     required = {"open", "high", "low", "close"}
     if not required.issubset(candles.columns):
         raise ValueError(f"Missing candle columns: {sorted(required - set(candles.columns))}")
+    finite_config_values = (
+        config.initial_capital,
+        config.risk_per_trade,
+        config.minimum_net_risk_reward,
+        config.slippage_bps_per_side,
+    )
+    if not np.isfinite(np.asarray(finite_config_values, dtype=float)).all():
+        raise ValueError("Capital, risk, net R:R, and slippage settings must be finite")
     if config.initial_capital <= 0 or config.risk_per_trade <= 0:
         raise ValueError("Capital and risk must be positive")
     if config.minimum_net_risk_reward <= 0:
         raise ValueError("minimum_net_risk_reward must be positive")
+    if not 0 <= config.slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be between 0 and 100")
     if config.bar_duration_minutes <= 0:
         raise ValueError("bar_duration_minutes must be positive")
     if config.max_trades_per_day < 1:
@@ -176,8 +187,36 @@ def backtest_fixed_levels(
 
     df = candles.copy()
     df.index = pd.DatetimeIndex([_as_ist(ts) for ts in df.index])
-    df = df[~df.index.duplicated(keep="last")].sort_index()
-    df = df.dropna(subset=["open", "high", "low", "close"])
+    if df.index.has_duplicates:
+        duplicates = df.index[df.index.duplicated(keep=False)].astype(str).tolist()
+        raise ValueError(f"Duplicate candle timestamps found: {duplicates[:5]}")
+    df = df.sort_index()
+
+    for column in required:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    prices = df[["open", "high", "low", "close"]]
+    finite_rows = pd.Series(
+        np.isfinite(prices.to_numpy(dtype=float)).all(axis=1), index=df.index
+    )
+    if prices.isna().any().any() or not finite_rows.all():
+        raise ValueError("OHLC candles contain missing or non-finite prices; clean data before backtesting")
+    if (prices <= 0).any().any():
+        raise ValueError("OHLC prices must be positive")
+    valid_ohlc = (
+        (df["high"] >= df[["open", "close", "low"]].max(axis=1))
+        & (df["low"] <= df[["open", "close", "high"]].min(axis=1))
+    )
+    if not valid_ohlc.all():
+        raise ValueError("OHLC values are inconsistent: high/low must contain open and close")
+    if "volume" in df.columns:
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+        volume = df["volume"]
+        if (
+            volume.isna().any()
+            or not np.isfinite(volume.to_numpy(dtype=float)).all()
+            or (volume < 0).any()
+        ):
+            raise ValueError("Volume must be finite and non-negative when provided")
 
     trades: list[Trade] = []
     position: dict | None = None
@@ -297,7 +336,12 @@ def backtest_fixed_levels(
         gross_rr = reward_per_share / risk_per_share
         candidate_gross_rr.append(gross_rr)
         risk_qty = floor(config.risk_per_trade / risk_per_share)
-        cash_qty = floor(config.initial_capital / entry)
+        # Cash-only sizing uses current realised equity, not the original account
+        # size on every trade. This avoids reusing capital already lost in earlier
+        # closed trades; unrealised P&L is not counted because only one position is open.
+        realised_equity = config.initial_capital + sum(trade.net_pnl for trade in trades)
+        available_cash = max(0.0, realised_equity)
+        cash_qty = floor(available_cash / entry)
         qty = min(risk_qty, cash_qty)
         candidate_qty.append(qty)
         if qty < 1:

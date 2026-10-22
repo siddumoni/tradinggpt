@@ -18,6 +18,7 @@ schedule:
 risk:
   require_margin_verification: true
   skip_if_margin_unavailable: true
+  slippage_bps_per_side: 5       # assumed slippage per side, in basis points
 
 paths:
   token_cache: .local/kite_token.json
@@ -35,4 +36,4 @@ costs:
   sebi_rate: "0.000001"              # ₹10 per crore
   gst_rate: "0.18"                   # 18% on brokerage + exchange + SEBI charges
   stamp_buy_rate: "0.00003"          # 0.003% on buy side
-  ipft_rate: "0"                     # optional; set only when a verified rate is available
+  ipft_rate: "0.000000001"            # NSE equity IPFT: ₹0.01/crore; review broker tariffs periodically

@@ -49,3 +49,31 @@ def test_empty_input_returns_zeroed_diagnostics():
     assert filtered.empty
     assert report["sessions_seen"] == 0
     assert report["sessions_excluded"] == 0
+
+
+
+def test_rejects_session_with_invalid_ohlc_relationship():
+    frame = make_session("2026-10-16")
+    frame.loc[pd.Timestamp("2026-10-16 10:00", tz="Asia/Kolkata"), "high"] = 98.0
+    filtered, report = filter_incomplete_sessions(frame)
+    assert filtered.empty
+    assert report["sessions_excluded"] == 1
+    assert report["excluded_sessions"][0]["rows_with_invalid_ohlcv"] == 1
+
+
+def test_rejects_session_with_non_finite_ohlc_value():
+    frame = make_session("2026-10-16")
+    frame.loc[pd.Timestamp("2026-10-16 10:00", tz="Asia/Kolkata"), "close"] = float("inf")
+    filtered, report = filter_incomplete_sessions(frame)
+    assert filtered.empty
+    assert report["sessions_excluded"] == 1
+    assert report["excluded_sessions"][0]["rows_with_invalid_ohlcv"] == 1
+
+
+def test_rejects_session_with_negative_volume():
+    frame = make_session("2026-10-16")
+    frame.loc[pd.Timestamp("2026-10-16 10:00", tz="Asia/Kolkata"), "volume"] = -1
+    filtered, report = filter_incomplete_sessions(frame)
+    assert filtered.empty
+    assert report["sessions_excluded"] == 1
+    assert report["excluded_sessions"][0]["rows_with_invalid_ohlcv"] == 1

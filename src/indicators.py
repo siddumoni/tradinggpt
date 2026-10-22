@@ -5,6 +5,7 @@ This module does not fetch data or place orders.
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
@@ -29,10 +30,26 @@ def add_indicators(candles: pd.DataFrame) -> pd.DataFrame:
     df = candles.copy().sort_index()
     for col in REQUIRED_COLUMNS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    if (df[["high", "low", "close"]].dropna() <= 0).any().any():
+
+    prices = df[["open", "high", "low", "close"]]
+    if prices.isna().any().any() or not np.isfinite(prices.to_numpy(dtype=float)).all():
+        raise ValueError("OHLC prices must be present and finite")
+    if (prices <= 0).any().any():
         raise ValueError("OHLC prices must be positive")
-    if (df["volume"].dropna() < 0).any():
-        raise ValueError("Volume cannot be negative")
+    valid_ohlc = (
+        (df["high"] >= df[["open", "close", "low"]].max(axis=1))
+        & (df["low"] <= df[["open", "close", "high"]].min(axis=1))
+    )
+    if not valid_ohlc.all():
+        raise ValueError("OHLC values are inconsistent: high/low must contain open and close")
+
+    volume = df["volume"]
+    if (
+        volume.isna().any()
+        or not np.isfinite(volume.to_numpy(dtype=float)).all()
+        or (volume < 0).any()
+    ):
+        raise ValueError("Volume must be present, finite, and non-negative")
 
     df["ema_9"] = EMAIndicator(close=df["close"], window=9, fillna=False).ema_indicator()
     df["ema_21"] = EMAIndicator(close=df["close"], window=21, fillna=False).ema_indicator()

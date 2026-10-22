@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.risk_engine import RiskSettings, assess_trade
+from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
 
 
 def test_missing_margin_fails_closed() -> None:
@@ -111,3 +111,32 @@ def test_slippage_above_supported_range_is_rejected():
             target_1=102, target_2=103, settings=settings,
             estimated_margin_per_share=50,
         )
+
+
+
+def test_settings_load_shared_schedule_and_ipft_rate(tmp_path):
+    settings_path = tmp_path / "settings.yaml"
+    settings_path.write_text(
+        """
+account:
+  capital_inr: 20000
+  risk_per_trade_inr: 350
+  minimum_net_risk_reward: 1.5
+schedule:
+  no_new_entries_after: "14:40"
+  intended_square_off_by: "15:20"
+risk:
+  slippage_bps_per_side: 7
+costs:
+  ipft_rate: "0.000000001"
+""",
+        encoding="utf-8",
+    )
+
+    settings, charges = load_phase2_settings(settings_path)
+
+    assert settings.risk_per_trade_inr == 350
+    assert settings.slippage_bps_per_side == 7
+    assert settings.entry_cutoff_ist == "14:40"
+    assert settings.square_off_time_ist == "15:20"
+    assert str(charges.ipft_rate) == "1E-9"

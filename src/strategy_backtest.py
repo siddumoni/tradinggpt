@@ -45,14 +45,19 @@ def candles_to_frame(candles: list[dict]) -> pd.DataFrame:
     if "date" not in frame:
         raise ValueError("Candle data must contain a 'date' field")
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-    frame = frame.dropna(subset=["date"]).set_index("date").sort_index()
+    if frame["date"].isna().any():
+        invalid_count = int(frame["date"].isna().sum())
+        raise ValueError(f"Candle data contains {invalid_count} invalid timestamp(s)")
+    frame = frame.set_index("date").sort_index()
     required = ["open", "high", "low", "close", "volume"]
     missing = set(required).difference(frame.columns)
     if missing:
         raise ValueError(f"Missing candle columns: {sorted(missing)}")
     for col in required:
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    return frame.dropna(subset=["open", "high", "low", "close"])
+    # Preserve invalid OHLCV rows so session-level quality checks can reject and
+    # report the affected session instead of silently deleting evidence of a gap.
+    return frame
 
 
 

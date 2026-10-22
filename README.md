@@ -10,7 +10,7 @@ TradingGPT is a Python research and advisory project for NSE equities. It combin
 - **Market-data adapters:** Kite-related fetch helpers and a Yahoo Finance historical-data adapter.
 - **Indicators and strategies:** EMA, RSI, MACD, ATR, session VWAP, VWAP trend/pullback, and opening-range logic.
 - **Risk and costs:** risk assessment, cash-only notional sizing in the backtester, and estimated NSE intraday charges.
-- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, shared-capital portfolio replay, prospective paper-signal journal, candle data-quality audit, and chronological validation.
+- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, shared-capital portfolio replay, prospective paper-signal journal/outcome evaluator, candle data-quality audit, and chronological validation.
 - **Tests:** offline unit and regression tests. Tests should not require a live brokerage session.
 
 The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge.
@@ -92,6 +92,17 @@ The runner requires at least 10 complete sessions in both chronological partitio
 **Important selection-bias rule:** if you chose a stock, strategy, or parameter after inspecting the same period's backtest results, a later split of those same dates is not an untouched out-of-sample test. Treat it as a diagnostic. Freeze the candidate list and settings, then test them prospectively on unseen sessions before considering real-money use.
 
 Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
+
+## Evaluate paper outcomes
+
+After the journal has enough later 5-minute data, evaluate the saved signals with a next-bar-open hypothesis and conservative stop/target handling:
+
+```powershell
+python -m src.paper_outcomes --journal logs/paper_signals.csv --candles-dir data/paper_candles --output reports/paper_outcomes.csv
+python -m src.portfolio_replay --trades reports/paper_outcomes_portfolio_candidates.csv --initial-capital 20000 --risk-per-trade 200 --slippage-bps 5 --max-concurrent-positions 3
+```
+
+The outcome report preserves pending/invalid/gap statuses and does not treat individual overlapping signals as portfolio results. Read [the paper outcome evaluator guide](docs/PAPER_OUTCOME_EVALUATOR.md) before interpreting the output.
 
 ## Capture prospective paper observations
 

@@ -54,6 +54,10 @@ Do not randomly shuffle intraday candles. Split by complete session/date, not in
 
 If a candidate was selected after reviewing the full period (including the later portion), that later portion is contaminated for that candidate. A chronological split of the same reviewed dataset does not remove that selection bias.
 
+### Paper outcome evaluation
+
+Evaluate observations with [the paper outcome evaluator](PAPER_OUTCOME_EVALUATOR.md) only after the session candles are available. Keep the next-bar-open convention, reference-close reconciliation, cash-only risk sizing, target-2 full exit, stop-first handling for ambiguous bars, conservative gap fills and missing-bar rejection fixed before reviewing P&L. Do not count pending or data-gap records as wins/losses, and do not sum overlapping per-signal outcomes as if they were independent trades. Pass completed hypothetical trade rows into the shared-capital replay before making any allocation-level statement.
+
 ### Prospective observations
 
 Capture scanner observations as they happen with the [paper-signal journal](PAPER_SIGNAL_JOURNAL.md). Preserve source scan files, signal timestamp, provider verification and the exact rules in use. The journal is not a fill ledger; do not calculate realised performance from reference prices unless a separate outcome evaluator has defined and recorded the fill convention. Do not backfill a prospective journal from historical charts.

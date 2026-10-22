@@ -104,6 +104,18 @@ python -m src.portfolio_replay --trades reports/paper_outcomes_portfolio_candida
 
 The outcome report preserves pending/invalid/gap statuses and does not treat individual overlapping signals as portfolio results. Read [the paper outcome evaluator guide](docs/PAPER_OUTCOME_EVALUATOR.md) before interpreting the output.
 
+## Use authenticated Kite market data
+
+The scanner now accepts `--provider kite` for read-only stock quotes and 5/15-minute candles from the authenticated Kite Connect API. Log in through the existing manual flow first:
+
+```powershell
+python -m src.main login
+python -m src.main check
+python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv
+```
+
+This option needs valid Kite credentials and a same-day session. A quote must include a positive last price and timestamp no more than 15 minutes old for the stock-data trust flag to pass. Missing/stale quotes fail closed. **The NIFTY 50 index regime still comes from unofficial Yahoo Finance data, and margin is not verified**, so conditional entry approval remains blocked. Use this for research/paper journaling, not live trade decisions.
+
 ## Capture prospective paper observations
 
 To append directional candidates from each scan to an idempotent CSV journal (without pretending candidates are filled trades), add `--paper-journal`:

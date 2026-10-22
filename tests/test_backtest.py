@@ -253,3 +253,39 @@ def test_backtest_rejects_invalid_slippage_configuration():
     config = BacktestConfig(slippage_bps_per_side=float("nan"))
     with pytest.raises(ValueError, match="must be finite"):
         backtest_fixed_levels("TEST", candles, one_signal, config)
+
+
+
+def test_cash_only_position_size_uses_remaining_realised_equity():
+    idx = pd.date_range(
+        "2026-10-12 09:15", periods=9, freq="5min", tz="Asia/Kolkata"
+    )
+    df = pd.DataFrame(
+        {
+            "open": [100.0] * 9,
+            "high": [100.5] * 9,
+            "low": [99.0, 99.0, 99.8, 99.8, 99.8, 99.8, 99.8, 99.8, 99.8],
+            "close": [100.0] * 9,
+            "volume": [1000] * 9,
+        },
+        index=idx,
+    )
+
+    def two_signals(history, i):
+        if i in (0, 2):
+            return {"side": "LONG", "stop_loss": 99.5, "target": 110.0}
+        return None
+
+    config = BacktestConfig(
+        initial_capital=20_000,
+        risk_per_trade=50_000,
+        minimum_net_risk_reward=1.0,
+        slippage_bps_per_side=0,
+    )
+    trades, _ = backtest_fixed_levels("TEST", df, two_signals, config)
+
+    assert len(trades) == 2
+    equity_before_second = config.initial_capital + trades.iloc[0]["net_pnl"]
+    second_notional = trades.iloc[1]["entry"] * trades.iloc[1]["quantity"]
+    assert second_notional <= equity_before_second
+    assert trades.iloc[1]["quantity"] < trades.iloc[0]["quantity"]

@@ -62,7 +62,7 @@ def test_repricing_reconciles_each_trade():
         sample_trades(), slippage_values=(5.0,), charge_rates=ChargeRates(),
     )
     assert (result["gross_pnl"] - result["total_estimated_costs"] - result["net_pnl"]).abs().max() < 1e-9
-    assert (result["transaction_charges"] - result["slippage_cost"] - result["total_estimated_costs"]).abs().max() < 1e-9
+    assert (result["transaction_charges"] + result["slippage_cost"] - result["total_estimated_costs"]).abs().max() < 1e-9
 
 
 def test_repricing_rejects_mismatched_gross_pnl():
@@ -74,6 +74,7 @@ def test_repricing_rejects_mismatched_gross_pnl():
 
 def test_repricing_rejects_invalid_quantity_and_side():
     trades = sample_trades()
+    trades["quantity"] = trades["quantity"].astype(float)
     trades.loc[0, "quantity"] = 1.5
     with pytest.raises(ValueError, match="quantity"):
         reprice_trade_set(trades, slippage_values=(2,), charge_rates=ChargeRates())

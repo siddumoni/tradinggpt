@@ -90,3 +90,24 @@ def test_risk_budget_is_configurable_without_a_hardcoded_ceiling(risk_budget: fl
     )
     assert result.accepted
     assert result.net_risk_inr <= risk_budget
+
+
+
+def test_non_finite_risk_settings_raise_clear_error():
+    settings = RiskSettings(capital_inr=float("nan"))
+    with pytest.raises(ValueError, match="settings must be finite"):
+        assess_trade(
+            side="LONG", entry_price=100, stop_loss=99,
+            target_1=102, target_2=103, settings=settings,
+            estimated_margin_per_share=50,
+        )
+
+
+def test_slippage_above_supported_range_is_rejected():
+    settings = RiskSettings(slippage_bps_per_side=101)
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        assess_trade(
+            side="LONG", entry_price=100, stop_loss=99,
+            target_1=102, target_2=103, settings=settings,
+            estimated_margin_per_share=50,
+        )

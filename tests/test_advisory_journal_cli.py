@@ -38,10 +38,30 @@ def test_cli_appends_scan_to_paper_journal_when_option_enabled(monkeypatch, tmp_
         }
 
     monkeypatch.setattr(advisory_engine, "append_scan_report", fake_append)
+
+    def fake_append_ledger(scan_path, ledger_path, *, signal_journal_result=None):
+        captured["ledger_scan_path"] = scan_path
+        captured["ledger_path"] = ledger_path
+        captured["ledger_journal_result"] = signal_journal_result
+        return {
+            "ledger_path": str(ledger_path),
+            "new_runs": 1,
+            "directional_candidates": 0,
+            "no_trade_candidates": 1,
+            "margin_checks_attempted": 0,
+            "fetch_error_count": 0,
+        }
+
+    monkeypatch.setattr(advisory_engine, "append_scan_ledger", fake_append_ledger)
     assert advisory_engine.main() == 0
     assert captured["scan_path"] == Path(report_path)
     assert captured["journal_path"] == tmp_path / "journal.csv"
-    assert "new events: 2" in capsys.readouterr().out
+    assert captured["ledger_scan_path"] == Path(report_path)
+    assert captured["ledger_path"] == Path("logs/paper_scan_runs.csv")
+    assert captured["ledger_journal_result"]["new_events"] == 2
+    output = capsys.readouterr().out
+    assert "new events: 2" in output
+    assert "no-trade candidates: 1" in output
 
 
 def test_cli_does_not_journal_market_closed_report_without_saved_snapshot(monkeypatch, tmp_path):

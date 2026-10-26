@@ -12,7 +12,7 @@ import json
 import logging
 from math import isfinite
 from datetime import datetime, time as dtime, timedelta
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -128,6 +128,9 @@ def run_scan(
     watchlist_path: Path | None = None, news_feeds_path: Path | None = None,
     output_dir: Path | None = None, data_provider: str = "yahoo",
     candle_archive_dir: Path | None = None,
+    paper_capital_inr: float | None = None,
+    paper_risk_per_trade_inr: float | None = None,
+    paper_minimum_net_rr: float | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
@@ -195,6 +198,13 @@ def run_scan(
             news_result.setdefault("errors", []).append(f"NIFTY index data unavailable: {exc}")
 
     risk_settings, charge_rates = load_phase2_settings()
+    overrides = {}
+    if paper_capital_inr is not None: overrides["capital_inr"] = float(paper_capital_inr)
+    if paper_risk_per_trade_inr is not None: overrides["risk_per_trade_inr"] = float(paper_risk_per_trade_inr)
+    if paper_minimum_net_rr is not None: overrides["minimum_net_risk_reward"] = float(paper_minimum_net_rr)
+    if any(not isfinite(value) or value <= 0 for value in overrides.values()):
+        raise ValueError("Paper risk overrides must be finite and positive")
+    if overrides: risk_settings = replace(risk_settings, **overrides)
     bundles: dict[str, dict[str, Any]] = {}
     fetch_errors: list[str] = []
     for symbol in selected:
@@ -395,6 +405,9 @@ def main() -> int:
     parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
     parser.add_argument("--scan-ledger", type=Path, default=None, help="Optional append-only CSV of scan health and candidate counts; defaults to logs/paper_scan_runs.csv when --paper-journal is enabled")
     parser.add_argument("--candle-archive-dir", type=Path, default=None, help="Optional directory for a provider-pure archive of completed 5-minute candles; enabled automatically at data/paper_candles when --paper-journal is set")
+    parser.add_argument("--account-capital", type=float, default=None, help="Optional virtual account capital override for risk gating")
+    parser.add_argument("--risk-per-trade", type=float, default=None, help="Optional virtual account planned risk per trade")
+    parser.add_argument("--minimum-net-rr", type=float, default=None, help="Optional minimum after-cost reward/risk gate")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
@@ -406,6 +419,8 @@ def main() -> int:
         symbols=symbols, max_symbols=args.max_symbols, watchlist_path=args.watchlist,
         news_feeds_path=args.news_feeds, output_dir=args.output_dir,
         data_provider=args.provider, candle_archive_dir=candle_archive_dir,
+        paper_capital_inr=args.account_capital, paper_risk_per_trade_inr=args.risk_per_trade,
+        paper_minimum_net_rr=args.minimum_net_rr,
     )
     journal_result = None
     if args.paper_journal is not None and report.get("report_path"):

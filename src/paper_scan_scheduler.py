@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -137,8 +137,12 @@ def run_scanner_process(
     scan_ledger: Path,
     candle_archive_dir: Path,
     timeout_seconds: int,
+    paper_broker: Any | None = None,
+    after_report: Callable[[Path], None] | None = None,
+    account_capital: float = 100_000.0,
+    risk_per_trade: float = 500.0,
 ) -> int:
-    """Invoke the existing advisory scanner as a child process and capture its logs."""
+    """Run the scanner and process its saved snapshot through the virtual account."""
     command = [
         sys.executable,
         "-m",
@@ -148,6 +152,9 @@ def run_scanner_process(
         "--paper-journal", str(paper_journal),
         "--scan-ledger", str(scan_ledger),
         "--candle-archive-dir", str(candle_archive_dir),
+        "--account-capital", str(account_capital),
+        "--risk-per-trade", str(risk_per_trade),
+        "--minimum-net-rr", "1.5",
         "--verbose",
     ]
     LOGGER.info("Command for %s: %s", _to_ist(boundary).isoformat(), subprocess.list2cmdline(command))
@@ -182,7 +189,37 @@ def run_scanner_process(
             LOGGER.warning("Scanner stderr:\n%s", completed.stderr.rstrip())
         else:
             LOGGER.error("Scanner stderr:\n%s", completed.stderr.rstrip())
+    if completed.returncode == 0:
+        report_path = _extract_report_path(completed.stdout, repo_root)
+        if report_path is None:
+            LOGGER.error("Scanner exited successfully but did not print an existing report path; paper broker skipped.")
+        else:
+            if paper_broker is not None:
+                try:
+                    result = paper_broker.process_scan_report(report_path)
+                    LOGGER.info("Virtual broker processed scan: opened=%s rejected=%s non-directional=%s",
+                                result.get("opened"), result.get("rejected"), result.get("neutral"))
+                except Exception:
+                    LOGGER.exception("Virtual broker could not process the scan report; no real orders were sent.")
+            if after_report is not None:
+                try:
+                    after_report(report_path)
+                except Exception:
+                    LOGGER.exception("Post-scan shadow research processing failed.")
     return int(completed.returncode)
+
+
+def _extract_report_path(stdout: str, repo_root: Path) -> Path | None:
+    for line in (stdout or "").splitlines():
+        if line.strip().startswith("Report:"):
+            raw = line.split(":", 1)[1].strip()
+            if not raw: return None
+            path = Path(raw)
+            if not path.is_absolute(): path = Path(repo_root) / path
+            if path.is_file(): return path
+            fallback = Path(raw)
+            return fallback if fallback.is_file() else None
+    return None
 
 
 def _configure_logging(log_path: Path) -> None:

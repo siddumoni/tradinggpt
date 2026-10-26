@@ -326,7 +326,7 @@ class PaperBroker:
                 "win_rate_pct":100.0*wins/count if count else 0.0,"profit_factor":gw/gl if gl else (None if gw==0 else "infinite"),
                 "expectancy_per_trade":expectancy,"max_drawdown":dd,"today_net_pnl":today,"max_daily_loss":self.max_daily_loss,
                 "risk_per_trade":self.risk_per_trade,"max_open_positions":self.max_open_positions,"created_at":account_row["created_at"]},
-              "open_positions":positions,"closed_trades":[dict(r) for r in closed[:100],"strategies":strategies,
+              "open_positions":positions,"closed_trades":[dict(r) for r in closed[:100]],"strategies":strategies,
               "strategy_registry":registry,"events":events,"updated_at":datetime.now(IST).isoformat()}
 
 class _RejectedSignal(Exception): pass

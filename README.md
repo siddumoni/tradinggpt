@@ -116,6 +116,22 @@ python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY -
 
 This option needs valid Kite credentials and a same-day session. A quote must include a positive last price and timestamp no more than 15 minutes old for the stock-data trust flag to pass. Missing/stale quotes fail closed. In Kite mode, the NIFTY 50 regime is fetched from Kite historical candles when the index instrument is present; Yahoo is not used as a fallback. For directional candidates, the scanner calls Kite's read-only order-margin calculator for a hypothetical one-share NSE MIS limit order. This does not submit an order. Missing, invalid or unavailable margin estimates fail closed. The report records the index source and each margin check. Use this for research/paper journaling, not live trade decisions.
 
+## Automate paper scans on Windows
+
+To scan automatically after each completed 5-minute candle, install the local scheduler and Windows Task Scheduler entry once:
+
+```powershell
+git pull origin main
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m src.main check
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_paper_scan_task.ps1
+```
+
+The task launches `src.paper_scan_scheduler` at user sign-in and starts it immediately when installed. It checks every five seconds, waits 10 seconds after the candle boundary for data publication, and scans on weekdays from 09:20 through 15:15 IST. It runs the existing Kite scanner with the paper signal journal, scan ledger, and Kite-only candle archive. A persistent state file prevents repeated attempts for the same candle; stale boundaries are skipped rather than replayed.
+
+Keep the Windows user signed in and the PC awake. The task uses that user's cached Kite session and does not run while the computer is asleep or powered off. It does not place, modify, or cancel orders. For log monitoring and stop/uninstall instructions, see [the automatic scheduler guide](docs/PAPER_SCAN_SCHEDULER.md).
+
 ## Capture prospective paper observations
 
 To append directional candidates from each scan to the idempotent signal journal (without pretending candidates are filled trades), add `--paper-journal`:

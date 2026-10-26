@@ -118,13 +118,15 @@ This option needs valid Kite credentials and a same-day session. A quote must in
 
 ## Capture prospective paper observations
 
-To append directional candidates from each scan to an idempotent CSV journal (without pretending candidates are filled trades), add `--paper-journal`:
+To append directional candidates from each scan to the idempotent signal journal (without pretending candidates are filled trades), add `--paper-journal`:
 
 ```powershell
-python -m src.advisory_engine --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv
+python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv --candle-archive-dir data/paper_candles_kite
 ```
 
-When `--paper-journal` is enabled, completed 5-minute candles are also archived automatically to `data/paper_candles` unless `--candle-archive-dir` is specified. The archive records `provider_mode` and refuses to mix Yahoo and Kite history for the same symbol. The journal records scanner timestamp, signal levels, provider-verification flags and a watch-only/paper-only status. The current Yahoo development feed and missing margin estimate are intentionally not trade-approved. The journal does not calculate outcomes yet. See [the paper signal journal guide](docs/PAPER_SIGNAL_JOURNAL.md).
+When `--paper-journal` is enabled, completed 5-minute candles are archived to `data/paper_candles` by default unless `--candle-archive-dir` is specified. The scanner also appends a row to `logs/paper_scan_runs.csv` by default. This **scan-run ledger includes successful scans with zero directional signals**, plus candidate counts, quote-verification totals, margin-check pass/fail counts, fetch errors, and candle-archive health. Use `--scan-ledger PATH` to choose another path or enable the run ledger without a signal journal.
+
+The signal journal remains selective: it stores only directional setups, so an empty signal journal can be normal when strategies return `NO_TRADE`. The separate ledger makes those no-trade runs auditable without manufacturing paper signals. The candle archive records `provider_mode` and refuses to mix Yahoo and Kite history for the same symbol. The outcome evaluator remains separate; see [the paper signal journal guide](docs/PAPER_SIGNAL_JOURNAL.md).
 
 ## Replay selected signals with shared capital
 

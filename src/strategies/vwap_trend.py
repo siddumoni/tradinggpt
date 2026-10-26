@@ -1,18 +1,36 @@
 """VWAP + EMA/momentum confirmation strategy."""
 from __future__ import annotations
+
 import pandas as pd
+
 from .models import StrategySignal
 from .market_regime import Regime
 
 
-def vwap_trend_signal(symbol: str, candles: pd.DataFrame, market_regime: Regime = "UNKNOWN") -> StrategySignal | None:
-    """Return a trend-continuation signal from the latest completed candle."""
+def vwap_trend_signal(
+    symbol: str,
+    candles: pd.DataFrame,
+    market_regime: Regime = "UNKNOWN",
+    diagnostics: list[str] | None = None,
+) -> StrategySignal | None:
+    """Return a trend-continuation signal from the latest completed candle.
+
+    Optional diagnostics explain why the current candle did not satisfy the
+    existing entry rules. They do not change signal eligibility.
+    """
+    def reject(reason: str) -> None:
+        if diagnostics is not None:
+            diagnostics.append(f"VWAP trend: {reason}")
+        return None
+
     required = {"close", "vwap", "ema_9", "ema_21", "rsi_14", "macd_histogram", "atr_14"}
     if candles.empty or not required.issubset(candles.columns):
-        return None
+        missing = sorted(required.difference(candles.columns))
+        detail = f"required columns are missing ({', '.join(missing)})." if missing else "no candles are available."
+        return reject(detail)
     row = candles.iloc[-1]
     if row[list(required)].isna().any():
-        return None
+        return reject("one or more required indicator values are not ready.")
     close = float(row["close"])
     vwap = float(row["vwap"])
     ema9 = float(row["ema_9"])
@@ -21,7 +39,7 @@ def vwap_trend_signal(symbol: str, candles: pd.DataFrame, market_regime: Regime 
     hist = float(row["macd_histogram"])
     atr = float(row["atr_14"])
     if atr <= 0:
-        return None
+        return reject(f"ATR14 is not positive ({atr:.4f}).")
 
     long_ok = close > vwap and ema9 > ema21 and 50 <= rsi <= 70 and hist > 0
     short_ok = close < vwap and ema9 < ema21 and 30 <= rsi <= 50 and hist < 0
@@ -42,4 +60,34 @@ def vwap_trend_signal(symbol: str, candles: pd.DataFrame, market_regime: Regime 
             confidence=70 if market_regime == "BEARISH" else 58,
             reason=f"Price below VWAP; EMA9 < EMA21; RSI={rsi:.1f}; MACD histogram negative; ATR14=₹{atr:.2f}.",
         )
-    return None
+    if long_ok and market_regime == "BEARISH":
+        return reject("bullish indicator alignment was blocked by the BEARISH NIFTY regime.")
+    if short_ok and market_regime == "BULLISH":
+        return reject("bearish indicator alignment was blocked by the BULLISH NIFTY regime.")
+
+    long_failures: list[str] = []
+    if close <= vwap:
+        long_failures.append("close is not above VWAP")
+    if ema9 <= ema21:
+        long_failures.append("EMA9 is not above EMA21")
+    if not 50 <= rsi <= 70:
+        long_failures.append(f"RSI {rsi:.1f} is outside the long range 50–70")
+    if hist <= 0:
+        long_failures.append("MACD histogram is not positive")
+
+    short_failures: list[str] = []
+    if close >= vwap:
+        short_failures.append("close is not below VWAP")
+    if ema9 >= ema21:
+        short_failures.append("EMA9 is not below EMA21")
+    if not 30 <= rsi <= 50:
+        short_failures.append(f"RSI {rsi:.1f} is outside the short range 30–50")
+    if hist >= 0:
+        short_failures.append("MACD histogram is not negative")
+
+    parts = []
+    if long_failures:
+        parts.append("LONG failed: " + ", ".join(long_failures))
+    if short_failures:
+        parts.append("SHORT failed: " + ", ".join(short_failures))
+    return reject("no aligned momentum setup; " + "; ".join(parts) + ".")

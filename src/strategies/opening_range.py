@@ -15,29 +15,32 @@ def opening_range_signal(
     candles: pd.DataFrame,
     market_regime: Regime = "UNKNOWN",
     volume_multiple: float = 1.2,
+    diagnostics: list[str] | None = None,
 ) -> StrategySignal | None:
-    """Signal an opening-range breakout only from a valid NSE session.
+    """Signal an opening-range breakout only from completed candles.
 
-    The first three bars must be the consecutive 09:15, 09:20 and 09:25 IST
-    bars. The final row is treated as the latest completed candle; callers must
-    not pass a still-forming candle. Duplicate timestamps, missing opening bars,
-    invalid opening OHLCV values, and signals before the opening range completes
-    are rejected.
+    Optional diagnostics receive one concise rejection reason when no signal is
+    returned. Diagnostics explain existing rules; they do not relax any rule.
     """
+    def reject(reason: str) -> None:
+        if diagnostics is not None:
+            diagnostics.append(f"Opening range: {reason}")
+        return None
+
     required = {"open", "high", "low", "close", "volume"}
     if len(candles) < 4 or not required.issubset(candles.columns):
-        return None
+        return reject("at least four candles with OHLCV columns are required.")
     if not isinstance(candles.index, pd.DatetimeIndex):
-        return None
+        return reject("timestamps are not a DatetimeIndex.")
     if candles.index.has_duplicates:
-        return None
+        return reject("duplicate candle timestamps were found.")
 
     df = candles.sort_index()
     dates = pd.Index(df.index.date)
     today = dates[-1]
     session = df.loc[dates == today]
     if len(session) < 4:
-        return None
+        return reject("fewer than four completed candles are available in the current session.")
 
     # The strategy is defined for NSE regular-session timestamps in IST.
     # Do not silently treat a partial/misaligned feed as a valid opening range.
@@ -46,55 +49,61 @@ def opening_range_signal(
         session_index = session_index.tz_convert("Asia/Kolkata")
     opening_times = tuple(ts.strftime("%H:%M") for ts in session_index[:3])
     if opening_times != _OPENING_TIMES:
-        return None
+        return reject("the first three session candles are not the 09:15, 09:20, and 09:25 IST opening bars.")
 
     # Ensure the first three opening bars are consecutive five-minute bars.
-    first_three = session.iloc[:3]
     if any(
         (session_index[i + 1] - session_index[i]) != pd.Timedelta(minutes=5)
         for i in range(2)
     ):
-        return None
+        return reject("the opening-range candles are not consecutive five-minute bars.")
 
     # Reject malformed opening bars rather than computing a range from them.
-    opening_ohlcv = first_three[list(required)].apply(pd.to_numeric, errors="coerce")
+    opening = session.iloc[:3]
+    opening_ohlcv = opening[list(required)].apply(pd.to_numeric, errors="coerce")
     if opening_ohlcv.isna().any().any():
-        return None
+        return reject("one or more opening-range OHLCV values are missing or non-numeric.")
     if (opening_ohlcv[["open", "high", "low", "close"]] <= 0).any().any():
-        return None
+        return reject("one or more opening-range prices are not positive.")
     if (opening_ohlcv["volume"] < 0).any():
-        return None
+        return reject("opening-range volume is negative.")
     if (
         (opening_ohlcv["high"] < opening_ohlcv[["open", "low", "close"]].max(axis=1))
         | (opening_ohlcv["low"] > opening_ohlcv[["open", "high", "close"]].min(axis=1))
     ).any():
-        return None
+        return reject("opening-range OHLC values are inconsistent.")
 
-    opening = first_three
     latest = session.iloc[-1]
     latest_values = pd.to_numeric(latest[list(required)], errors="coerce")
     if latest_values.isna().any():
-        return None
+        return reject("latest OHLCV values are missing or non-numeric.")
     if float(latest_values["volume"]) < 0:
-        return None
-    if float(latest_values["open"]) <= 0 or float(latest_values["high"]) <= 0 or float(latest_values["low"]) <= 0 or float(latest_values["close"]) <= 0:
-        return None
+        return reject("latest candle volume is negative.")
+    if any(float(latest_values[k]) <= 0 for k in ("open", "high", "low", "close")):
+        return reject("latest candle contains a non-positive price.")
 
     # Only allow a signal after the opening range has completed at 09:30.
     latest_time = session_index[-1].strftime("%H:%M")
     if latest_time < "09:30":
-        return None
+        return reject("the opening range has not completed by 09:30 IST.")
 
     range_high = float(opening["high"].max())
     range_low = float(opening["low"].min())
-    prior_volume = session["volume"].iloc[:-1].tail(20)
-    prior_volume = pd.to_numeric(prior_volume, errors="coerce").dropna()
+    prior_volume = pd.to_numeric(session["volume"].iloc[:-1].tail(20), errors="coerce").dropna()
     baseline = float(prior_volume.mean()) if not prior_volume.empty else 0.0
-    if baseline <= 0 or float(latest_values["volume"]) < baseline * volume_multiple:
-        return None
+    latest_volume = float(latest_values["volume"])
+    if baseline <= 0:
+        return reject("a positive prior-volume baseline is unavailable.")
+    if latest_volume < baseline * volume_multiple:
+        return reject(
+            f"relative-volume confirmation failed (latest {latest_volume:.0f}; "
+            f"required at least {baseline * volume_multiple:.0f})."
+        )
 
     close = float(latest_values["close"])
-    if close > range_high and market_regime != "BEARISH":
+    if close > range_high:
+        if market_regime == "BEARISH":
+            return reject("price broke above the opening range, but the BEARISH NIFTY regime blocks a long signal.")
         return StrategySignal(
             symbol=symbol, side="LONG", strategy="opening_range_breakout",
             trigger=f"Enter only after a completed 5-minute close above ₹{range_high:.2f}",
@@ -102,7 +111,9 @@ def opening_range_signal(
             confidence=65 if market_regime == "BULLISH" else 55,
             reason=f"Close ₹{close:.2f} broke opening-range high ₹{range_high:.2f} with volume confirmation; regime={market_regime}.",
         )
-    if close < range_low and market_regime != "BULLISH":
+    if close < range_low:
+        if market_regime == "BULLISH":
+            return reject("price broke below the opening range, but the BULLISH NIFTY regime blocks a short signal.")
         return StrategySignal(
             symbol=symbol, side="SHORT", strategy="opening_range_breakdown",
             trigger=f"Enter only after a completed 5-minute close below ₹{range_low:.2f}",
@@ -110,4 +121,7 @@ def opening_range_signal(
             confidence=65 if market_regime == "BEARISH" else 55,
             reason=f"Close ₹{close:.2f} broke opening-range low ₹{range_low:.2f} with volume confirmation; regime={market_regime}.",
         )
-    return None
+    return reject(
+        f"latest close ₹{close:.2f} remains inside the opening range "
+        f"(₹{range_low:.2f}–₹{range_high:.2f})."
+    )

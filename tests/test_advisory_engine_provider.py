@@ -131,7 +131,7 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
         @classmethod
         def now(cls, tz=None):
             value = times.pop(0)
-            return value.astimezone(tz) if tz else value
+            return cls.fromtimestamp(value.timestamp(), tz) if tz else cls.fromtimestamp(value.timestamp())
 
     monkeypatch.setattr(advisory_engine, "datetime", ControlledDatetime)
 

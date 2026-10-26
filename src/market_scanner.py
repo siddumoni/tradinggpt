@@ -443,13 +443,15 @@ def evaluate_symbol_bundle(
             company_headline_match_status=company_headline_match_status,
             company_specific_risk=company_specific_risk)
 
+    strategy_diagnostics: list[str] = []
     strategy_results = [
-        opening_range_signal(symbol, ind5, market_regime=regime),
-        vwap_trend_signal(symbol, ind5, market_regime=regime),
-        vwap_pullback_signal(symbol, ind5, market_regime=regime),
+        opening_range_signal(symbol, ind5, market_regime=regime, diagnostics=strategy_diagnostics),
+        vwap_trend_signal(symbol, ind5, market_regime=regime, diagnostics=strategy_diagnostics),
+        vwap_pullback_signal(symbol, ind5, market_regime=regime, diagnostics=strategy_diagnostics),
     ]
     signals = [signal for signal in strategy_results if signal is not None]
     if not signals:
+        reasons.extend(strategy_diagnostics)
         reasons.append("No strategy produced a valid setup on the latest completed candle.")
         return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
             market_context_status=market_context_status,

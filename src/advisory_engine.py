@@ -184,7 +184,14 @@ def run_scan(
                     fetch_errors.append(f"{symbol}: not found as an NSE equity in the current Kite instrument list")
                     continue
                 bundle = provider.fetch_symbol_bundle(instrument, now=current)
-                verified, quote_warning = _kite_quote_verification(bundle.get("quote"), current)
+                # The candle window is anchored to scan start, but the quote is fetched
+                # later. For live scans, verify freshness against the observation time
+                # immediately after the quote request, not the earlier scan timestamp.
+                # An explicitly injected 'now' remains deterministic for tests/replays.
+                quote_check_time = datetime.now(IST) if now is None else current
+                verified, quote_warning = _kite_quote_verification(
+                    bundle.get("quote"), quote_check_time
+                )
                 bundle["provider"] = stock_provider_label
                 bundle["verified_live_data"] = verified
                 bundle["data_quality_warning"] = quote_warning

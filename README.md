@@ -132,6 +132,20 @@ The task launches `src.paper_scan_scheduler` at user sign-in and starts it immed
 
 Keep the Windows user signed in and the PC awake. The task uses that user's cached Kite session and does not run while the computer is asleep or powered off. It does not place, modify, or cancel orders. For log monitoring and stop/uninstall instructions, see [the automatic scheduler guide](docs/PAPER_SCAN_SCHEDULER.md).
 
+## Virtual paper broker and local dashboard
+
+The virtual account is separate from Kite's brokerage account and uses no real-order API. It starts with ₹1,00,000 virtual capital, ₹500 planned risk per entry, a ₹2,000 daily loss limit, at most three open positions, no leverage, and 5 bps per-side slippage by default. The persistent SQLite ledger tracks simulated entry/exit prices, quantity, stop/targets, estimated fees, slippage, gross/net P&L, and strategy reasons.
+
+Start the dashboard locally:
+
+```powershell
+python -m src.paper_dashboard --db-path data/paper_trading.sqlite3 --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000`. The dashboard binds to localhost only. The simulator accepts only fresh, verified Kite reports with approved conditional candidates, verified margin, valid price levels, sufficient virtual cash and passing risk/after-cost reward-to-risk checks. No actual Kite orders are submitted. Quote snapshots are included in saved Kite reports for the simulator; stale quotes are rejected.
+
+The broker and dashboard are being integrated into the running candle scheduler in the next service step. Until that service integration is installed, a dashboard/database alone will not automatically execute virtual trades from background scans.
+
 ## Capture prospective paper observations
 
 To append directional candidates from each scan to the idempotent signal journal (without pretending candidates are filled trades), add `--paper-journal`:

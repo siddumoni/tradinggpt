@@ -103,6 +103,26 @@ def _kite_quote_verification(quote: Any, now: datetime, max_age_minutes: float =
     return True, ""
 
 
+
+def _paper_market_snapshot(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Expose only quote fields needed by the localhost paper simulator."""
+    quote = bundle.get("quote")
+    if not isinstance(quote, dict):
+        return {}
+    depth = quote.get("depth") or {}
+    buys = depth.get("buy", []) if isinstance(depth, dict) else []
+    sells = depth.get("sell", []) if isinstance(depth, dict) else []
+    def best(rows: Any) -> float | None:
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return None
+        try: price = float(rows[0].get("price"))
+        except (TypeError, ValueError, OverflowError): return None
+        return price if isfinite(price) and price > 0 else None
+    return {"last_price": quote.get("last_price"), "timestamp": quote.get("timestamp"),
+        "last_trade_time": quote.get("last_trade_time"), "bid": best(buys), "ask": best(sells),
+        "verified_live": bundle.get("verified_live_data") is True}
+
+
 def run_scan(
     *, symbols: list[str], now: datetime | None = None, max_symbols: int | None = None,
     watchlist_path: Path | None = None, news_feeds_path: Path | None = None,
@@ -344,6 +364,7 @@ def run_scan(
         "fetch_errors": fetch_errors,
         "news": news_result,
         "candidates": [item.to_dict() for item in ranked],
+        "market_snapshots": ({symbol: _paper_market_snapshot(bundle) for symbol, bundle in bundles.items() if _paper_market_snapshot(bundle)} if provider_name == "kite" else {}),
         "limitations": [
             ("Yahoo Finance stock data is unofficial and may be delayed or incomplete; it is not verified for live decisions."
              if provider_name == "yahoo" else

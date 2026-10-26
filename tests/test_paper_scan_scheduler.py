@@ -52,7 +52,12 @@ def test_persistent_state_prevents_duplicate_attempt_after_restart(tmp_path, mon
     calls = []
 
     monkeypatch.setattr("src.paper_scan_scheduler.LOGGER", logging.getLogger("scheduler-test"))
-    assert process_due_boundary(boundary, state_file, fake_scan := lambda value: calls.append(value) or 0) is True
+
+    def fake_scan(value):
+        calls.append(value)
+        return 0
+
+    assert process_due_boundary(boundary, state_file, fake_scan) is True
     assert process_due_boundary(boundary, state_file, fake_scan) is False
     assert calls == [boundary]
     assert read_last_attempted_boundary(state_file) == boundary.isoformat()

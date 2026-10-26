@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.paper_journal import JOURNAL_FIELDS, append_scan_report, load_scan_report
+from src.paper_journal import SCAN_LEDGER_FIELDS, JOURNAL_FIELDS, append_scan_ledger, append_scan_report, load_scan_report
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -166,3 +166,103 @@ def test_journal_rejects_incompatible_existing_csv_schema(tmp_path):
     journal.write_text("signal_id,wrong_column\nabc,def\n", encoding="utf-8")
     with pytest.raises(ValueError, match="unexpected schema"):
         append_scan_report(report, journal)
+
+
+
+def test_scan_ledger_records_no_trade_runs_and_verification_health(tmp_path):
+    report = write_report(
+        tmp_path / "scan.json",
+        [
+            candidate(
+                action="CONDITIONAL_BUY",
+                data_verified_live=True,
+                margin_verified=True,
+                news_status="CHECKED_NO_MATCH",
+            ),
+            candidate(symbol="HDFCBANK", action="WATCH_CANDIDATE", side="SHORT"),
+            candidate(symbol="RELIANCE", action="NO_TRADE", side=None, strategy=None),
+        ],
+        provider="Kite",
+        symbols_requested=["INFY", "HDFCBANK", "RELIANCE"],
+        symbols_evaluated=3,
+        fetch_errors=[],
+        margin_checks=[
+            {"symbol": "INFY", "verified": True, "margin_per_share_inr": 15.0},
+            {"symbol": "HDFCBANK", "verified": False, "reason": "test unavailable"},
+        ],
+        candle_archive={
+            "results": [
+                {"symbol": "INFY", "rows_written": 5},
+                {"symbol": "HDFCBANK", "rows_written": 5},
+            ],
+            "errors": [],
+        },
+    )
+    ledger = tmp_path / "logs" / "paper_scan_runs.csv"
+    journal_result = {
+        "journal_path": "logs/paper_signals.csv",
+        "new_events": 2,
+        "duplicates_skipped": 0,
+        "non_directional_skipped": 1,
+    }
+
+    result = append_scan_ledger(
+        report,
+        ledger,
+        signal_journal_result=journal_result,
+        recorded_at=datetime(2026, 10, 22, 10, 6, tzinfo=IST),
+    )
+    rows = read_rows(ledger)
+
+    assert result["new_runs"] == 1
+    assert len(rows) == 1
+    assert rows[0]["symbols_requested"] == "INFY;HDFCBANK;RELIANCE"
+    assert rows[0]["candidate_count"] == "3"
+    assert rows[0]["directional_candidates"] == "2"
+    assert rows[0]["conditional_candidates"] == "1"
+    assert rows[0]["watch_candidates"] == "1"
+    assert rows[0]["no_trade_candidates"] == "1"
+    assert rows[0]["data_verified_candidates"] == "1"
+    assert rows[0]["margin_verified_candidates"] == "1"
+    assert rows[0]["margin_checks_attempted"] == "2"
+    assert rows[0]["margin_checks_passed"] == "1"
+    assert rows[0]["margin_checks_failed"] == "1"
+    assert rows[0]["fetch_error_count"] == "0"
+    assert rows[0]["archived_symbols"] == "HDFCBANK;INFY"
+    assert rows[0]["archived_rows_written"] == "10"
+    assert rows[0]["signal_events_new"] == "2"
+    assert rows[0]["signal_events_non_directional_skipped"] == "1"
+    with ledger.open("r", encoding="utf-8", newline="") as handle:
+        assert next(csv.reader(handle)) == SCAN_LEDGER_FIELDS
+
+
+def test_scan_ledger_records_successful_no_trade_scans_and_deduplicates(tmp_path):
+    report = write_report(
+        tmp_path / "scan.json",
+        [candidate(symbol="INFY", action="NO_TRADE", side=None, strategy=None),
+         candidate(symbol="RELIANCE", action="NO_TRADE", side=None, strategy=None)],
+        symbols_requested=["INFY", "RELIANCE"],
+        symbols_evaluated=2,
+        fetch_errors=[],
+        margin_checks=[],
+    )
+    ledger = tmp_path / "ledger.csv"
+
+    first = append_scan_ledger(report, ledger)
+    second = append_scan_ledger(report, ledger)
+
+    assert first["new_runs"] == 1
+    assert first["directional_candidates"] == 0
+    assert first["no_trade_candidates"] == 2
+    assert second["new_runs"] == 0
+    assert second["duplicates_skipped"] == 1
+    assert len(read_rows(ledger)) == 1
+
+
+def test_scan_ledger_rejects_incompatible_existing_schema(tmp_path):
+    report = write_report(tmp_path / "scan.json", [])
+    ledger = tmp_path / "ledger.csv"
+    ledger.write_text("scan_id,wrong_column\nabc,def\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unexpected schema"):
+        append_scan_ledger(report, ledger)

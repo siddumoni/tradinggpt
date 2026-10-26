@@ -22,7 +22,7 @@ import yaml
 from src.market_scanner import evaluate_symbol_bundle, rank_candidates
 from src.news_events import DEFAULT_FEEDS, fetch_news, google_news_search_url
 from src.risk_engine import load_phase2_settings
-from src.paper_journal import append_scan_report
+from src.paper_journal import append_scan_ledger, append_scan_report
 from src.candle_archive import append_completed_candles
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -372,6 +372,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
     parser.add_argument("--provider", choices=("yahoo", "kite"), default="yahoo", help="Market-data source; kite uses the authenticated read-only Kite Connect API and cached daily session")
     parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
+    parser.add_argument("--scan-ledger", type=Path, default=None, help="Optional append-only CSV of scan health and candidate counts; defaults to logs/paper_scan_runs.csv when --paper-journal is enabled")
     parser.add_argument("--candle-archive-dir", type=Path, default=None, help="Optional directory for a provider-pure archive of completed 5-minute candles; enabled automatically at data/paper_candles when --paper-journal is set")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -385,9 +386,27 @@ def main() -> int:
         news_feeds_path=args.news_feeds, output_dir=args.output_dir,
         data_provider=args.provider, candle_archive_dir=candle_archive_dir,
     )
+    journal_result = None
     if args.paper_journal is not None and report.get("report_path"):
         journal_result = append_scan_report(Path(report["report_path"]), args.paper_journal)
         print(f"Paper journal: {journal_result['journal_path']} (new events: {journal_result['new_events']}, duplicates skipped: {journal_result['duplicates_skipped']})")
+    scan_ledger_path = args.scan_ledger
+    if scan_ledger_path is None and args.paper_journal is not None:
+        scan_ledger_path = Path("logs/paper_scan_runs.csv")
+    if scan_ledger_path is not None and report.get("report_path"):
+        ledger_result = append_scan_ledger(
+            Path(report["report_path"]),
+            scan_ledger_path,
+            signal_journal_result=journal_result,
+        )
+        print(
+            f"Paper scan ledger: {ledger_result['ledger_path']} "
+            f"(new runs: {ledger_result['new_runs']}, "
+            f"directional candidates: {ledger_result['directional_candidates']}, "
+            f"no-trade candidates: {ledger_result['no_trade_candidates']}, "
+            f"margin checks: {ledger_result['margin_checks_attempted']}, "
+            f"fetch errors: {ledger_result['fetch_error_count']})"
+        )
     print(f"Status: {report['status']}")
     print(f"As of: {report['as_of']}")
     if report.get("report_path"):

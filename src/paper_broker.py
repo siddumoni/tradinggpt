@@ -76,6 +76,15 @@ class PaperBroker:
             CREATE INDEX IF NOT EXISTS idx_events_time ON events(event_time DESC);
             CREATE TABLE IF NOT EXISTS strategy_registry(strategy_version TEXT PRIMARY KEY,strategy_name TEXT NOT NULL,
               track TEXT NOT NULL,status TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS shadow_signals(
+              signal_id TEXT PRIMARY KEY,strategy_version TEXT NOT NULL,strategy_name TEXT NOT NULL,symbol TEXT NOT NULL,
+              side TEXT NOT NULL CHECK(side IN ('LONG','SHORT')),signal_time TEXT NOT NULL,signal_close REAL NOT NULL,
+              stop_loss REAL NOT NULL,target_1 REAL NOT NULL,target_2 REAL NOT NULL,status TEXT NOT NULL,
+              entry_time TEXT,entry_reference_price REAL,entry_fill_price REAL,quantity INTEGER,exit_time TEXT,
+              exit_reference_price REAL,exit_fill_price REAL,exit_reason TEXT,exit_detail TEXT,gross_pnl REAL,brokerage REAL,
+              stt REAL,exchange_charges REAL,sebi_charges REAL,gst REAL,stamp_duty REAL,ipft REAL,transaction_charges REAL,
+              slippage_cost REAL,total_estimated_costs REAL,net_pnl REAL,reason TEXT NOT NULL,created_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_shadow_version_status ON shadow_signals(strategy_version,status);
             """)
             now=datetime.now(IST).isoformat()
             db.execute("INSERT OR IGNORE INTO account(id,starting_capital,created_at) VALUES(1,?,?)",(self.initial_capital,now))
@@ -147,6 +156,7 @@ class PaperBroker:
             raise _RejectedSignal("Candidate action and direction disagree.")
         if candidate.get("data_verified_live") is not True: raise _RejectedSignal("Live Kite quote/data verification did not pass.")
         if candidate.get("margin_verified") is not True: raise _RejectedSignal("Kite margin verification did not pass.")
+        if not isinstance(snapshot,dict) or snapshot.get("verified_live") is not True: raise _RejectedSignal("Quote snapshot lacks explicit live-data verification.")
         if str(candidate.get("company_specific_risk","")).upper()=="HIGH": raise _RejectedSignal("Company-specific risk is HIGH.")
         if not isinstance(snapshot,dict): raise _RejectedSignal("No market quote snapshot is available for a paper fill.")
         qtime=snapshot.get("timestamp") or snapshot.get("last_trade_time")
@@ -311,7 +321,26 @@ class PaperBroker:
             for r in db.execute("""SELECT strategy,strategy_version,COUNT(*) trades,
               SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) wins,COALESCE(SUM(net_pnl),0) net_pnl,
               COALESCE(AVG(net_pnl),0) expectancy FROM trades WHERE status='CLOSED' GROUP BY strategy,strategy_version ORDER BY net_pnl DESC"""):
-                item=dict(r); item["win_rate_pct"]=100.0*item["wins"]/item["trades"] if item["trades"] else 0.0; strategies.append(item)
+                item=dict(r); item["track"]="CHAMPION"; item["win_rate_pct"]=100.0*item["wins"]/item["trades"] if item["trades"] else 0.0; strategies.append(item)
+            shadow_open=[]; shadow_closed=[]
+            for row in db.execute("SELECT * FROM shadow_signals WHERE status='OPEN' ORDER BY entry_time DESC"):
+                item=dict(row); mark=marks.get(item["symbol"]); last=float(mark["last_price"]) if mark else float(item["entry_reference_price"])
+                if mark and item["side"]=="LONG": exit_ref=float(mark["bid"] or mark["last_price"])
+                elif mark: exit_ref=float(mark["ask"] or mark["last_price"])
+                else: exit_ref=float(item["entry_reference_price"])
+                qty=int(item["quantity"]); entry_ref=float(item["entry_reference_price"]); entry_fill=float(item["entry_fill_price"])
+                gross=((exit_ref-entry_ref) if item["side"]=="LONG" else (entry_ref-exit_ref))*qty
+                exit_fill=exit_ref*(1-self.slippage_bps/10000) if item["side"]=="LONG" else exit_ref*(1+self.slippage_bps/10000)
+                fees=estimate_intraday_round_trip_cost(side=item["side"],entry_price=entry_fill,exit_price=exit_fill,quantity=qty,rates=rates)
+                slip=abs(entry_fill-entry_ref)*qty+abs(exit_fill-exit_ref)*qty
+                item.update({"last_price":last,"unrealized_gross_pnl":gross,"unrealized_net_pnl":gross-fees.total-slip,
+                    "track":"SHADOW","position_value_inr":entry_fill*qty,"market_time":mark.get("market_time") if mark else None})
+                shadow_open.append(item)
+            for row in db.execute("SELECT * FROM shadow_signals WHERE status='CLOSED' ORDER BY exit_time DESC LIMIT 100"):
+                item=dict(row); item["strategy"]=item["strategy_name"]; item["track"]="SHADOW"; shadow_closed.append(item)
+            for version,name in (("challenger_ema_9_21_v1","EMA 9/21 momentum"),("challenger_vwap_momentum_v1","VWAP + MACD momentum"),("challenger_ema_pullback_v1","EMA trend pullback")):
+                row=db.execute("SELECT COUNT(*) trades,SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) wins,COALESCE(SUM(net_pnl),0) net_pnl,COALESCE(AVG(net_pnl),0) expectancy FROM shadow_signals WHERE strategy_version=? AND status='CLOSED'",(version,)).fetchone()
+                shadow_count=int(row["trades"] or 0); strategies.append({"strategy":name,"strategy_version":version,"track":"SHADOW","trades":shadow_count,"wins":int(row["wins"] or 0),"net_pnl":float(row["net_pnl"] or 0),"expectancy":float(row["expectancy"] or 0),"win_rate_pct":100.0*int(row["wins"] or 0)/shadow_count if shadow_count else 0.0})
             events=[dict(r) for r in db.execute("SELECT * FROM events ORDER BY id DESC LIMIT 100")]
             for item in events:
                 try: item["details"]=json.loads(item.pop("details_json"))
@@ -326,7 +355,7 @@ class PaperBroker:
                 "win_rate_pct":100.0*wins/count if count else 0.0,"profit_factor":gw/gl if gl else (None if gw==0 else "infinite"),
                 "expectancy_per_trade":expectancy,"max_drawdown":dd,"today_net_pnl":today,"max_daily_loss":self.max_daily_loss,
                 "risk_per_trade":self.risk_per_trade,"max_open_positions":self.max_open_positions,"created_at":account_row["created_at"]},
-              "open_positions":positions,"closed_trades":[dict(r) for r in closed[:100]],"strategies":strategies,
+              "open_positions":positions,"shadow_open_positions":shadow_open,"closed_trades":[dict(r) for r in closed[:100]],"shadow_closed_trades":shadow_closed,"strategies":strategies,
               "strategy_registry":registry,"events":events,"updated_at":datetime.now(IST).isoformat()}
 
 class _RejectedSignal(Exception): pass

@@ -144,7 +144,18 @@ python -m src.paper_dashboard --db-path data/paper_trading.sqlite3 --host 127.0.
 
 Open `http://127.0.0.1:8000`. The dashboard binds to localhost only. The simulator accepts only fresh, verified Kite reports with approved conditional candidates, verified margin, valid price levels, sufficient virtual cash and passing risk/after-cost reward-to-risk checks. No actual Kite orders are submitted. Quote snapshots are included in saved Kite reports for the simulator; stale quotes are rejected.
 
-The broker and dashboard are being integrated into the running candle scheduler in the next service step. Until that service integration is installed, a dashboard/database alone will not automatically execute virtual trades from background scans.
+The integrated service now runs the scheduler, live read-only Kite tick monitor, champion virtual broker, challenger shadow portfolios, dashboard and daily report generator in one process. After pulling these updates, rerun the Windows task installer once so Task Scheduler switches from the scan-only module to the integrated service.
+
+## Run the integrated paper-trading service
+
+The integrated service runs the candle scheduler, read-only Kite WebSocket monitor, champion virtual account, isolated challenger shadow portfolios, localhost dashboard and daily reports together.
+
+Foreground command: python -m src.paper_trading_service --symbols RELIANCE,HDFCBANK,INFY
+
+Open http://127.0.0.1:8000. After pulling updates, rerun the Windows task installer once so Task Scheduler starts src.paper_trading_service instead of the old scan-only module. Keep the Windows user signed in and the PC awake. If the Kite session expires, authenticate again using python -m src.main login.
+
+Daily outputs are written to reports/paper_daily_YYYY-MM-DD.md, .json and _trades.csv. Challenger books never affect champion statistics and are never automatically promoted.
+
 
 ## Capture prospective paper observations
 

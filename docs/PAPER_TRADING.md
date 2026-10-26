@@ -16,6 +16,16 @@ Open `http://127.0.0.1:8000`. The API binds to a loopback interface and does not
 
 The dashboard shows virtual equity, realised/unrealised P&L, open exposure, virtual cash, positions, closed trades, fees, slippage, exits, strategy grouping and recent decision events. The research registry is seeded with the frozen champion and named challenger candidates; it does not automatically promote or rewrite any strategy.
 
+## Integrated automation
+
+The Windows scheduled task runs the integrated service rather than the scan-only loop. It starts the localhost dashboard, subscribes to read-only Kite WebSocket ticks to monitor virtual exits, runs the frozen champion scanner after completed five-minute candles, updates independent challenger shadow portfolios, and creates Markdown/JSON/CSV daily reports.
+
+After pulling the new version, rerun the installer once so Task Scheduler replaces the old module target. The signed-in Windows user and the PC must remain active, and the daily Kite session must be valid. No real broker orders are submitted.
+
+## Challenger strategy lab
+
+Three alternatives are evaluated in isolated shadow books: EMA 9/21 crossover with VWAP/MACD confirmation, VWAP crossover with EMA/MACD confirmation, and EMA21 trend pullback. They use completed candles, next-bar-open entry assumptions, stop-first OHLC exits, cash-only sizing, estimated charges and adverse slippage. The existing scanner remains the frozen champion. A REVIEW_CANDIDATE label only invites out-of-sample review after a minimum sample and risk screens; strategies are never automatically promoted.
+
 ## Approved entry behavior
 
 `PaperBroker.process_scan_report()` accepts only saved reports marked `RESEARCH_SCAN_ONLY`, explicitly asserting no orders were placed, from the Kite provider. It admits only `CONDITIONAL_BUY` / `CONDITIONAL_SHORT` candidates with verified live data and margin, a fresh quote timestamp, usable bid/ask, valid stop/target ordering, sufficient virtual cash, available position capacity and passing risk plus after-cost reward/risk checks. It does not trust a scanner's suggested quantity; it recomputes a cash-only quantity against the virtual account's risk budget.

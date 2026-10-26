@@ -224,3 +224,35 @@ def test_scanner_refuses_invalid_configured_cutoff():
     )
     assert result.action == "NO_TRADE"
     assert any("cutoff is invalid" in reason for reason in result.reasons)
+
+def test_no_trade_report_explains_each_strategy_rejection():
+    now = datetime(2026, 10, 16, 12, 0, tzinfo=IST)
+    flat_candles = [
+        {
+            "date": stamp,
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1000,
+        }
+        for stamp in pd.date_range(
+            start="2026-10-16 09:15:00", periods=60, freq="5min", tz=IST
+        )
+    ]
+    bundle = {
+        "provider": "test",
+        "candles_5m": flat_candles,
+        "candles_15m": flat_candles,
+    }
+    result = evaluate_symbol_bundle(
+        "TEST",
+        bundle,
+        index_15m_candles=flat_candles,
+        now=now,
+    )
+    assert result.action == "NO_TRADE"
+    assert any(reason.startswith("Opening range:") for reason in result.reasons)
+    assert any(reason.startswith("VWAP trend:") for reason in result.reasons)
+    assert any(reason.startswith("VWAP pullback:") for reason in result.reasons)
+

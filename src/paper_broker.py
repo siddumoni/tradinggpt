@@ -340,7 +340,7 @@ class PaperBroker:
                 item=dict(row); item["strategy"]=item["strategy_name"]; item["track"]="SHADOW"; shadow_closed.append(item)
             for version,name in (("challenger_ema_9_21_v1","EMA 9/21 momentum"),("challenger_vwap_momentum_v1","VWAP + MACD momentum"),("challenger_ema_pullback_v1","EMA trend pullback")):
                 row=db.execute("SELECT COUNT(*) trades,SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) wins,COALESCE(SUM(net_pnl),0) net_pnl,COALESCE(AVG(net_pnl),0) expectancy FROM shadow_signals WHERE strategy_version=? AND status='CLOSED'",(version,)).fetchone()
-                count=int(row["trades"] or 0); strategies.append({"strategy":name,"strategy_version":version,"track":"SHADOW","trades":count,"wins":int(row["wins"] or 0),"net_pnl":float(row["net_pnl"] or 0),"expectancy":float(row["expectancy"] or 0),"win_rate_pct":100.0*int(row["wins"] or 0)/count if count else 0.0})
+                shadow_count=int(row["trades"] or 0); strategies.append({"strategy":name,"strategy_version":version,"track":"SHADOW","trades":shadow_count,"wins":int(row["wins"] or 0),"net_pnl":float(row["net_pnl"] or 0),"expectancy":float(row["expectancy"] or 0),"win_rate_pct":100.0*int(row["wins"] or 0)/shadow_count if shadow_count else 0.0})
             events=[dict(r) for r in db.execute("SELECT * FROM events ORDER BY id DESC LIMIT 100")]
             for item in events:
                 try: item["details"]=json.loads(item.pop("details_json"))

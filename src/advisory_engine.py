@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from math import isfinite
 from datetime import datetime, time as dtime, timedelta
 from dataclasses import asdict
 from pathlib import Path
@@ -238,9 +239,19 @@ def run_scan(
             if not candidate.side or not candidate.reference_entry:
                 continue
             try:
-                margin_value = provider.estimate_mis_margin_per_share(
+                raw_margin_value = provider.estimate_mis_margin_per_share(
                     candidate.symbol, candidate.side, candidate.reference_entry
                 )
+                try:
+                    margin_value = float(raw_margin_value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        "Kite MIS margin estimate must be a finite positive number."
+                    ) from exc
+                if not isfinite(margin_value) or margin_value <= 0:
+                    raise ValueError(
+                        "Kite MIS margin estimate must be a finite positive number."
+                    )
                 margin_per_share_by_symbol[candidate.symbol] = margin_value
                 margin_checks.append({
                     "symbol": candidate.symbol,

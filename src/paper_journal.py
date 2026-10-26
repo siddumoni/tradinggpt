@@ -26,7 +26,18 @@ JOURNAL_FIELDS = [
     "net_rr_t1", "data_verified_live", "margin_verified", "news_status", "news_risk",
     "paper_status", "status_note",
 ]
+SCAN_LEDGER_FIELDS = [
+    "scan_id", "recorded_at", "scan_as_of", "report_path", "provider", "report_status",
+    "symbols_requested", "symbols_evaluated", "candidate_count", "directional_candidates",
+    "conditional_candidates", "watch_candidates", "no_trade_candidates",
+    "data_verified_candidates", "margin_verified_candidates",
+    "margin_checks_attempted", "margin_checks_passed", "margin_checks_failed",
+    "fetch_error_count", "candle_archive_error_count", "archived_symbols",
+    "archived_rows_written", "signal_journal_path", "signal_events_new",
+    "signal_events_duplicates_skipped", "signal_events_non_directional_skipped",
+]
 DIRECTIONAL_SIDES = {"LONG", "SHORT"}
+CONDITIONAL_ACTIONS = {"CONDITIONAL_BUY", "CONDITIONAL_SHORT"}
 PAPER_ACTIONS = {"CONDITIONAL_BUY", "CONDITIONAL_SHORT", "WATCH_CANDIDATE"}
 
 
@@ -228,19 +239,147 @@ def append_scan_report(
     }
 
 
+def append_scan_ledger(
+    scan_path: Path,
+    ledger_path: Path,
+    *,
+    signal_journal_result: dict[str, Any] | None = None,
+    recorded_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Idempotently append a run summary, including successful scans with no directional setup."""
+    scan_path = Path(scan_path)
+    ledger_path = Path(ledger_path)
+    report = load_scan_report(scan_path)
+    stamp = recorded_at or datetime.now(IST)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=IST)
+    recorded_at_text = stamp.astimezone(IST).isoformat()
+    scan_id = hashlib.sha256(
+        f"{scan_path.resolve()}|{report['status']}|{report['_validated_as_of']}".encode("utf-8")
+    ).hexdigest()[:24]
+
+    candidates = report.get("candidates", [])
+    actions = [str(item.get("action") or "UNKNOWN").upper() for item in candidates]
+    sides = [str(item.get("side") or "").upper() for item in candidates]
+    margin_checks = report.get("margin_checks", [])
+    if not isinstance(margin_checks, list) or any(not isinstance(item, dict) for item in margin_checks):
+        raise ValueError("scanner report margin_checks must be a list of objects")
+    fetch_errors = report.get("fetch_errors", [])
+    if not isinstance(fetch_errors, list):
+        raise ValueError("scanner report fetch_errors must be a list")
+    archive = report.get("candle_archive", {})
+    if not isinstance(archive, dict):
+        raise ValueError("scanner report candle_archive must be an object")
+    archive_results = archive.get("results", [])
+    archive_errors = archive.get("errors", [])
+    if not isinstance(archive_results, list) or any(not isinstance(item, dict) for item in archive_results):
+        raise ValueError("scanner report candle_archive.results must be a list of objects")
+    if not isinstance(archive_errors, list):
+        raise ValueError("scanner report candle_archive.errors must be a list")
+    symbols_requested = report.get("symbols_requested", [])
+    if not isinstance(symbols_requested, list):
+        symbols_requested = []
+    rows_written = 0
+    archived_symbols: list[str] = []
+    for item in archive_results:
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if symbol:
+            archived_symbols.append(symbol)
+        try:
+            count = int(item.get("rows_written", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            count = 0
+        if count > 0:
+            rows_written += count
+
+    journal_result = signal_journal_result or {}
+    row = {
+        "scan_id": scan_id,
+        "recorded_at": recorded_at_text,
+        "scan_as_of": report["_validated_as_of"],
+        "report_path": str(scan_path.resolve()),
+        "provider": str(report.get("provider", "unknown")),
+        "report_status": report["status"],
+        "symbols_requested": ";".join(str(symbol).strip().upper() for symbol in symbols_requested if str(symbol).strip()),
+        "symbols_evaluated": int(report.get("symbols_evaluated", len(candidates)) or 0),
+        "candidate_count": len(candidates),
+        "directional_candidates": sum(side in DIRECTIONAL_SIDES for side in sides),
+        "conditional_candidates": sum(action in CONDITIONAL_ACTIONS for action in actions),
+        "watch_candidates": sum(action == "WATCH_CANDIDATE" for action in actions),
+        "no_trade_candidates": sum(action == "NO_TRADE" for action in actions),
+        "data_verified_candidates": sum(item.get("data_verified_live") is True for item in candidates),
+        "margin_verified_candidates": sum(item.get("margin_verified") is True for item in candidates),
+        "margin_checks_attempted": len(margin_checks),
+        "margin_checks_passed": sum(item.get("verified") is True for item in margin_checks),
+        "margin_checks_failed": sum(item.get("verified") is not True for item in margin_checks),
+        "fetch_error_count": len(fetch_errors),
+        "candle_archive_error_count": len(archive_errors),
+        "archived_symbols": ";".join(sorted(set(archived_symbols))),
+        "archived_rows_written": rows_written,
+        "signal_journal_path": str(journal_result.get("journal_path", "")),
+        "signal_events_new": int(journal_result.get("new_events", 0) or 0),
+        "signal_events_duplicates_skipped": int(journal_result.get("duplicates_skipped", 0) or 0),
+        "signal_events_non_directional_skipped": int(journal_result.get("non_directional_skipped", 0) or 0),
+    }
+
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    has_existing_file = ledger_path.exists() and ledger_path.stat().st_size > 0
+    existing_ids: set[str] = set()
+    if has_existing_file:
+        try:
+            with ledger_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                if reader.fieldnames != SCAN_LEDGER_FIELDS:
+                    raise ValueError(
+                        f"Existing scan ledger has an unexpected schema: {ledger_path}; "
+                        "do not append incompatible formats."
+                    )
+                existing_ids = {
+                    str(existing.get("scan_id", ""))
+                    for existing in reader if existing.get("scan_id")
+                }
+        except OSError as exc:
+            raise ValueError(f"Could not read existing scan ledger {ledger_path}: {exc}") from exc
+
+    duplicate = scan_id in existing_ids
+    with ledger_path.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SCAN_LEDGER_FIELDS, extrasaction="ignore")
+        if not has_existing_file:
+            writer.writeheader()
+        if not duplicate:
+            writer.writerow(row)
+
+    return {
+        "scan_id": scan_id,
+        "ledger_path": str(ledger_path),
+        "new_runs": 0 if duplicate else 1,
+        "duplicates_skipped": 1 if duplicate else 0,
+        "candidate_count": len(candidates),
+        "directional_candidates": row["directional_candidates"],
+        "no_trade_candidates": row["no_trade_candidates"],
+        "margin_checks_attempted": row["margin_checks_attempted"],
+        "fetch_error_count": row["fetch_error_count"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Append directional candidates from a saved advisory scan to a paper-only journal."
     )
     parser.add_argument("--scan", required=True, type=Path, help="Saved phase6_scan_*.json report")
     parser.add_argument("--journal", type=Path, default=Path("logs/paper_signals.csv"))
+    parser.add_argument("--scan-ledger", type=Path, default=Path("logs/paper_scan_runs.csv"),
+                        help="Append one summary row per saved scan, including scans with no directional signal")
     args = parser.parse_args()
     try:
         result = append_scan_report(args.scan, args.journal)
+        ledger_result = append_scan_ledger(
+            args.scan, args.scan_ledger, signal_journal_result=result
+        )
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
-    print(json.dumps(result, indent=2))
-    print("Journal only: no orders, fills, or realised P&L are created by this command.")
+    print(json.dumps({"signal_journal": result, "scan_ledger": ledger_result}, indent=2))
+    print("Paper records only: no orders, fills, or realised P&L are created by these commands.")
 
 
 if __name__ == "__main__":

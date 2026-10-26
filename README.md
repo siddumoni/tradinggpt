@@ -114,7 +114,7 @@ python -m src.main check
 python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv --candle-archive-dir data/paper_candles
 ```
 
-This option needs valid Kite credentials and a same-day session. A quote must include a positive last price and timestamp no more than 15 minutes old for the stock-data trust flag to pass. Missing/stale quotes fail closed. **The NIFTY 50 index regime still comes from unofficial Yahoo Finance data, and margin is not verified**, so conditional entry approval remains blocked. Use this for research/paper journaling, not live trade decisions.
+This option needs valid Kite credentials and a same-day session. A quote must include a positive last price and timestamp no more than 15 minutes old for the stock-data trust flag to pass. Missing/stale quotes fail closed. In Kite mode, the NIFTY 50 regime is fetched from Kite historical candles when the index instrument is present; Yahoo is not used as a fallback. For directional candidates, the scanner calls Kite's read-only order-margin calculator for a hypothetical one-share NSE MIS limit order. This does not submit an order. Missing, invalid or unavailable margin estimates fail closed. The report records the index source and each margin check. Use this for research/paper journaling, not live trade decisions.
 
 ## Capture prospective paper observations
 

@@ -198,6 +198,115 @@ class KiteMarketData:
         }
 
 
+
+    def fetch_nifty50_15m_candles(
+        self,
+        instrument_rows: Iterable[dict[str, Any]],
+        now: datetime | None = None,
+        lookback_days: int = 7,
+    ) -> list[dict[str, Any]]:
+        """Fetch NIFTY 50 15-minute regime candles from Kite, not Yahoo."""
+        current = (now or datetime.now(IST)).astimezone(IST)
+        candidates = []
+        for row in instrument_rows:
+            trading_symbol = " ".join(str(row.get("tradingsymbol", "")).upper().split())
+            name = " ".join(str(row.get("name", "")).upper().split())
+            exchange = str(row.get("exchange", "NSE")).upper()
+            if (
+                (trading_symbol in {"NIFTY 50", "NIFTY50"} or name == "NIFTY 50")
+                and exchange == "NSE"
+                and row.get("instrument_token")
+            ):
+                candidates.append(row)
+        if not candidates:
+            raise DataFetchError(
+                "NIFTY 50 index instrument was not found in the Kite NSE instrument dump; "
+                "index regime unavailable and Yahoo fallback is disabled in Kite mode."
+            )
+        instrument = next(
+            (row for row in candidates if str(row.get("segment", "")).upper() == "INDICES"),
+            candidates[0],
+        )
+        start = datetime.combine(
+            current.date() - timedelta(days=lookback_days), dtime(0, 0), tzinfo=IST
+        )
+        candles = self.historical_candles(
+            int(instrument["instrument_token"]), start, current, "15minute"
+        )
+        if not candles:
+            raise DataFetchError("Kite returned no NIFTY 50 15-minute candles for regime context")
+        return candles
+
+    def estimate_mis_margin_per_share(
+        self,
+        tradingsymbol: str,
+        side: str,
+        price: float,
+    ) -> float:
+        """Use Kite's read-only margin calculator for one hypothetical MIS share.
+
+        This calls the margin-estimation API only; no order is submitted.
+        Missing, malformed, zero, or negative estimates raise DataFetchError
+        so the scanner can preserve its fail-closed policy.
+        """
+        symbol = str(tradingsymbol).strip().upper()
+        direction = str(side).strip().upper()
+        if not symbol or direction not in {"LONG", "SHORT"}:
+            raise ValueError("tradingsymbol and side LONG/SHORT are required")
+        try:
+            unit_price = float(price)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("price must be a positive finite number") from exc
+        if not (0 < unit_price < float("inf")):
+            raise ValueError("price must be a positive finite number")
+
+        params = [{
+            "exchange": "NSE",
+            "tradingsymbol": symbol,
+            "transaction_type": "BUY" if direction == "LONG" else "SELL",
+            "variety": "regular",
+            "product": "MIS",
+            "order_type": "LIMIT",
+            "quantity": 1,
+            "price": unit_price,
+        }]
+        result = _retry(
+            lambda: self.kite.order_margins(params),
+            attempts=self.config.retries,
+            delay=self.config.retry_delay_seconds,
+            label="MIS margin estimate",
+        )
+        rows = result
+        if isinstance(result, dict):
+            if isinstance(result.get("orders"), list):
+                rows = result["orders"]
+            elif isinstance(result.get("data"), list):
+                rows = result["data"]
+            else:
+                rows = [result]
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            raise DataFetchError("Kite margin calculator returned an unexpected response")
+
+        try:
+            amount = float(rows[0].get("total"))
+        except (TypeError, ValueError, OverflowError):
+            amount = 0.0
+        if not (0 < amount < float("inf")):
+            fields = ("span", "exposure", "option_premium", "additional", "bo", "cash", "var")
+            components = []
+            for field in fields:
+                try:
+                    value = float(rows[0].get(field, 0) or 0)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise DataFetchError("Kite margin response contains invalid components") from exc
+                if value < 0 or not (value < float("inf")):
+                    raise DataFetchError("Kite margin response contains invalid components")
+                components.append(value)
+            amount = sum(components)
+        if not (0 < amount < float("inf")):
+            raise DataFetchError("Kite did not return a positive, usable MIS margin estimate")
+        return amount
+
 def market_session_message(now: datetime | None = None) -> str | None:
     """Return a graceful notice for weekends or outside normal NSE cash hours.
 

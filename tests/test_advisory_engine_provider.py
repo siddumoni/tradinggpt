@@ -45,6 +45,9 @@ def test_kite_provider_uses_authenticated_read_only_client_and_marks_quote_statu
                 "instrument_type": "EQ",
             }]
 
+        def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
+            return []
+
         def fetch_symbol_bundle(self, instrument, now=None):
             captured["instrument"] = instrument
             return {
@@ -73,7 +76,7 @@ def test_kite_provider_uses_authenticated_read_only_client_and_marks_quote_statu
     assert captured["instrument"]["tradingsymbol"] == "INFY"
     assert report["data_provider_mode"] == "kite"
     assert "Kite Connect" in report["stock_data_provider"]
-    assert "Yahoo Finance" in report["index_regime_provider"]
+    assert "Kite Connect" in report["index_regime_provider"]
     assert report["fetch_errors"] == []
     assert report["candidates"][0]["data_verified_live"] is True
     assert report["candidates"][0]["action"] == "NO_TRADE"
@@ -90,6 +93,9 @@ def test_kite_provider_skips_symbols_not_in_nse_equity_dump(monkeypatch, tmp_pat
                 "segment": "NSE",
                 "instrument_type": "EQ",
             }]
+
+        def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
+            return []
 
         def fetch_symbol_bundle(self, instrument, now=None):
             raise AssertionError("missing symbols must not trigger a data fetch")

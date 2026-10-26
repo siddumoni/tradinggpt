@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 from src import paper_scan_scheduler as scheduler
 def test_report_path_is_resolved_from_scanner_stdout(tmp_path):
@@ -15,6 +17,7 @@ def test_scanner_command_processes_virtual_broker_and_callback(tmp_path,monkeypa
  class Broker:
   def process_scan_report(self,path):captured["processed"].append(path);return {"opened":1,"rejected":0,"neutral":0}
  monkeypatch.setattr(scheduler.subprocess,"run",fake_run)
- code=scheduler.run_scanner_process(None,repo_root=tmp_path,symbols="INFY",paper_journal=tmp_path/"journal.csv",scan_ledger=tmp_path/"ledger.csv",candle_archive_dir=tmp_path/"candles",timeout_seconds=10,paper_broker=Broker(),after_report=lambda path:captured["after"].append(path),account_capital=100000,risk_per_trade=500)
+ boundary=datetime(2026,10,26,10,5,tzinfo=ZoneInfo("Asia/Kolkata"))
+ code=scheduler.run_scanner_process(boundary,repo_root=tmp_path,symbols="INFY",paper_journal=tmp_path/"journal.csv",scan_ledger=tmp_path/"ledger.csv",candle_archive_dir=tmp_path/"candles",timeout_seconds=10,paper_broker=Broker(),after_report=lambda path:captured["after"].append(path),account_capital=100000,risk_per_trade=500)
  assert code==0 and captured["processed"]==[report] and captured["after"]==[report]
  assert "--account-capital" in captured["command"] and "100000" in captured["command"]

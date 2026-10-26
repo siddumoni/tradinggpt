@@ -118,3 +118,52 @@ def test_retries_exhausted_raises_clear_error():
     client = KiteMarketData(kite, DataClientConfig(retries=2, retry_delay_seconds=0))
     with pytest.raises(DataFetchError, match="LTP request failed after 2 attempts"):
         client.ltp(["RELIANCE"])
+
+
+
+def test_kite_nifty_index_history_uses_index_instrument_token():
+    kite = FakeKite()
+    client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0))
+    rows = [
+        {"tradingsymbol": "RELIANCE", "instrument_token": 1, "segment": "NSE", "exchange": "NSE"},
+        {"tradingsymbol": "NIFTY 50", "name": "NIFTY 50", "instrument_token": 256265,
+         "segment": "INDICES", "exchange": "NSE"},
+    ]
+    now = datetime(2026, 10, 19, 10, 0, tzinfo=IST)
+    candles = client.fetch_nifty50_15m_candles(rows, now=now)
+    assert candles
+    assert kite.historical_calls[-1][0] == 256265
+    assert kite.historical_calls[-1][3] == "15minute"
+
+
+def test_kite_nifty_index_history_fails_closed_when_index_missing():
+    client = KiteMarketData(FakeKite(), DataClientConfig(retries=1, retry_delay_seconds=0))
+    with pytest.raises(DataFetchError, match="NIFTY 50 index instrument was not found"):
+        client.fetch_nifty50_15m_candles([
+            {"tradingsymbol": "RELIANCE", "instrument_token": 1, "segment": "NSE", "exchange": "NSE"}
+        ], now=datetime(2026, 10, 19, 10, 0, tzinfo=IST))
+
+
+def test_kite_margin_estimator_uses_read_only_one_share_mis_calculator():
+    kite = FakeKite()
+    captured = {}
+    def order_margins(params):
+        captured["params"] = params
+        return [{"total": 22.5}]
+    kite.order_margins = order_margins
+    client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0))
+    value = client.estimate_mis_margin_per_share("INFY", "LONG", 1500.0)
+    assert value == pytest.approx(22.5)
+    assert captured["params"][0]["tradingsymbol"] == "INFY"
+    assert captured["params"][0]["transaction_type"] == "BUY"
+    assert captured["params"][0]["product"] == "MIS"
+    assert captured["params"][0]["quantity"] == 1
+    assert captured["params"][0]["order_type"] == "LIMIT"
+
+
+def test_kite_margin_estimator_fails_closed_for_missing_margin():
+    kite = FakeKite()
+    kite.order_margins = lambda _params: [{"total": 0}]
+    client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0))
+    with pytest.raises(DataFetchError, match="positive, usable MIS margin"):
+        client.estimate_mis_margin_per_share("INFY", "LONG", 1500.0)

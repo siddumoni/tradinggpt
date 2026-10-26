@@ -155,12 +155,23 @@ def run_scan(
     news_result = fetch_news(_load_feeds(news_feeds_path), timeout_seconds=5.0)
     # Headlines are triage inputs only. Per-symbol company RSS queries are added for
     # the most promising technical candidates in a later iteration after this scan.
-    try:
-        index_15m = _fetch_nifty_15m(current)
-    except Exception as exc:
-        LOGGER.warning("Could not fetch NIFTY index candles: %s", exc)
-        index_15m = []
-        news_result.setdefault("errors", []).append(f"NIFTY index data unavailable: {exc}")
+    index_provider_label = "Yahoo Finance unofficial NIFTY 50 index history; not verified live exchange data"
+    if provider_name == "kite":
+        index_provider_label = "Zerodha Kite Connect NIFTY 50 index historical candles"
+        try:
+            index_15m = provider.fetch_nifty50_15m_candles(instrument_rows, now=current)
+        except Exception as exc:
+            LOGGER.warning("Could not fetch NIFTY index candles from Kite: %s", exc)
+            index_15m = []
+            index_provider_label = "Unavailable: Kite NIFTY 50 index candles; Yahoo fallback disabled"
+            news_result.setdefault("errors", []).append(f"Kite NIFTY 50 index data unavailable: {exc}")
+    else:
+        try:
+            index_15m = _fetch_nifty_15m(current)
+        except Exception as exc:
+            LOGGER.warning("Could not fetch NIFTY index candles: %s", exc)
+            index_15m = []
+            news_result.setdefault("errors", []).append(f"NIFTY index data unavailable: {exc}")
 
     risk_settings, charge_rates = load_phase2_settings()
     bundles: dict[str, dict[str, Any]] = {}
@@ -211,6 +222,44 @@ def run_scan(
         for symbol, bundle in bundles.items()
     ]
 
+    # Margin estimation is read-only: this requests a hypothetical one-share
+    # MIS limit-order margin calculation and never submits an order.
+    margin_per_share_by_symbol: dict[str, float] = {}
+    margin_checks: list[dict[str, Any]] = []
+    if provider_name == "kite":
+        for candidate in candidates:
+            if not candidate.side or not candidate.reference_entry:
+                continue
+            try:
+                margin_value = provider.estimate_mis_margin_per_share(
+                    candidate.symbol, candidate.side, candidate.reference_entry
+                )
+                margin_per_share_by_symbol[candidate.symbol] = margin_value
+                margin_checks.append({
+                    "symbol": candidate.symbol,
+                    "side": candidate.side,
+                    "verified": True,
+                    "margin_per_share_inr": round(margin_value, 4),
+                })
+            except Exception as exc:
+                message = f"{type(exc).__name__}: {exc}"
+                margin_checks.append({
+                    "symbol": candidate.symbol, "side": candidate.side,
+                    "verified": False, "reason": message,
+                })
+                LOGGER.warning("MIS margin estimate unavailable for %s: %s", candidate.symbol, message)
+
+        # Re-evaluate only with explicit positive results from Kite's calculator.
+        candidates = [
+            evaluate_symbol_bundle(
+                symbol, bundle, index_15m_candles=index_15m,
+                news_items=general_news,
+                margin_per_share=margin_per_share_by_symbol.get(symbol),
+                now=current, settings=risk_settings, charge_rates=charge_rates,
+            )
+            for symbol, bundle in bundles.items()
+        ]
+
     # After the first technical pass, fetch company-specific RSS only for symbols
     # that actually produced a directional setup. This limits requests to the
     # small candidate set instead of querying every watchlist constituent.
@@ -241,7 +290,7 @@ def run_scan(
             revised.append(evaluate_symbol_bundle(
                 candidate.symbol, bundles[candidate.symbol], index_15m_candles=index_15m,
                 news_items=general_news + company_news_by_symbol[candidate.symbol],
-                margin_per_share=None, now=current, settings=risk_settings,
+                margin_per_share=margin_per_share_by_symbol.get(candidate.symbol), now=current, settings=risk_settings,
                 charge_rates=charge_rates,
             ))
         candidates = revised
@@ -252,7 +301,8 @@ def run_scan(
         "as_of": current.isoformat(),
         "provider": stock_provider_label,
         "stock_data_provider": stock_provider_label,
-        "index_regime_provider": "Yahoo Finance unofficial NIFTY 50 index history; not verified live exchange data",
+        "index_regime_provider": index_provider_label,
+        "margin_checks": margin_checks,
         "data_provider_mode": provider_name,
         "candle_archive": ({
             "directory": str(candle_archive_dir),
@@ -279,8 +329,10 @@ def run_scan(
         "limitations": [
             ("Yahoo Finance stock data is unofficial and may be delayed or incomplete; it is not verified for live decisions."
              if provider_name == "yahoo" else
-             "Kite stock quote freshness is checked against its timestamp, but index-regime context still uses unofficial Yahoo Finance data."),
-            "Margin was not verified, so the risk engine is fail-closed and no candidate can be approved for entry.",
+             "Kite stock quote freshness and stock candles are checked; the NIFTY 50 index candles are also requested from Kite with no Yahoo fallback."),
+            ("Kite's read-only MIS margin calculator is attempted for directional candidates; missing or invalid results remain fail-closed."
+             if provider_name == "kite" else
+             "The Yahoo-only path does not verify Kite MIS margin; candidates remain fail-closed."),
             "RSS keyword triage is not a sentiment model and does not replace original company filings or human verification.",
             "This report is advisory-only and never submits, modifies, or cancels orders.",
         ],

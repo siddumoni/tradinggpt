@@ -34,6 +34,12 @@ python -m src.paper_journal --scan reports/phase6_scan_20261022_103000.json --jo
 
 When `--paper-journal` is enabled, the scanner also archives completed 5-minute candles under `data/paper_candles` by default. Override the location with `--candle-archive-dir`. Each per-symbol file is tagged with `provider_mode`; switching from Yahoo to Kite (or vice versa) in the same archive deliberately fails instead of mixing feeds. Keep the scan reports, journal, scan ledger, and candle archive together for auditability. When `--paper-journal` is provided, the scanner automatically writes `logs/paper_scan_runs.csv` unless `--scan-ledger` overrides it. The ledger includes every saved scan, even runs where every candidate is `NO_TRADE`; it does not add non-directional rows to the signal journal. Review the ledger to track scan counts, data status, margin verification attempts and fetch/archive errors. Run it prospectively and do not backfill by looking at historical charts and pretending those were live observations.
 
+## Automatic scans on Windows
+
+Use [the automatic scheduler guide](PAPER_SCAN_SCHEDULER.md) to register a Task Scheduler task that starts the read-only Kite scan process when the current Windows user signs in. During weekdays it checks every five seconds and scans shortly after each completed 5-minute candle boundary. It writes scan-run health data even when there are no directional setups.
+
+Keep the user session signed in and the computer awake so the task can access the user's cached Kite session. Scheduler logs are written to `logs/paper_scan_scheduler.log`. It persists each attempted candle boundary to avoid duplicate attempts after restart and does not replay stale missed boundaries.
+
 ## Meaning of paper status
 
 - `WATCH_ONLY_UNVERIFIED_DATA`: the scanner did not verify the feed as live exchange data.

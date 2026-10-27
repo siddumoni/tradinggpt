@@ -156,6 +156,12 @@ Open http://127.0.0.1:8000. After pulling updates, rerun the Windows task instal
 
 Daily outputs are written to reports/paper_daily_YYYY-MM-DD.md, .json and _trades.csv. Challenger books never affect champion statistics and are never automatically promoted.
 
+### Watch-candidate shadow book
+
+The integrated service also maintains a separate cash-only shadow book for directional `WATCH_CANDIDATE` signals rejected specifically by the scanner's minimum **net** reward-to-risk gate. It does not lower or bypass that gate for the champion account. A shadow entry is recorded only when the saved report is Kite-only, the no-order assertion is explicit, live data and margin are verified, company-specific risk is not HIGH, news checks are complete, the quote is fresh, and best bid/ask are available. Other watch candidates are shown in the dashboard's decision audit with their exclusion reason.
+
+The shadow book uses the service's virtual capital/risk settings, a maximum-position limit, 5 bps adverse slippage per side, estimated transaction charges, stop-loss/target-2 exits, and a fresh-quote square-off at 15:15 IST. Its P&L and trade history remain completely separate from champion and challenger statistics. Outcomes are prospective observations—not evidence of a profitable edge and never real Kite orders. Existing saved reports are not replayed automatically; observations begin as new reports arrive after you update and restart the service.
+
 
 ## Capture prospective paper observations
 

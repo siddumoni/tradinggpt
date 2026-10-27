@@ -13,12 +13,13 @@ from src.paper_broker import DEFAULT_DB,PaperBroker
 from src.paper_dashboard import make_server
 from src.paper_daily_report import generate_daily_report
 from src.paper_strategy_lab import process_archive
+from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.paper_scan_scheduler import latest_completed_boundary,process_due_boundary,run_scanner_process,_resolve_path
 
 IST=ZoneInfo("Asia/Kolkata")
 LOGGER=logging.getLogger("paper_trading_service")
 
-def _ticker_thread(broker:PaperBroker,symbols:list[str],stop:threading.Event)->None:
+def _ticker_thread(broker:PaperBroker,watch_shadow:WatchShadowPortfolio,symbols:list[str],stop:threading.Event)->None:
  """Monitor fresh Kite WebSocket ticks and close virtual positions only."""
  while not stop.is_set():
   ticker=None
@@ -58,7 +59,9 @@ def _ticker_thread(broker:PaperBroker,symbols:list[str],stop:threading.Event)->N
       bid=float(buys[0]["price"]) if buys and isinstance(buys[0],dict) and buys[0].get("price") else None
       ask=float(sells[0]["price"]) if sells and isinstance(sells[0],dict) and sells[0].get("price") else None
       closed=broker.update_market_price(symbol,last,bid=bid,ask=ask,market_time=stamp,received_at=now)
-      if closed:LOGGER.info("Kite ticks triggered %s virtual exit(s) for %s",closed,symbol)
+      shadow_closed=watch_shadow.update_market_price(symbol,last,bid=bid,ask=ask,market_time=stamp,received_at=now)
+      if closed:LOGGER.info("Kite ticks triggered %s champion virtual exit(s) for %s",closed,symbol)
+      if shadow_closed:LOGGER.info("Kite ticks triggered %s watch-shadow virtual exit(s) for %s",shadow_closed,symbol)
      except (TypeError,ValueError,KeyError,OverflowError):LOGGER.exception("Ignored malformed Kite tick")
    def on_error(ws,code,reason):LOGGER.error("Kite WebSocket error code=%s reason=%s",code,reason)
    def on_close(ws,code,reason):LOGGER.warning("Kite WebSocket closed code=%s reason=%s",code,reason)
@@ -108,13 +111,14 @@ def main(argv=None)->int:
  reports=_resolve_path(root,a.reports_dir);log_path=_resolve_path(root,a.log_file);_configure_logging(log_path)
  symbols=list(dict.fromkeys(s.strip().upper() for s in a.symbols.split(",") if s.strip()))
  broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
+ watch_shadow=WatchShadowPortfolio(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
  stop=threading.Event();server=None;server_thread=None
  try:
-  server=make_server(broker,a.dashboard_host,a.dashboard_port)
+  server=make_server(broker,a.dashboard_host,a.dashboard_port,watch_shadow=watch_shadow)
   server_thread=threading.Thread(target=server.serve_forever,kwargs={"poll_interval":.5},daemon=True,name="paper-dashboard")
   server_thread.start();LOGGER.info("Local dashboard listening at http://%s:%s",a.dashboard_host,a.dashboard_port)
  except OSError:LOGGER.exception("Dashboard could not bind; scan service continues but dashboard is unavailable")
- tick_thread=threading.Thread(target=_ticker_thread,args=(broker,symbols,stop),daemon=True,name="kite-tick-monitor");tick_thread.start()
+ tick_thread=threading.Thread(target=_ticker_thread,args=(broker,watch_shadow,symbols,stop),daemon=True,name="kite-tick-monitor");tick_thread.start()
  LOGGER.info("Paper service started: capital=%.2f risk=%.2f daily-loss=%.2f symbols=%s",a.account_capital,a.risk_per_trade,a.daily_loss_limit,",".join(symbols))
  LOGGER.info("Paper-only boundary enforced: no real order placement/modification/cancellation.")
  try:
@@ -123,6 +127,11 @@ def main(argv=None)->int:
    try:
     boundary=latest_completed_boundary(now,grace_seconds=a.grace_seconds,max_lateness_seconds=a.max_lateness_seconds)
     def after_report(path):
+     try:
+      watch_result=watch_shadow.process_scan_report(path)
+      LOGGER.info("Watch-candidate shadow book after %s: %s",path.name,watch_result)
+     except Exception:
+      LOGGER.exception("Watch-candidate shadow processing failed; champion account remains unchanged.")
      result=process_archive(archive,db_path)
      LOGGER.info("Challenger lab updated from archive after %s: %s",path.name,result)
     def scan(at):
@@ -131,7 +140,9 @@ def main(argv=None)->int:
       account_capital=a.account_capital,risk_per_trade=a.risk_per_trade)
     process_due_boundary(boundary,scan_state,scan)
     closed=broker.square_off_due_positions(now)
-    if closed:LOGGER.info("Square-off closed %s virtual position(s)",closed)
+    shadow_closed=watch_shadow.square_off_due_positions(now)
+    if closed:LOGGER.info("Square-off closed %s champion virtual position(s)",closed)
+    if shadow_closed:LOGGER.info("Square-off closed %s watch-shadow virtual position(s)",shadow_closed)
     if now.weekday()<5 and now.time().replace(tzinfo=None)>=dtime(15,20):
      date_key=now.date().isoformat();existing=""
      if daily_state.exists():
@@ -141,7 +152,7 @@ def main(argv=None)->int:
       try:
        shadow=process_archive(archive,db_path);summary=generate_daily_report(db_path,reports,now)
        daily_state.parent.mkdir(parents=True,exist_ok=True);temp=daily_state.with_suffix(".tmp")
-       temp.write_text(json.dumps({"report_date":date_key,"generated_at":now.isoformat(),"summary":summary,"shadow_update":shadow},indent=2),encoding="utf-8");temp.replace(daily_state)
+       temp.write_text(json.dumps({"report_date":date_key,"generated_at":now.isoformat(),"summary":summary,"shadow_update":shadow,"watch_shadow":watch_shadow.snapshot()},indent=2,default=str),encoding="utf-8");temp.replace(daily_state)
        LOGGER.info("Daily report generated: %s",summary["markdown_path"])
       except Exception:LOGGER.exception("Daily paper report failed; will retry next scheduler cycle")
    except Exception:LOGGER.exception("Paper service cycle failed; continuing")

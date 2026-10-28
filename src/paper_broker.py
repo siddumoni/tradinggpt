@@ -130,15 +130,16 @@ class PaperBroker:
         if not isinstance(candidates,list) or not isinstance(snapshots,dict): raise ValueError("Scan report candidates or market_snapshots schema is invalid")
         as_of=str(report.get("as_of") or "")
         if not as_of: raise ValueError("Scan report is missing as_of timestamp")
-        scan_time=to_ist(as_of); opened=rejected=neutral=0
+        scan_time=to_ist(as_of); opened=rejected=neutral=0; action_counts={}
         with self._connect() as db:
-            directional=sum(1 for c in candidates if isinstance(c,dict) and c.get("action") in {"CONDITIONAL_BUY","CONDITIONAL_SHORT"})
-            self._event(db,"SCAN_PROCESSED",f"Processed scan report: {len(candidates)} candidates; directional-entry actions={directional}.",
+            directional=sum(1 for c in candidates if isinstance(c,dict) and str(c.get("action") or "").upper() in {"CONDITIONAL_BUY","CONDITIONAL_SHORT"})
+            self._event(db,"SCAN_PROCESSED",f"Processed scan report: {len(candidates)} candidates; conditional-entry actions={directional}.",
                 details={"report_path":str(path),"provider":report.get("provider"),"scan_as_of":as_of},
                 event_key=f"scan:{path.resolve()}:{as_of}",at=scan_time)
             for item in candidates:
                 if not isinstance(item,dict): rejected+=1; continue
-                action=str(item.get("action") or "").upper()
+                action=str(item.get("action") or "UNKNOWN").upper()
+                action_counts[action]=action_counts.get(action,0)+1
                 if action not in {"CONDITIONAL_BUY","CONDITIONAL_SHORT"}:
                     neutral+=1; self._record_rejection(db,item,as_of,"No approved directional entry: scanner action is "+(action or "UNKNOWN")+"."); continue
                 try:
@@ -146,7 +147,14 @@ class PaperBroker:
                     opened+=1
                 except _RejectedSignal as exc:
                     rejected+=1; self._record_rejection(db,item,as_of,str(exc))
-        return {"opened":opened,"rejected":rejected,"neutral":neutral,"candidate_count":len(candidates)}
+        conditional_count=action_counts.get("CONDITIONAL_BUY",0)+action_counts.get("CONDITIONAL_SHORT",0)
+        watch_count=action_counts.get("WATCH_CANDIDATE",0)
+        no_trade_count=action_counts.get("NO_TRADE",0)
+        other_count=sum(count for action,count in action_counts.items()
+                        if action not in {"CONDITIONAL_BUY","CONDITIONAL_SHORT","WATCH_CANDIDATE","NO_TRADE"})
+        return {"opened":opened,"rejected":rejected,"neutral":neutral,"candidate_count":len(candidates),
+                "conditional_candidates":conditional_count,"watch_candidates":watch_count,
+                "no_trade":no_trade_count,"other_actions":other_count}
     def _open_candidate(self,db,candidate,snapshot):
         symbol=str(candidate.get("symbol") or "").strip().upper(); side=str(candidate.get("side") or "").upper()
         strategy=str(candidate.get("strategy") or "").strip(); signal_time=str(candidate.get("signal_time") or "")
@@ -282,6 +290,16 @@ class PaperBroker:
           "stamp_duty":fees.stamp_duty,"ipft":fees.ipft,"transaction_charges":fees.total,"slippage_cost":slip,
           "total_estimated_costs":total,"net_pnl":net,"entry_reason":trade["entry_reason"]},
           event_key=f"exit:{trade['signal_id']}",at=at)
+        planned_risk=abs(float(trade["risk_budget_inr"] or 0))
+        if planned_risk and net < -planned_risk:
+            self._event(db,"RISK_OVERRUN",
+              f"Simulated net loss for {trade['symbol']} was ₹{abs(net):.2f}, exceeding planned per-trade risk ₹{planned_risk:.2f}; stop gaps/slippage can exceed the plan.",
+              symbol=trade["symbol"],severity="WARNING",
+              details={"trade_id":trade["id"],"signal_id":trade["signal_id"],"planned_risk_inr":planned_risk,
+                       "realized_net_loss_inr":abs(net),"excess_loss_inr":abs(net)-planned_risk,
+                       "exit_reason":exit_reason,"exit_reference_price":exit_ref,"exit_fill_price":exit_fill,
+                       "slippage_cost":slip,"total_estimated_costs":total},
+              event_key=f"risk-overrun:{trade['signal_id']}",at=at)
     def record_research_observations(self,observations:list[dict[str,Any]],*,observed_at:datetime|None=None)->None:
         current=observed_at or datetime.now(IST); current=current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
         with self._connect() as db:

@@ -12,6 +12,7 @@ from src.data_fetcher import KiteMarketData
 from src.paper_broker import DEFAULT_DB,PaperBroker
 from src.paper_dashboard import make_server
 from src.paper_daily_report import generate_daily_report
+from src.paper_upload_checklist import write_upload_checklist
 from src.paper_strategy_lab import process_archive
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.paper_scan_scheduler import latest_completed_boundary,process_due_boundary,run_scanner_process,_resolve_path
@@ -87,6 +88,80 @@ def _configure_logging(path:Path)->None:
  console=logging.StreamHandler();console.setFormatter(formatter)
  logging.basicConfig(level=logging.INFO,handlers=[handler,console],force=True)
 
+def _finalize_reports(
+    *, root: Path, db_path: Path, archive: Path, reports: Path,
+    daily_state_file: Path, paper_journal: Path, scan_ledger: Path,
+    scheduler_state_file: Path, service_log: Path, symbols: list[str], reason: str,
+) -> dict | None:
+    """Refresh all daily artifacts and print an actionable upload checklist."""
+    now = datetime.now(IST)
+    shadow_update: dict = {}
+    try:
+        shadow_update = process_archive(archive, db_path)
+        LOGGER.info("Challenger lab final update: %s", shadow_update)
+    except Exception as exc:
+        LOGGER.exception("Challenger lab final update failed; reporting will continue.")
+        shadow_update = {"error": f"{type(exc).__name__}: {exc}"}
+
+    report_result = None
+    try:
+        report_result = generate_daily_report(db_path, reports, now)
+        LOGGER.info("Daily report generated: %s", report_result["markdown_path"])
+    except Exception:
+        LOGGER.exception("Daily report generation failed; upload checklist will still be printed.")
+
+    try:
+        champion_account = PaperBroker(db_path).snapshot()["account"]
+        watch_state = WatchShadowPortfolio(
+            db_path,
+            initial_capital=float(champion_account["starting_capital"]),
+            risk_per_trade=float(champion_account.get("risk_per_trade", 500.0)),
+            max_daily_loss=float(champion_account.get("max_daily_loss", 2000.0)),
+            max_open_positions=int(champion_account.get("max_open_positions", 3)),
+        ).snapshot()
+    except Exception:
+        LOGGER.exception("Could not snapshot the watch-candidate shadow book.")
+        watch_state = {"error": "Watch-shadow snapshot unavailable", "research_only": True,
+                       "orders_sent_to_broker": False}
+
+    state_payload = {
+        "report_date": now.date().isoformat(),
+        "generated_at": now.isoformat(),
+        "finalization_reason": reason,
+        "orders_sent_to_broker": False,
+        "summary": report_result or {"error": "Daily report generation failed"},
+        "shadow_update": shadow_update,
+        "watch_shadow": watch_state,
+    }
+    try:
+        daily_state_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = daily_state_file.with_suffix(daily_state_file.suffix + ".tmp")
+        temporary.write_text(json.dumps(state_payload, indent=2, ensure_ascii=False, default=str),
+                             encoding="utf-8")
+        temporary.replace(daily_state_file)
+    except Exception:
+        LOGGER.exception("Could not persist the final daily report state.")
+
+    try:
+        checklist = write_upload_checklist(
+            root=root, reports_dir=reports, report_result=report_result,
+            daily_state_file=daily_state_file, scan_ledger=scan_ledger,
+            paper_journal=paper_journal, scheduler_state_file=scheduler_state_file,
+            service_log=service_log, candle_archive_dir=archive, db_path=db_path,
+            symbols=symbols, now=now, reason=reason,
+        )
+        print("\n" + checklist["text"], flush=True)
+        LOGGER.info(
+            "Upload checklist saved: %s; ready=%s/%s; missing required=%s",
+            checklist["checklist_path"], checklist["ready_files"], checklist["total_files"],
+            checklist["missing_required_files"],
+        )
+    except Exception:
+        LOGGER.exception("Could not write the upload checklist.")
+        print("\nTradingGPT final report attempted. Check the service log for report errors.", flush=True)
+    return report_result
+
+
 def main(argv=None)->int:
  p=argparse.ArgumentParser(description="Integrated read-only Kite paper broker, tick monitor and local dashboard.")
  p.add_argument("--symbols",default="RELIANCE,HDFCBANK,INFY")
@@ -112,7 +187,7 @@ def main(argv=None)->int:
  symbols=list(dict.fromkeys(s.strip().upper() for s in a.symbols.split(",") if s.strip()))
  broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
  watch_shadow=WatchShadowPortfolio(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
- stop=threading.Event();server=None;server_thread=None
+ stop=threading.Event();server=None;server_thread=None;reported_dates=set()
  try:
   server=make_server(broker,a.dashboard_host,a.dashboard_port,watch_shadow=watch_shadow)
   server_thread=threading.Thread(target=server.serve_forever,kwargs={"poll_interval":.5},daemon=True,name="paper-dashboard")
@@ -144,17 +219,13 @@ def main(argv=None)->int:
     if closed:LOGGER.info("Square-off closed %s champion virtual position(s)",closed)
     if shadow_closed:LOGGER.info("Square-off closed %s watch-shadow virtual position(s)",shadow_closed)
     if now.weekday()<5 and now.time().replace(tzinfo=None)>=dtime(15,20):
-     date_key=now.date().isoformat();existing=""
-     if daily_state.exists():
-      try:existing=str(json.loads(daily_state.read_text(encoding="utf-8")).get("report_date",""))
-      except (OSError,json.JSONDecodeError):existing=""
-     if existing!=date_key:
-      try:
-       shadow=process_archive(archive,db_path);summary=generate_daily_report(db_path,reports,now)
-       daily_state.parent.mkdir(parents=True,exist_ok=True);temp=daily_state.with_suffix(".tmp")
-       temp.write_text(json.dumps({"report_date":date_key,"generated_at":now.isoformat(),"summary":summary,"shadow_update":shadow,"watch_shadow":watch_shadow.snapshot()},indent=2,default=str),encoding="utf-8");temp.replace(daily_state)
-       LOGGER.info("Daily report generated: %s",summary["markdown_path"])
-      except Exception:LOGGER.exception("Daily paper report failed; will retry next scheduler cycle")
+     date_key=now.date().isoformat()
+     if date_key not in reported_dates:
+      _finalize_reports(root=root,db_path=db_path,archive=archive,reports=reports,
+       daily_state_file=daily_state,paper_journal=journal,scan_ledger=ledger,
+       scheduler_state_file=scan_state,service_log=log_path,symbols=symbols,
+       reason="market close daily summary")
+      reported_dates.add(date_key)
    except Exception:LOGGER.exception("Paper service cycle failed; continuing")
    time.sleep(a.poll_seconds)
  except KeyboardInterrupt:
@@ -164,5 +235,9 @@ def main(argv=None)->int:
   if server:server.shutdown();server.server_close()
   if server_thread:server_thread.join(timeout=3)
   tick_thread.join(timeout=3)
+  _finalize_reports(root=root,db_path=db_path,archive=archive,reports=reports,
+   daily_state_file=daily_state,paper_journal=journal,scan_ledger=ledger,
+   scheduler_state_file=scan_state,service_log=log_path,symbols=symbols,
+   reason="manual stop / graceful shutdown")
  return 0
 if __name__=="__main__":raise SystemExit(main())

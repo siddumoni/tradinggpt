@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import sqlite3
 from datetime import datetime, time as dtime
@@ -27,6 +28,7 @@ DEFAULT_SLIPPAGE_BPS = 5.0
 MAX_QUOTE_AGE_SECONDS = 120.0
 ENTRY_CUTOFF = dtime(14, 45)
 SQUARE_OFF_TIME = dtime(15, 15)
+LOGGER = logging.getLogger("paper_trading_service")
 
 
 def _to_ist(value: Any) -> datetime:
@@ -424,6 +426,15 @@ class WatchShadowPortfolio:
         """, (at.isoformat(), exit_reference, exit_fill, exit_reason, detail, gross, fees.brokerage, fees.stt,
               fees.exchange_charges, fees.sebi_charges, fees.gst, fees.stamp_duty, fees.ipft, fees.total,
               slip, total, net, now, row["signal_id"]))
+        planned_risk = abs(float(row["risk_budget_inr"] or 0))
+        if planned_risk and net < -planned_risk:
+            LOGGER.warning(
+                "WATCH_SHADOW_RISK_OVERRUN symbol=%s side=%s net_loss=₹%.2f planned_risk=₹%.2f "
+                "excess=₹%.2f exit_reason=%s exit_reference=%.4f exit_fill=%.4f; simulated stop/slippage "
+                "can exceed planned risk.",
+                row["symbol"], side, abs(net), planned_risk, abs(net) - planned_risk,
+                exit_reason, exit_reference, exit_fill,
+            )
 
     def snapshot(self) -> dict[str, Any]:
         with self._connect() as db:

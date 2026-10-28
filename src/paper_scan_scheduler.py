@@ -197,8 +197,13 @@ def run_scanner_process(
             if paper_broker is not None:
                 try:
                     result = paper_broker.process_scan_report(report_path)
-                    LOGGER.info("Virtual broker processed scan: opened=%s rejected=%s non-directional=%s",
-                                result.get("opened"), result.get("rejected"), result.get("neutral"))
+                    LOGGER.info(
+                        "Virtual broker processed scan: conditional entries opened=%s; candidate rejections=%s; "
+                        "WATCH_CANDIDATE=%s; NO_TRADE=%s; other actions=%s (candidates=%s). "
+                        "WATCH_CANDIDATE is a directional research signal, not a conditional entry.",
+                        result.get("opened"), result.get("rejected"), result.get("watch_candidates", 0),
+                        result.get("no_trade", 0), result.get("other_actions", 0), result.get("candidate_count"),
+                    )
                 except Exception:
                     LOGGER.exception("Virtual broker could not process the scan report; no real orders were sent.")
             if after_report is not None:

@@ -62,7 +62,7 @@ def write_upload_checklist(
 
     def display_path(path: Path) -> str:
         try:
-            return str(path.resolve().relative_to(root.resolve()))
+            return path.resolve().relative_to(root.resolve()).as_posix()
         except (ValueError, OSError):
             return str(path)
 

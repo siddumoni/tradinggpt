@@ -73,4 +73,4 @@ def test_daily_report_includes_watch_shadow_trade_and_risk_overrun(tmp_path):
         rows = list(csv.DictReader(handle))
     assert any(row["track"] == "WATCH_SHADOW" and row["symbol"] == "RELIANCE" for row in rows)
     markdown = (tmp_path / "reports" / f"paper_daily_{now.date().isoformat()}.md").read_text()
-    assert "exceeding planned risk" in markdown
+    assert "exceeded planned risk" in markdown

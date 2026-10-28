@@ -69,7 +69,7 @@ def write_upload_checklist(
     lines = [
         f"TradingGPT post-run upload checklist — {day}",
         f"Created: {current.isoformat()}",
-        f"Run ended because: {reason}",
+        f"Checklist trigger: {reason}",
         "",
         "Upload the READY files to ChatGPT for the next full analysis.",
         "Do not upload API credentials, access tokens, .env files, or browser/profile data.",

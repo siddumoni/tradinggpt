@@ -148,19 +148,34 @@ The integrated service now runs the scheduler, live read-only Kite tick monitor,
 
 ## Run the integrated paper-trading service
 
-The integrated service runs the candle scheduler, read-only Kite WebSocket monitor, champion virtual account, isolated challenger shadow portfolios, localhost dashboard and daily reports together.
+The integrated service runs the candle scheduler, read-only Kite WebSocket monitor, champion virtual account, isolated challenger shadow portfolios, the watch-candidate shadow book, localhost dashboard and daily reports together.
 
 Foreground command: python -m src.paper_trading_service --symbols RELIANCE,HDFCBANK,INFY
 
 Open http://127.0.0.1:8000. After pulling updates, rerun the Windows task installer once so Task Scheduler starts src.paper_trading_service instead of the old scan-only module. Keep the Windows user signed in and the PC awake. If the Kite session expires, authenticate again using python -m src.main login.
 
-Daily outputs are written to reports/paper_daily_YYYY-MM-DD.md, .json and _trades.csv. Challenger books never affect champion statistics and are never automatically promoted.
+Daily outputs are written to `reports/paper_daily_YYYY-MM-DD.md`, `.json` and `_trades.csv`. All three files distinguish the champion account, challenger strategy lab, and watch-candidate shadow book. The combined trade CSV includes the three tracks. Challenger and watch-shadow books never affect champion statistics and are never automatically promoted. The report also lists closed trades whose realised simulated loss exceeded their recorded per-trade risk budget.
 
 ### Watch-candidate shadow book
 
 The integrated service also maintains a separate cash-only shadow book for directional `WATCH_CANDIDATE` signals rejected specifically by the scanner's minimum **net** reward-to-risk gate. It does not lower or bypass that gate for the champion account. A shadow entry is recorded only when the saved report is Kite-only, the no-order assertion is explicit, live data and margin are verified, company-specific risk is not HIGH, news checks are complete, the quote is fresh, and best bid/ask are available. Other watch candidates are shown in the dashboard's decision audit with their exclusion reason.
 
 The shadow book uses the service's virtual capital/risk settings, a maximum-position limit, 5 bps adverse slippage per side, estimated transaction charges, stop-loss/target-2 exits, and a fresh-quote square-off at 15:15 IST. Its P&L and trade history remain completely separate from champion and challenger statistics. Outcomes are prospective observations—not evidence of a profitable edge and never real Kite orders. Existing saved reports are not replayed automatically; observations begin as new reports arrive after you update and restart the service.
+
+### End-of-session report and upload checklist
+
+At or after **15:20 IST** on a weekday, the service writes the daily report and prints an **UPLOAD CHECKLIST** in the console. When you stop the service with **Ctrl+C**, it refreshes the report and prints the checklist again, including when you stop it before market close. The checklist is also saved as `reports/paper_upload_checklist_YYYY-MM-DD.txt`. Allow the shutdown messages to finish before closing the terminal; do not use Task Manager/force-kill if you want the final report written.
+
+For the next review, upload the three daily report files plus the operational inputs listed as REQUIRED in the checklist:
+- `logs/paper_daily_report_state.json`
+- `logs/paper_scan_runs.csv`
+- `logs/paper_signals.csv`
+- `logs/paper_scan_scheduler_state.json`
+- `logs/paper_trading_service.log`
+- Each selected symbol's `data/paper_candles_kite/SYMBOL.csv` archive.
+
+The SQLite paper-account database is listed as optional but can help when investigating full persistent trade/event history. **Never upload Kite API keys, access tokens, `.env` files, or browser profiles.** A missing file is explicitly marked in the checklist, so you can tell whether the file was not created or is merely optional.
+
 
 
 ## Capture prospective paper observations

@@ -41,6 +41,20 @@ def test_daily_loss_limit_blocks_new_entries_after_loss(tmp_path):
  second=candidate("HDFCBANK","2026-10-26T10:05:00+05:30")
  r=b.process_scan_report(report_file(tmp_path,[second],{"HDFCBANK":quote()})); assert r["opened"]==0 and r["rejected"]==1
  assert any("Daily paper loss limit" in x["message"] for x in b.snapshot()["events"])
+ assert any(x["event_type"]=="RISK_OVERRUN" for x in b.snapshot()["events"])
 def test_non_directional_scan_stays_no_trade(tmp_path):
  b=PaperBroker(tmp_path/"paper.sqlite3"); c=candidate(action="NO_TRADE",side=None)
  r=b.process_scan_report(report_file(tmp_path,[c],{"INFY":quote()})); assert r["opened"]==0 and r["neutral"]==1 and b.snapshot()["account"]["open_positions"]==0
+
+
+def test_scan_action_counts_separate_watch_candidates_from_no_trade(tmp_path):
+ b=PaperBroker(tmp_path/"paper.sqlite3")
+ watch=candidate("RELIANCE",action="WATCH_CANDIDATE")
+ no_trade=candidate("HDFCBANK",action="NO_TRADE")
+ r=b.process_scan_report(report_file(tmp_path,[watch,no_trade]))
+ assert r["opened"]==0
+ assert r["watch_candidates"]==1
+ assert r["no_trade"]==1
+ assert r["conditional_candidates"]==0
+ assert r["other_actions"]==0
+ assert r["neutral"]==2

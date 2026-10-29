@@ -30,12 +30,12 @@ The process accepts only archives whose `provider_mode` is consistently `kite`. 
 - Levels: 1 ATR stop, 2 ATR Target 1, 2.5 ATR Target 2.
 - Starting capital for individual signal sizing: ₹20,000.
 - Planned risk budget per signal: ₹500, including estimated stop costs and modeled slippage.
-- Minimum after-cost Target 1 net R:R gate: 1.5, fixed.
+- Minimum after-cost Target 2 net R:R gate: 1.5, fixed. This matches the historical baseline backtest, whose single 2.5-ATR target is the scored target.
 - Per-side slippage sensitivity: 2, 5, and 8 basis points.
 - Entry at the next five-minute candle open; target 2 full exit; stop-first rule if stop and target share a candle; adverse stop-gap handling; regular-session square-off; no outcome scoring across missing bars.
 - Costs are estimates from the project's cost calculator. This does not guarantee exact broker fills or current fees.
 
-For each signal and slippage scenario, the result records the regular gate decision independently. When the only rejection is Target 1 net R:R below 1.5 and a valid positive quantity fits the existing risk/cash checks, a separate **research-only shadow outcome** is tracked. This does not approve the entry or alter any live/champion decision. Other gate rejections, invalid levels, gaps, missing data, and pending exits remain rejected or unscored.
+For each signal and slippage scenario, the result records the regular gate decision independently. When the only rejection is Target 2 net R:R below 1.5 and a valid positive quantity fits the existing risk/cash checks, a separate **research-only shadow outcome** is tracked. This does not approve the entry or alter any live/champion decision. Other gate rejections, invalid levels, gaps, missing data, and pending exits remain rejected or unscored.
 
 ## Output files
 

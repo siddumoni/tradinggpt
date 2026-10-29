@@ -224,6 +224,7 @@ def load_phase2_settings(
             capital_inr=float(account.get("capital_inr", 20_000)),
             risk_per_trade_inr=float(account.get("risk_per_trade_inr", 200)),
             minimum_net_risk_reward=float(account.get("minimum_net_risk_reward", 1.5)),
+            minimum_net_rr_target=str(risk.get("minimum_net_rr_target", "target_1")),
             require_margin_verification=bool(risk.get("require_margin_verification", True)),
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),

@@ -403,7 +403,7 @@ def evaluate_signal(
             status, note = "INCOMPLETE_SESSION_DATA", "No defensible exit was found in the available session bars."
     result["outcome_status"] = status
     result["outcome_note"] = note
-    if status != "COMPLETED_RESEARCH_ONLY" or exit_price is None or exit_ts is None:
+    if status not in {"COMPLETED_RESEARCH_ONLY", "COMPLETED_RESEARCH_ONLY_GATE_BYPASSED"} or exit_price is None or exit_ts is None:
         return result
 
     gross = (exit_price - entry_price) * quantity if side == "LONG" else (entry_price - exit_price) * quantity

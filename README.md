@@ -104,6 +104,16 @@ python -m src.portfolio_replay --trades reports/paper_outcomes_portfolio_candida
 
 The outcome report preserves pending/invalid/gap statuses and does not treat individual overlapping signals as portfolio results. Read [the paper outcome evaluator guide](docs/PAPER_OUTCOME_EVALUATOR.md) before interpreting the output.
 
+## Prospective strategy forward test
+
+To test the frozen candidates selected in the historical study using new Kite candles (without reconstructing old signals), run the separate prospective evaluator alongside the integrated paper-trading service in another terminal:
+
+```powershell
+python -m src.prospective_strategy_evaluator --candles-dir data/paper_candles_kite --candidates HDFCBANK:vwap_trend,INFY:vwap_pullback
+```
+
+The first launch seeds a per-symbol watermark at the current archive head and skips pre-start bars. Keep it running as new completed candles are appended. It uses the same baseline strategy callbacks, ₹20,000 individual-signal sizing, ₹500 risk budget, fixed 1.5 after-cost net R:R gate, and 2/5/8 bps per-side slippage scenarios. Only signals rejected specifically by the net R:R gate get a separate research-only shadow outcome; other risk/data failures stay fail-closed. Reports are written to `reports/prospective_strategy_evaluation`. Individual signals may overlap, so their summed P&L is not portfolio P&L. Read [the forward evaluator guide](docs/PROSPECTIVE_STRATEGY_EVALUATOR.md) before interpreting results. This process has no order-placement path and does not change the integrated paper broker.
+
 ## Use authenticated Kite market data
 
 The scanner now accepts `--provider kite` for read-only stock quotes and 5/15-minute candles from the authenticated Kite Connect API. Log in through the existing manual flow first:

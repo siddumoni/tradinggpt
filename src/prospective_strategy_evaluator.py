@@ -463,6 +463,7 @@ def refresh_outcomes(
                 capital_inr=FORWARD_CAPITAL_INR,
                 risk_per_trade_inr=FORWARD_RISK_PER_TRADE_INR,
                 minimum_net_risk_reward=MINIMUM_NET_RR,
+                minimum_net_rr_target="target_2",
                 require_margin_verification=False,
                 skip_if_margin_unavailable=False,
                 slippage_bps_per_side=float(slippage),

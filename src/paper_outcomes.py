@@ -328,7 +328,8 @@ def evaluate_signal(
     rejected_only_for_net_rr = (
         not assessment.accepted
         and assessment.quantity >= 1
-        and assessment.reason.startswith("Rejected: Target 1 net R:R is below")
+        and assessment.reason.startswith("Rejected: Target ")
+        and " net R:R is below " in assessment.reason
     )
     shadow_gate_bypass = bool(simulate_net_rr_rejections and rejected_only_for_net_rr)
     result["research_shadow_only"] = shadow_gate_bypass

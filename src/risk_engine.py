@@ -22,6 +22,7 @@ class RiskSettings:
     capital_inr: float = 20_000.0
     risk_per_trade_inr: float = 200.0
     minimum_net_risk_reward: float = 1.5
+    minimum_net_rr_target: Literal["target_1", "target_2"] = "target_1"
     require_margin_verification: bool = True
     skip_if_margin_unavailable: bool = True
     slippage_bps_per_side: float = 5.0
@@ -91,6 +92,8 @@ def assess_trade(
         raise ValueError("capital and risk_per_trade_inr must be positive")
     if settings.minimum_net_risk_reward <= 0:
         raise ValueError("minimum_net_risk_reward must be positive")
+    if settings.minimum_net_rr_target not in ("target_1", "target_2"):
+        raise ValueError("minimum_net_rr_target must be target_1 or target_2")
     if not 0 <= settings.slippage_bps_per_side <= 100:
         raise ValueError("slippage_bps_per_side must be between 0 and 100")
 
@@ -160,10 +163,12 @@ def assess_trade(
     rr_t1 = net_t1 / net_risk if net_risk > 0 else 0.0
     rr_t2 = net_t2 / net_risk if net_risk > 0 else 0.0
 
-    if rr_t1 < settings.minimum_net_risk_reward:
+    gate_rr = rr_t1 if settings.minimum_net_rr_target == "target_1" else rr_t2
+    gate_target_label = "Target 1" if settings.minimum_net_rr_target == "target_1" else "Target 2"
+    if gate_rr < settings.minimum_net_risk_reward:
         return TradeAssessment(
             accepted=False,
-            reason=f"Rejected: Target 1 net R:R is below {settings.minimum_net_risk_reward:.2f}.",
+            reason=f"Rejected: {gate_target_label} net R:R is below {settings.minimum_net_risk_reward:.2f}.",
             side=side, entry_price=entry_price, stop_loss=stop_loss,
             target_1=target_1, target_2=target_2, quantity=qty,
             estimated_margin_inr=margin, gross_risk_inr=gross_risk,

@@ -550,6 +550,7 @@ def run_once(
     state_path: Path,
     now: pd.Timestamp | None = None,
     max_late_seconds: float = 120.0,
+    slippage_values: tuple[float, ...] = DEFAULT_SLIPPAGE_BPS,
 ) -> dict[str, Any]:
     """Run one poll cycle; bootstrap skips all already-present archive bars."""
     recorded_at = now if now is not None else now_ist()
@@ -622,7 +623,7 @@ def run_once(
 
     summary = None
     if state.get("outcomes_dirty", False):
-        summary = refresh_outcomes(signal_path, candles_dir, outcome_path)
+        summary = refresh_outcomes(signal_path, candles_dir, outcome_path, slippage_values=slippage_values)
         state["outcomes_dirty"] = False
         state["last_outcome_refresh_at"] = recorded_at.isoformat()
         _write_state(state_path, state)

@@ -176,6 +176,9 @@ def _base_result(row: pd.Series, *, candle_path: Path | None) -> dict[str, Any]:
         "net_pnl": None,
         "exit_reason": "",
         "risk_filter_reason": "",
+        "entry_gate_accepted": None,
+        "entry_gate_rejection_reason": "",
+        "research_shadow_only": False,
         "source_live_data_verified": strict_csv_bool(row.get("data_verified_live")),
         "research_only": True,
     })
@@ -191,8 +194,14 @@ def evaluate_signal(
     charge_rates: ChargeRates,
     slippage_bps_per_side: float,
     entry_cutoff: dtime,
+    simulate_net_rr_rejections: bool = False,
 ) -> dict[str, Any]:
-    """Score one signal only when an unambiguous next-bar entry and exit are known."""
+    """Score one signal only when an unambiguous next-bar entry and exit are known.
+
+    The optional research flag permits a hypothetical shadow outcome only when the
+    configured minimum net R:R is the sole rejection reason and a valid quantity
+    was calculated. All other risk/data/session rejections remain fail-closed.
+    """
     result = _base_result(row, candle_path=candle_path)
     signal_id = str(row["signal_id"])
     symbol = str(row["symbol"]).strip().upper()
@@ -311,15 +320,29 @@ def evaluate_signal(
         fill_entry=entry_price,
         evaluated_quantity=assessment.quantity,
         risk_filter_reason=assessment.reason,
+        entry_gate_accepted=bool(assessment.accepted),
+        entry_gate_rejection_reason="" if assessment.accepted else assessment.reason,
         net_rr_t1=assessment.net_rr_t1,
         net_rr_t2=assessment.net_rr_t2,
     )
-    if not assessment.accepted or assessment.quantity < 1:
+    rejected_only_for_net_rr = (
+        not assessment.accepted
+        and assessment.quantity >= 1
+        and assessment.reason.startswith("Rejected: Target 1 net R:R is below")
+    )
+    shadow_gate_bypass = bool(simulate_net_rr_rejections and rejected_only_for_net_rr)
+    result["research_shadow_only"] = shadow_gate_bypass
+    if (not assessment.accepted and not shadow_gate_bypass) or assessment.quantity < 1:
         result.update(
             outcome_status="ENTRY_REJECTED_BY_RISK_FILTER",
             outcome_note="Next-bar price failed the configured cash-only risk/after-cost R:R checks; no hypothetical position opened.",
         )
         return result
+
+    completion_status = (
+        "COMPLETED_RESEARCH_ONLY_GATE_BYPASSED"
+        if shadow_gate_bypass else "COMPLETED_RESEARCH_ONLY"
+    )
 
     session_rows = candles.loc[candles.index.date == signal_ts.date()]
     last_seen: pd.Timestamp | None = None
@@ -346,7 +369,7 @@ def evaluate_signal(
             exit_price = min(stop, open_price) if side == "LONG" else max(stop, open_price)
             exit_reason = "STOP_LOSS"
             exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
-            status = "COMPLETED_RESEARCH_ONLY"
+            status = completion_status
             note = "Stop-first intrabar policy applied; exit timestamp is the bar-end boundary for conservative capital release."
             break
         if target_hit:
@@ -354,14 +377,14 @@ def evaluate_signal(
             exit_price = target_2
             exit_reason = "TARGET_2"
             exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
-            status = "COMPLETED_RESEARCH_ONLY"
+            status = completion_status
             note = "Full quantity exits at target 2; target 1 is only the entry viability gate."
             break
         if stamp.time().replace(tzinfo=None) == LAST_BAR_START:
             exit_price = float(bar["close"])
             exit_reason = "SESSION_SQUARE_OFF"
             exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
-            status = "COMPLETED_RESEARCH_ONLY"
+            status = completion_status
             note = "Position closed at the final regular-session candle close."
             break
         last_seen = stamp

@@ -22,12 +22,13 @@ class RiskSettings:
     capital_inr: float = 20_000.0
     risk_per_trade_inr: float = 200.0
     minimum_net_risk_reward: float = 1.5
-    minimum_net_rr_target: Literal["target_1", "target_2"] = "target_1"
     require_margin_verification: bool = True
     skip_if_margin_unavailable: bool = True
     slippage_bps_per_side: float = 5.0
     entry_cutoff_ist: str = "14:45"
     square_off_time_ist: str = "15:15"
+    # Appended to preserve the positional order of existing constructor arguments.
+    minimum_net_rr_target: Literal["target_1", "target_2"] = "target_1"
 
 
 @dataclass(frozen=True)

@@ -379,7 +379,7 @@ def evaluate_signal(
             exit_reason = "TARGET_2"
             exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
             status = completion_status
-            note = "Full quantity exits at target 2; target 1 is only the entry viability gate."
+            note = "Full quantity exits at target 2; entry acceptance used the configured target for the minimum net R:R gate."
             break
         if stamp.time().replace(tzinfo=None) == LAST_BAR_START:
             exit_price = float(bar["close"])

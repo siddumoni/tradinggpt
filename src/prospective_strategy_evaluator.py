@@ -400,7 +400,7 @@ def _outcome_metrics(outcomes: pd.DataFrame) -> list[dict[str, Any]]:
         gate = group["entry_gate_accepted"]
         gate_accepted = int(gate.map(lambda value: str(value).casefold() == "true").sum())
         rejection = group["entry_gate_rejection_reason"].fillna("").astype(str)
-        rr_rejected = int(rejection.str.contains("Target 1 net R:R is below", regex=False).sum())
+        rr_rejected = int(rejection.str.contains("net R:R is below", regex=False).sum())
         net_sum = float(pnl.sum()) if len(pnl) else 0.0
         expectancy = float(pnl.mean()) if len(pnl) else None
         n = int(len(pnl))
@@ -487,7 +487,7 @@ def refresh_outcomes(
                     "ACCEPTED_BY_CONFIGURED_GATE"
                     if str(outcome.get("entry_gate_accepted", "")).casefold() == "true"
                     else "REJECTED_NET_RR_SHADOW_ONLY"
-                    if "Target 1 net R:R is below" in str(outcome.get("entry_gate_rejection_reason", ""))
+                    if "Rejected: Target " in str(outcome.get("entry_gate_rejection_reason", "")) and " net R:R is below " in str(outcome.get("entry_gate_rejection_reason", ""))
                     else "REJECTED_OTHER_OR_NOT_YET_ASSESSED"
                 ),
                 "signal_level_outcome_not_portfolio": True,

@@ -33,6 +33,7 @@ from src.strategy_backtest import (
     filter_incomplete_sessions,
     make_signal_callback,
 )
+from src.strategies.market_regime import classify_market_regime
 from src.strategies.signal_planner import plan_atr_levels
 
 LOGGER = logging.getLogger(__name__)
@@ -52,12 +53,6 @@ JOURNAL_FIELDS = [
 AUDIT_FIELDS = [
     "recorded_at", "symbol", "strategy", "candle_time", "status", "reason", "signal_id",
 ]
-OUTCOME_SUFFIXES = (
-    "_outcomes.csv",
-    "_outcomes_summary.json",
-)
-
-
 def now_ist() -> pd.Timestamp:
     return pd.Timestamp(datetime.now(IST))
 
@@ -276,7 +271,7 @@ def _make_candidate(
         "target_1": levels.target_1,
         "target_2": levels.target_2,
         "confidence": signal.get("confidence", ""),
-        "market_regime": "CAUSAL_SYMBOL_PROXY",
+        "market_regime": classify_market_regime(indicators),
         "reason": signal.get("reason", ""),
         "provider": "Kite Connect candle archive",
         # Candle provenance is verified as Kite, but this is not a fresh-quote or fill claim.
@@ -499,6 +494,13 @@ def refresh_outcomes(
             rows.append(outcome)
 
     outcomes = pd.DataFrame(rows)
+    if outcomes.empty:
+        outcomes = pd.DataFrame(columns=[
+            "signal_id", "symbol", "strategy", "candidate", "slippage_bps_per_side",
+            "outcome_status", "net_pnl", "entry_gate_accepted",
+            "entry_gate_rejection_reason", "gate_decision",
+            "signal_level_outcome_not_portfolio", "research_only",
+        ])
     output_path.parent.mkdir(parents=True, exist_ok=True)
     outcomes.to_csv(output_path, index=False)
     summary = {
@@ -565,7 +567,7 @@ def run_once(
     state = _read_state(state_path)
     if not state.get("initialized", False):
         state = _bootstrap_state(state, candidates, candles_dir, state_path, recorded_at)
-        refresh_outcomes(signal_path, candles_dir, outcome_path)
+        refresh_outcomes(signal_path, candles_dir, outcome_path, slippage_values=slippage_values)
         return {"bootstrapped": True, "signals_added": 0, "candles_processed": 0}
 
     watermarks: dict[str, str | None] = state.setdefault("last_processed", {})
@@ -662,14 +664,6 @@ def main() -> None:
             raise ValueError("poll-seconds must be at least 1")
         if not math.isfinite(args.max_late_seconds) or args.max_late_seconds < 0:
             raise ValueError("max-late-seconds must be non-negative")
-        # Freeze scenarios once at process startup; report order is stable and repeatable.
-        original_refresh = refresh_outcomes
-
-        def refresh_with_config(journal_path, candles_dir, output_path, *, slippage_values=slippage_values):
-            return original_refresh(journal_path, candles_dir, output_path, slippage_values=slippage_values)
-
-        global refresh_outcomes
-        refresh_outcomes = refresh_with_config
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
         LOGGER.info(
             "Research-only forward evaluator starting; candidates=%s slippage_bps_per_side=%s",
@@ -683,6 +677,7 @@ def main() -> None:
                     output_dir=args.output_dir,
                     state_path=args.state,
                     max_late_seconds=args.max_late_seconds,
+                    slippage_values=slippage_values,
                 )
             except (ValueError, OSError, FileNotFoundError) as exc:
                 LOGGER.exception("Prospective evaluator cycle failed; no orders were sent: %s", exc)

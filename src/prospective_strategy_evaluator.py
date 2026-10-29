@@ -43,6 +43,8 @@ SESSION_START = dtime(9, 15)
 LAST_BAR_START = dtime(15, 10)
 DEFAULT_CANDIDATES = "HDFCBANK:vwap_trend,INFY:vwap_pullback"
 DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
+FORWARD_CAPITAL_INR = 20_000.0
+FORWARD_RISK_PER_TRADE_INR = 500.0
 MINIMUM_NET_RR = 1.5
 MINIMUM_COMPLETED_FOR_REVIEW = 30
 JOURNAL_FIELDS = [
@@ -458,8 +460,8 @@ def refresh_outcomes(
         candles, candle_path = candle_cache.get(symbol, (None, None))
         for slippage in slippage_values:
             settings = configured.__class__(
-                capital_inr=configured.capital_inr,
-                risk_per_trade_inr=configured.risk_per_trade_inr,
+                capital_inr=FORWARD_CAPITAL_INR,
+                risk_per_trade_inr=FORWARD_RISK_PER_TRADE_INR,
                 minimum_net_risk_reward=MINIMUM_NET_RR,
                 require_margin_verification=False,
                 skip_if_margin_unavailable=False,
@@ -514,14 +516,14 @@ def refresh_outcomes(
         "slippage_bps_per_side": list(slippage_values),
         "minimum_net_reward_risk_gate": MINIMUM_NET_RR,
         "minimum_completed_signals_for_review": MINIMUM_COMPLETED_FOR_REVIEW,
-        "starting_capital_for_individual_signal_sizing_inr": float(configured.capital_inr),
-        "risk_budget_per_signal_inr": float(configured.risk_per_trade_inr),
+        "starting_capital_for_individual_signal_sizing_inr": FORWARD_CAPITAL_INR,
+        "risk_budget_per_signal_inr": FORWARD_RISK_PER_TRADE_INR,
         "method": (
             "Frozen vwap_trend/vwap_pullback callbacks from src.strategy_backtest; only newly appended "
             "Kite candles; no pre-start signal backfill; completed signal close followed by next-bar-open "
             "entry; 1 ATR stop, 2 ATR target 1 and 2.5 ATR target 2; stop-first same-bar handling; "
             "conservative stop-gap fills; target 2 full exit; session square-off; no scoring through data gaps. "
-            "The configured 1.5 minimum net R:R gate is recorded independently. When and only when this gate "
+            "The frozen 1.5 minimum net R:R gate is recorded independently. When and only when this gate "
             "is the rejection reason, a separate research-only shadow outcome is simulated for diagnostics."
         ),
         "warning": (

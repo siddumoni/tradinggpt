@@ -41,6 +41,7 @@ IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
 SESSION_START = dtime(9, 15)
 LAST_BAR_START = dtime(15, 10)
+LAST_BAR_END = dtime(15, 15)
 DEFAULT_CANDIDATES = "HDFCBANK:vwap_trend,INFY:vwap_pullback"
 DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
 FORWARD_CAPITAL_INR = 20_000.0
@@ -519,6 +520,29 @@ def refresh_outcomes(
         "minimum_completed_signals_for_review": MINIMUM_COMPLETED_FOR_REVIEW,
         "starting_capital_for_individual_signal_sizing_inr": FORWARD_CAPITAL_INR,
         "risk_budget_per_signal_inr": FORWARD_RISK_PER_TRADE_INR,
+        "session_model": {
+            "session_open_ist": SESSION_START.strftime("%H:%M"),
+            "last_eligible_signal_candle_start_ist": LAST_BAR_START.strftime("%H:%M"),
+            "last_eligible_signal_candle_end_ist": LAST_BAR_END.strftime("%H:%M"),
+            "configured_square_off_time_ist": configured.square_off_time_ist,
+            "explanation": (
+                "The 15:10 candle is the final eligible five-minute signal candle; it completes "
+                "at 15:15. Later candle start times are intentionally outside this evaluator's "
+                "configured entry/square-off model. A 15:10 state watermark is therefore expected "
+                "when the final modeled candle was archived and processed."
+            ),
+        },
+        "data_provenance": {
+            "required_archive_provider_mode": "kite",
+            "provider_mode_purity_enforced": True,
+            "fresh_quote_verification_performed": False,
+            "data_verified_live": False,
+            "explanation": (
+                "provider_mode=kite verifies that the OHLCV archive is Kite-sourced and provider-pure. "
+                "This evaluator does not fetch or validate a fresh quote. data_verified_live is a "
+                "quote-freshness trust flag and must remain false for this candle-only evaluator."
+            ),
+        },
         "method": (
             "Frozen vwap_trend/vwap_pullback callbacks from src.strategy_backtest; only newly appended "
             "Kite candles; no pre-start signal backfill; completed signal close followed by next-bar-open "

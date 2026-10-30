@@ -239,3 +239,36 @@ def test_full_evaluation_writes_outcomes_and_portfolio_compatible_trades(tmp_pat
     assert summary["completed_research_only_outcomes"] == 1
     parsed = json.loads(output.with_name("outcomes_summary.json").read_text(encoding="utf-8"))
     assert parsed["warning"].startswith("Research-only")
+
+
+def test_research_shadow_scores_signal_rejected_only_by_net_rr_gate(tmp_path):
+    frame = make_session()
+    row = signal_row(target_1=100.1, target_2=104.0)
+    settings = RiskSettings(
+        capital_inr=20_000,
+        risk_per_trade_inr=200,
+        minimum_net_risk_reward=1.5,
+        require_margin_verification=False,
+        skip_if_margin_unavailable=False,
+        slippage_bps_per_side=5,
+        entry_cutoff_ist="14:45",
+        square_off_time_ist="15:15",
+    )
+
+    result = evaluate_signal(
+        row,
+        frame,
+        candle_path=tmp_path / "INFY.csv",
+        settings=settings,
+        charge_rates=ChargeRates(),
+        slippage_bps_per_side=5,
+        entry_cutoff=time(14, 45),
+        simulate_net_rr_rejections=True,
+    )
+
+    assert result["entry_gate_accepted"] is False
+    assert "Target 1 net R:R is below" in result["entry_gate_rejection_reason"]
+    assert result["research_shadow_only"] is True
+    assert result["outcome_status"] == "COMPLETED_RESEARCH_ONLY_GATE_BYPASSED"
+    assert result["net_pnl"] is not None
+    assert result["research_only"] is True

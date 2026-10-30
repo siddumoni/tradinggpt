@@ -23,6 +23,18 @@ Keep the process running during market hours alongside the existing service. Sto
 
 The process accepts only archives whose `provider_mode` is consistently `kite`. Current-session bars must be consecutive five-minute candles starting at 09:15. Incomplete current sessions are skipped without fabricating bars. Past incomplete sessions are excluded before indicators are calculated. A newly discovered candle more than 120 seconds after its candle-end boundary is audited and skipped rather than replayed as a new signal.
 
+## Session boundary and final candle
+
+The project's configured paper session ends at **15:15 IST**, not 15:30. The final modeled five-minute candle is timestamped **15:10** and completes at **15:15**. The archive and scheduler intentionally stop at this boundary; candle start times after 15:10 are outside this evaluator's signal window. Therefore, a per-symbol evaluator watermark of 15:10 is expected when that final modeled candle has been archived and processed. The summary JSON records this session model explicitly so the timestamp is not mistaken for a missed 15:15–15:30 candle.
+
+This is a project simulation boundary, not a statement that the NSE cash market itself closes at 15:15. Do not extend the evaluator to later candles without separately changing and validating the configured square-off and entry assumptions.
+
+## What the source-verification flag means
+
+`provider_mode=kite` is checked when the evaluator reads each archive, and mixed/non-Kite archives fail closed. This verifies the **candle archive's provider provenance**. It does not mean the evaluator has fetched a fresh quote for the same timestamp.
+
+The journal's `data_verified_live` field intentionally remains **false** because the prospective evaluator consumes archived OHLCV candles only and does not perform the scanner's fresh-quote timestamp/last-price check. Do not change it to true merely because `provider_mode` is `kite`. The outcome summary exposes both facts separately: Kite archive provenance is enforced, while fresh-quote verification is not performed by this process.
+
 ## Frozen experiment settings
 
 - Symbols and rules: HDFCBANK VWAP Trend; INFY VWAP Pullback.
@@ -57,3 +69,5 @@ Pending, invalid, late, or data-gap rows are not wins/losses. The summary uses 3
 - If no signal rows appear, check `prospective_strategy_audit.csv`. Many bars can correctly produce `NO_SIGNAL`; the strategy rules must not be loosened just to increase the count.
 - If the first run creates no signal rows, that is expected: it only seeds watermarks. Leave it running for newly completed candles.
 - Do not delete the signal journal or state file while the process is running.
+- A watermark at 15:10 is the expected final modeled candle start; see the session-boundary section before treating it as a missing-candle defect.
+- `data_verified_live=false` is intentional for this candle-only evaluator. It does not mean the Kite archive provider check failed.

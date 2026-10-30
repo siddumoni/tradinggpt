@@ -1,7 +1,7 @@
 """Prospective challenger-strategy shadow portfolios, isolated from the champion account."""
 from __future__ import annotations
 import hashlib, math, sqlite3
-from datetime import time as dtime
+from datetime import datetime, time as dtime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -80,13 +80,20 @@ def _insert_new_signals(db:sqlite3.Connection,symbol:str,frame:pd.DataFrame)->in
  return count
 def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->None:
  sig=pd.Timestamp(row["signal_time"])
- if sig not in frame.index:return
- entry_ts=sig+pd.Timedelta(minutes=5);idx=frame.index.get_indexer([entry_ts])[0]
- if idx<0:
-  if frame.index[-1]>sig:db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",("Exact next five-minute candle missing; no entry fabricated.",row["signal_id"]))
-  return
+ entry_ts=sig+pd.Timedelta(minutes=5)
+ # Decide eligibility before looking for the next candle. Signals whose next-bar
+ # entry is at/after the cutoff can never become valid, even when that candle
+ # is absent from the archive (the 15:10 signal was previously left pending).
  if entry_ts.date()!=sig.date() or entry_ts.time().replace(tzinfo=None)>=ENTRY_CUTOFF:
-  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Next-bar entry outside the same-session entry window.",row["signal_id"]));return
+  db.execute("UPDATE shadow_signals SET status='EXPIRED_NO_ENTRY',reason=? WHERE signal_id=?",
+   (f"Next-bar entry at {entry_ts.strftime('%H:%M')} IST is outside the same-session entry window (must be before {ENTRY_CUTOFF.strftime('%H:%M')}); no entry was simulated.",row["signal_id"]));return
+ if sig not in frame.index:return
+ idx=frame.index.get_indexer([entry_ts])[0]
+ if idx<0:
+  if not frame.empty and frame.index[-1]>sig:
+   db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+    ("Exact next five-minute candle missing; no entry fabricated.",row["signal_id"]))
+  return
  if db.execute("SELECT 1 FROM shadow_signals WHERE strategy_version=? AND symbol=? AND status='OPEN'",(row["strategy_version"],row["symbol"])).fetchone():
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Same-symbol shadow position already open for this strategy.",row["signal_id"]));return
  n=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE strategy_version=? AND status='OPEN'",(row["strategy_version"],)).fetchone()["n"]
@@ -102,6 +109,29 @@ def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->Non
  if not assess.accepted or assess.quantity<1:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Cash-only risk/after-cost R:R gate: "+assess.reason,row["signal_id"]));return
  db.execute("UPDATE shadow_signals SET status='OPEN',entry_time=?,entry_reference_price=?,entry_fill_price=?,quantity=?,reason=? WHERE signal_id=?",(entry_ts.isoformat(),entry_ref,entry_fill,int(assess.quantity),str(row["reason"])+" Entry uses next-bar open with adverse slippage.",row["signal_id"]))
+
+
+def _reconcile_pending_entries(
+ db:sqlite3.Connection,*,now:datetime|pd.Timestamp|None=None,finalize_session:bool=False
+)->dict[str,int]:
+ """Resolve impossible or end-of-session pending entries without inventing fills."""
+ current=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=IST)
+ current=current.tz_localize(IST) if current.tzinfo is None else current.tz_convert(IST)
+ expired=incomplete=0
+ pending=list(db.execute("SELECT signal_id,signal_time FROM shadow_signals WHERE status='PENDING_ENTRY'"))
+ for row in pending:
+  sig=pd.Timestamp(row["signal_time"])
+  entry_ts=sig+pd.Timedelta(minutes=5)
+  if entry_ts.date()!=sig.date() or entry_ts.time().replace(tzinfo=None)>=ENTRY_CUTOFF:
+   db.execute("UPDATE shadow_signals SET status='EXPIRED_NO_ENTRY',reason=? WHERE signal_id=?",
+    (f"Next-bar entry at {entry_ts.strftime('%H:%M')} IST is outside the same-session entry window (must be before {ENTRY_CUTOFF.strftime('%H:%M')}); no entry was simulated.",row["signal_id"]))
+   expired+=1
+  elif finalize_session and sig.date()<=current.date():
+   db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+    ("Session finalized before the expected eligible next-bar candle was present in the Kite archive; no entry was fabricated and this observation is unscored.",row["signal_id"]))
+   incomplete+=1
+ return {"expired_no_entry":expired,"incomplete_pending":incomplete}
+
 def _close_shadow(db:sqlite3.Connection,row:sqlite3.Row,exit_ref:float,reason:str,detail:str,exit_ts:pd.Timestamp)->None:
  side=row["side"];qty=int(row["quantity"]);entry_ref=float(row["entry_reference_price"]);entry_fill=float(row["entry_fill_price"])
  exit_fill=exit_ref*(1-SLIPPAGE_BPS/10000) if side=="LONG" else exit_ref*(1+SLIPPAGE_BPS/10000)
@@ -137,33 +167,43 @@ def _update_review_status(db:sqlite3.Connection,version:str)->None:
  if len(days)>=20 and sum(vals)>0 and pf>=1.2 and dd<=SHADOW_CAPITAL*.10:
   db.execute("UPDATE strategy_registry SET status='REVIEW_CANDIDATE',description=? WHERE strategy_version=?",
    ("Initial paper screen passed (50+ closed trades, 20+ exit dates, positive net P&L, PF >=1.2, drawdown <=10%). Requires untouched out-of-sample review; never auto-promoted.",version))
-def process_archive(archive_dir:Path,db_path:Path)->dict[str,int]:
- """Generate prospective challenger observations and outcomes from completed Kite candles."""
+def process_archive(
+ archive_dir:Path,db_path:Path,*,now:datetime|pd.Timestamp|None=None,finalize_session:bool=False
+)->dict[str,int]:
+ """Generate prospective challenger observations from completed Kite candles.
+
+ When finalize_session is true, any still-pending eligible entry is classified as
+ an incomplete-data observation. It is never filled from a later session or guessed.
+ """
  from src.paper_broker import PaperBroker
  PaperBroker(db_path);archive=Path(archive_dir)
- if not archive.is_dir():return {"symbols":0,"new_signals":0,"newly_closed":0,"open_or_pending":0}
  inserted=closed=0;symbols=0
  with sqlite3.connect(db_path,timeout=15) as db:
   db.row_factory=sqlite3.Row;ensure_shadow_schema(db)
-  for path in sorted(archive.glob("*.csv")):
-   try:candles=load_candles(path)
-   except (ValueError,OSError):continue
-   modes={str(v).strip().lower() for v in candles["provider_mode"].dropna().unique()} if "provider_mode" in candles.columns else set()
-   if modes and modes!={"kite"}:continue
-   if len(candles)<35:continue
-   symbols+=1;symbol=path.stem.upper();frame=add_scanner_indicators(candles)
-   inserted+=_insert_new_signals(db,symbol,frame)
-   before=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
-   pending=list(db.execute("SELECT * FROM shadow_signals WHERE symbol=? AND status IN ('PENDING_ENTRY','OPEN')",(symbol,)))
-   for row in pending:
-    if row["status"]=="PENDING_ENTRY":_entry_shadow(db,row,frame)
-    row=db.execute("SELECT * FROM shadow_signals WHERE signal_id=?",(row["signal_id"],)).fetchone()
-    if row and row["status"]=="OPEN":_monitor_shadow(db,row,frame)
-   after=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
-   closed+=int(after-before)
+  if archive.is_dir():
+   for path in sorted(archive.glob("*.csv")):
+    try:candles=load_candles(path)
+    except (ValueError,OSError):continue
+    modes={str(v).strip().lower() for v in candles["provider_mode"].dropna().unique()} if "provider_mode" in candles.columns else set()
+    if modes and modes!={"kite"}:continue
+    if len(candles)<35:continue
+    symbols+=1;symbol=path.stem.upper();frame=add_scanner_indicators(candles)
+    inserted+=_insert_new_signals(db,symbol,frame)
+    before=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
+    pending=list(db.execute("SELECT * FROM shadow_signals WHERE symbol=? AND status IN ('PENDING_ENTRY','OPEN')",(symbol,)))
+    for row in pending:
+     if row["status"]=="PENDING_ENTRY":_entry_shadow(db,row,frame)
+     row=db.execute("SELECT * FROM shadow_signals WHERE signal_id=?",(row["signal_id"],)).fetchone()
+     if row and row["status"]=="OPEN":_monitor_shadow(db,row,frame)
+    after=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
+    closed+=int(after-before)
+  pending_result=_reconcile_pending_entries(db,now=now,finalize_session=finalize_session)
   for version in DEFINITIONS:_update_review_status(db,version)
   opens=db.execute("SELECT COUNT(*) FROM shadow_signals WHERE status IN ('OPEN','PENDING_ENTRY')").fetchone()[0]
- return {"symbols":symbols,"new_signals":inserted,"newly_closed":closed,"open_or_pending":int(opens)}
+ return {
+  "symbols":symbols,"new_signals":inserted,"newly_closed":closed,
+  "open_or_pending":int(opens),**pending_result
+}
 if __name__=="__main__":
  import argparse,json
  p=argparse.ArgumentParser(description="Update prospective shadow-strategy outcomes from Kite candles.")

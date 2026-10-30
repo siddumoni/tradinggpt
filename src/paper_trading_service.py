@@ -97,7 +97,10 @@ def _finalize_reports(
     now = datetime.now(IST)
     shadow_update: dict = {}
     try:
-        shadow_update = process_archive(archive, db_path)
+        finalize_session = now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 20)
+        shadow_update = process_archive(
+            archive, db_path, now=now, finalize_session=finalize_session
+        )
         LOGGER.info("Challenger lab final update: %s", shadow_update)
     except Exception as exc:
         LOGGER.exception("Challenger lab final update failed; reporting will continue.")

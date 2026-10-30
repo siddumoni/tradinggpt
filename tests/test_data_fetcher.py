@@ -78,7 +78,10 @@ def test_resolve_watchlist_reports_missing_symbols(tmp_path: Path):
 
 def test_ltp_and_quote_batching():
     kite = FakeKite()
-    client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0, quote_batch_size=2))
+    client = KiteMarketData(kite, DataClientConfig(
+        retries=1, retry_delay_seconds=0, quote_batch_size=2,
+        quote_min_interval_seconds=0,
+    ))
     symbols = ["RELIANCE", "TCS", "INFY"]
     assert len(client.ltp(symbols)) == 3
     assert len(kite.ltp_calls) == 2
@@ -167,3 +170,112 @@ def test_kite_margin_estimator_fails_closed_for_missing_margin():
     client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0))
     with pytest.raises(DataFetchError, match="positive, usable MIS margin"):
         client.estimate_mis_margin_per_share("INFY", "LONG", 1500.0)
+
+
+def test_full_quote_batches_never_exceed_kite_limit():
+    class BatchKite(FakeKite):
+        def quote(self, *keys):
+            self.quote_calls.append(keys)
+            return {key: {"last_price": 100.0} for key in keys}
+
+    kite = BatchKite()
+    client = KiteMarketData(
+        kite,
+        DataClientConfig(
+            retries=1, retry_delay_seconds=0, quote_batch_size=1000,
+            quote_min_interval_seconds=0,
+        ),
+    )
+    symbols = [f"STOCK{i:04d}" for i in range(501)]
+    result = client.quotes(symbols)
+    assert len(result) == 501
+    assert [len(batch) for batch in kite.quote_calls] == [500, 1]
+
+
+def test_screen_liquid_nse_equities_ranks_fresh_quotes_and_explains_exclusions():
+    now = datetime(2026, 10, 30, 11, 0, tzinfo=IST)
+
+    class ScreenKite(FakeKite):
+        def quote(self, *keys):
+            self.quote_calls.append(keys)
+            prices = {
+                "NSE:RELIANCE": (2500.0, 100000, 2500.0),
+                "NSE:TCS": (4000.0, 100000, 4000.0),
+                "NSE:CHEAP": (20.0, 1000000, 20.0),
+                "NSE:LOWVOL": (100.0, 100, 100.0),
+                "NSE:STALE": (100.0, 100000, 100.0),
+            }
+            values = {}
+            for key in keys:
+                if key not in prices:
+                    continue
+                price, volume, average = prices[key]
+                timestamp = now - timedelta(minutes=30) if key == "NSE:STALE" else now - timedelta(minutes=1)
+                values[key] = {
+                    "last_price": price,
+                    "volume": volume,
+                    "average_price": average,
+                    "timestamp": timestamp,
+                }
+            return values
+
+    instruments = [
+        {"tradingsymbol": symbol, "instrument_token": i + 1, "exchange": "NSE",
+         "segment": "NSE", "instrument_type": "EQ"}
+        for i, symbol in enumerate(("RELIANCE", "TCS", "CHEAP", "LOWVOL", "STALE", "MISSING"))
+    ]
+    # These must not enter the NSE cash-equity quote universe.
+    instruments += [
+        {"tradingsymbol": "NIFTY 50", "instrument_token": 999, "exchange": "NSE",
+         "segment": "INDICES", "instrument_type": "EQ"},
+        {"tradingsymbol": "GOLDBEES", "instrument_token": 998, "exchange": "NSE",
+         "segment": "NSE", "instrument_type": "ETF"},
+    ]
+    client = KiteMarketData(
+        ScreenKite(),
+        DataClientConfig(retries=1, retry_delay_seconds=0, quote_min_interval_seconds=0),
+    )
+    selected, quotes, summary = client.screen_liquid_nse_equities(
+        instruments, now=now, max_symbols=1,
+        min_current_day_volume=1000,
+        min_current_day_turnover_inr=1000000,
+    )
+    assert [row["tradingsymbol"] for row in selected] == ["TCS"]
+    assert quotes["TCS"]["last_price"] == 4000.0
+    assert summary["instruments_total"] == 6
+    assert summary["eligible_before_top_n"] == 2
+    assert summary["selected_for_technical_analysis"] == 1
+    assert summary["selection_metric"] == "average_price × current-day volume"
+    assert summary["exclusions"]["PRICE_OUTSIDE_RANGE"] == 1
+    assert summary["exclusions"]["CURRENT_DAY_VOLUME_BELOW_MINIMUM"] == 1
+    assert summary["exclusions"]["QUOTE_STALE"] == 1
+    assert summary["exclusions"]["QUOTE_MISSING"] == 1
+
+
+def test_fetch_symbol_bundle_reuses_bulk_quote_and_can_skip_daily_history():
+    kite = FakeKite()
+    client = KiteMarketData(
+        kite,
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+    )
+    quote = {
+        "last_price": 123.0,
+        "timestamp": datetime(2026, 10, 19, 10, 0, tzinfo=IST),
+    }
+    instrument = {
+        "tradingsymbol": "RELIANCE",
+        "instrument_token": 1,
+        "exchange": "NSE",
+        "segment": "NSE",
+        "instrument_type": "EQ",
+    }
+    bundle = client.fetch_symbol_bundle(
+        instrument,
+        now=datetime(2026, 10, 19, 10, 0, tzinfo=IST),
+        quote_data=quote,
+        include_daily_candles=False,
+    )
+    assert bundle["quote"] is quote
+    assert kite.quote_calls == []
+    assert [call[3] for call in kite.historical_calls] == ["5minute", "15minute"]
+    assert bundle["candles_daily_60d"] == []

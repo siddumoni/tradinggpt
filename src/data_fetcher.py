@@ -252,9 +252,6 @@ class KiteMarketData:
         if min_current_day_volume < 0 or min_current_day_turnover_inr < 0 or max_quote_age_minutes <= 0:
             raise ValueError("Volume/turnover thresholds must be non-negative and quote age must be positive")
 
-        current = now or datetime.now(IST)
-        current = current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
-
         equities: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in instrument_rows:
@@ -273,6 +270,10 @@ class KiteMarketData:
 
         symbols = [str(row["tradingsymbol"]).strip().upper() for row in equities]
         quote_map = self.quotes(symbols)
+        # Measure quote age after all quote batches have arrived so request
+        # duration cannot make the first batch appear artificially fresher.
+        current = now or datetime.now(IST)
+        current = current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
         exclusions: dict[str, int] = {}
         ranked: list[tuple[float, float, str, dict[str, Any], dict[str, Any]]] = []
 

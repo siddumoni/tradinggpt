@@ -76,7 +76,7 @@ A scan with no eligible instruments fails closed with a clear error; it does not
 
 ## API pacing and operational load
 
-The adapter batches full quote requests at no more than 500 instruments per request, paces quote requests at one request per second, and paces historical candle requests at approximately three requests per second. A top-50 technical scan needs two intraday historical intervals per selected stock, plus index context. It can therefore take materially longer than a three-stock scan; leave sufficient time before the next five-minute candle and inspect timeout / fetch-error logs.
+The adapter batches full quote requests at no more than 500 instruments per request, paces quote requests at one request per second, historical candle requests at approximately three requests per second, and other read-only API calls (such as margin estimates) at approximately nine requests per second. The margin pacing is intentionally below the documented ten-request-per-second ceiling. A top-50 technical scan needs two intraday historical intervals per selected stock, plus index context. It can therefore take materially longer than a three-stock scan; leave sufficient time before the next five-minute candle and inspect timeout / fetch-error logs.
 
 Only one instance of a broad scan should be launched at a time using the same Kite session. Do not use the universe mode in the existing per-five-minute integrated scheduler until its runtime, quote freshness, historical-call volume, and paper-book behaviour have been independently validated.
 

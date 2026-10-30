@@ -197,7 +197,7 @@ def run_scan(
             if mode == "nse_equity":
                 selected_rows, universe_quotes, universe_selection = provider.screen_liquid_nse_equities(
                     instrument_rows,
-                    now=current,
+                    now=current if now is not None else None,
                     max_symbols=universe_max_symbols,
                     min_price_inr=universe_min_price_inr,
                     max_price_inr=universe_max_price_inr,

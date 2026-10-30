@@ -40,6 +40,7 @@ class DataClientConfig:
     quote_batch_size: int = 500
     quote_min_interval_seconds: float = 1.0
     historical_min_interval_seconds: float = 0.34
+    other_api_min_interval_seconds: float = 0.11
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -90,8 +91,11 @@ class KiteMarketData:
             raise ValueError("quote_min_interval_seconds must be non-negative")
         if self.config.historical_min_interval_seconds < 0:
             raise ValueError("historical_min_interval_seconds must be non-negative")
+        if self.config.other_api_min_interval_seconds < 0:
+            raise ValueError("other_api_min_interval_seconds must be non-negative")
         self._last_quote_request_at: float | None = None
         self._last_historical_request_at: float | None = None
+        self._last_other_request_at: float | None = None
 
     @classmethod
     def from_cached_session(cls, cache_path: Path = DEFAULT_TOKEN_CACHE, config: DataClientConfig | None = None) -> "KiteMarketData":
@@ -152,7 +156,17 @@ class KiteMarketData:
         result: dict[str, Any] = {}
         for offset in range(0, len(keys), self.config.quote_batch_size):
             batch = keys[offset:offset + self.config.quote_batch_size]
-            data = _retry(lambda b=batch: self.kite.ltp(*b), attempts=self.config.retries, delay=self.config.retry_delay_seconds, label="LTP request")
+
+            def request(batch_keys: list[str] = batch) -> Any:
+                self._wait_for_endpoint_slot("quote")
+                return self.kite.ltp(*batch_keys)
+
+            data = _retry(
+                request,
+                attempts=self.config.retries,
+                delay=self.config.retry_delay_seconds,
+                label="LTP request",
+            )
             if isinstance(data, dict):
                 result.update(data)
         return result
@@ -165,6 +179,9 @@ class KiteMarketData:
         elif endpoint == "historical":
             interval = self.config.historical_min_interval_seconds
             last = self._last_historical_request_at
+        elif endpoint == "other":
+            interval = self.config.other_api_min_interval_seconds
+            last = self._last_other_request_at
         else:
             raise ValueError(f"Unknown rate-limit endpoint: {endpoint}")
 
@@ -177,8 +194,10 @@ class KiteMarketData:
         stamp = time.monotonic()
         if endpoint == "quote":
             self._last_quote_request_at = stamp
-        else:
+        elif endpoint == "historical":
             self._last_historical_request_at = stamp
+        else:
+            self._last_other_request_at = stamp
 
     def quotes(self, symbols: Iterable[str]) -> dict[str, Any]:
         """Fetch full quotes in batches of at most 500, paced at one request/second."""
@@ -469,8 +488,12 @@ class KiteMarketData:
             "quantity": 1,
             "price": unit_price,
         }]
+        def request_margin() -> Any:
+            self._wait_for_endpoint_slot("other")
+            return self.kite.order_margins(params)
+
         result = _retry(
-            lambda: self.kite.order_margins(params),
+            request_margin,
             attempts=self.config.retries,
             delay=self.config.retry_delay_seconds,
             label="MIS margin estimate",

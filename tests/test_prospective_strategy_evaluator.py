@@ -178,3 +178,51 @@ def test_late_bar_is_audited_but_never_backfilled(tmp_path, monkeypatch):
     assert "LATE_CANDLE_SKIPPED" in set(audit["status"])
     journal = pd.read_csv(output_dir / "prospective_strategy_signals.csv")
     assert journal.empty
+
+def test_summary_documents_final_modeled_candle_and_kite_provenance(tmp_path):
+    journal_path = tmp_path / "prospective_strategy_signals.csv"
+    pd.DataFrame(columns=evaluator.JOURNAL_FIELDS).to_csv(journal_path, index=False)
+    outcome_path = tmp_path / "prospective_strategy_outcomes.csv"
+
+    evaluator.refresh_outcomes(journal_path, tmp_path / "candles", outcome_path)
+    summary = json.loads(
+        (tmp_path / "prospective_strategy_outcomes_summary.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["session_model"]["last_eligible_signal_candle_start_ist"] == "15:10"
+    assert summary["session_model"]["last_eligible_signal_candle_end_ist"] == "15:15"
+    assert summary["session_model"]["configured_square_off_time_ist"] == "15:15"
+    assert summary["data_provenance"]["required_archive_provider_mode"] == "kite"
+    assert summary["data_provenance"]["provider_mode_purity_enforced"] is True
+    assert summary["data_provenance"]["fresh_quote_verification_performed"] is False
+    assert summary["data_provenance"]["data_verified_live"] is False
+
+
+def test_final_modeled_signal_candle_is_1510_and_later_start_is_outside_session(monkeypatch):
+    frame = make_candles(71)  # 09:15 through 15:05
+    last_eligible_stamp = frame.index[-1] + pd.Timedelta(minutes=5)
+    after_session_stamp = last_eligible_stamp + pd.Timedelta(minutes=5)
+
+    def bar(stamp, close):
+        return pd.DataFrame(
+            {
+                "open": [close - 0.1], "high": [close + 0.5],
+                "low": [close - 0.5], "close": [close], "volume": [1000],
+                "provider_mode": ["kite"],
+            },
+            index=[stamp],
+        )
+
+    frame = pd.concat([frame, bar(last_eligible_stamp, 111.0), bar(after_session_stamp, 112.0)])
+    monkeypatch.setattr(evaluator, "_make_candidate", lambda *args, **kwargs: None)
+
+    _signals, audits, watermark = evaluator._process_new_bars_for_symbol(
+        "HDFCBANK", ("vwap_trend",), frame, frame.index[70].isoformat(),
+        now=pd.Timestamp("2026-10-30 15:15:30", tz=IST),
+        max_late_seconds=120, existing_ids=set(),
+    )
+
+    statuses = {row["candle_time"]: row["status"] for row in audits}
+    assert statuses[last_eligible_stamp.isoformat()] == "NO_SIGNAL"
+    assert statuses[after_session_stamp.isoformat()] == "OUTSIDE_SESSION"
+    assert pd.Timestamp(watermark) == after_session_stamp

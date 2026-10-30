@@ -176,6 +176,8 @@ The shadow book uses the service's virtual capital/risk settings, a maximum-posi
 
 At or after **15:20 IST** on a weekday, the service writes the daily report and prints an **UPLOAD CHECKLIST** in the console. When you stop the service with **Ctrl+C**, it refreshes the report and prints the checklist again, including when you stop it before market close. The checklist is also saved as `reports/paper_upload_checklist_YYYY-MM-DD.txt`. Allow the shutdown messages to finish before closing the terminal; do not use Task Manager/force-kill if you want the final report written.
 
+During end-of-session finalization, challenger shadow entries are reconciled: a signal whose next-bar entry is at/after the 14:45 IST entry cutoff becomes `EXPIRED_NO_ENTRY`; an otherwise eligible signal whose next-bar candle is missing becomes `INCOMPLETE_DATA_GAP`. Neither status is treated as a filled trade, and no price is fabricated. The project's final modeled candle is timestamped 15:10 and completes at the configured 15:15 square-off boundary.
+
 For the next review, upload the three daily report files plus the operational inputs listed as REQUIRED in the checklist:
 - `logs/paper_daily_report_state.json`
 - `logs/paper_scan_runs.csv`

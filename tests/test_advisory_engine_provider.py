@@ -188,6 +188,96 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
 
 
 
+
+def test_nse_equity_universe_uses_bulk_quote_screen_and_selected_instruments(monkeypatch, tmp_path):
+    now = datetime(2026, 10, 30, 11, 0, tzinfo=IST)
+    captured = {}
+
+    class FakeUniverseKite:
+        def instruments(self, now=None):
+            return [
+                {"tradingsymbol": "INFY", "instrument_token": 408065,
+                 "exchange": "NSE", "segment": "NSE", "instrument_type": "EQ"},
+                {"tradingsymbol": "NIFTY 50", "instrument_token": 256265,
+                 "exchange": "NSE", "segment": "INDICES", "instrument_type": "EQ"},
+            ]
+
+        def screen_liquid_nse_equities(self, instrument_rows, **kwargs):
+            captured["screen_rows"] = instrument_rows
+            captured["screen_kwargs"] = kwargs
+            quote = {
+                "last_price": 1500.0,
+                "timestamp": now,
+                "volume": 100000,
+                "average_price": 1499.0,
+                "depth": {"buy": [{"price": 1499.5}], "sell": [{"price": 1500.5}]},
+            }
+            return [instrument_rows[0]], {"INFY": quote}, {
+                "mode": "NSE_EQ_LIQUID_TOP",
+                "instruments_total": 1,
+                "selected_for_technical_analysis": 1,
+                "selected_symbols": ["INFY"],
+                "filters": {"min_current_day_volume": kwargs["min_current_day_volume"]},
+            }
+
+        def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
+            return []
+
+        def fetch_symbol_bundle(self, instrument, now=None, *, quote_data=None, include_daily_candles=True):
+            captured["bundle_args"] = {
+                "symbol": instrument["tradingsymbol"],
+                "quote_data": quote_data,
+                "include_daily_candles": include_daily_candles,
+            }
+            return {
+                "quote": quote_data,
+                "candles_5m": [],
+                "candles_15m": [],
+                "provider": "fake Kite",
+            }
+
+    fake = FakeUniverseKite()
+    monkeypatch.setattr(
+        "src.data_fetcher.KiteMarketData.from_cached_session",
+        lambda: fake,
+    )
+    monkeypatch.setattr(
+        advisory_engine, "fetch_news",
+        lambda *args, **kwargs: {"items": [], "errors": []},
+    )
+
+    report = advisory_engine.run_scan(
+        symbols=[],
+        now=now,
+        output_dir=tmp_path,
+        data_provider="kite",
+        universe_mode="nse_equity",
+        universe_max_symbols=25,
+        universe_min_current_day_volume=12345,
+    )
+
+    assert report["symbols_requested"] == ["INFY"]
+    assert report["symbols_evaluated"] == 1
+    assert report["universe_selection"]["mode"] == "NSE_EQ_LIQUID_TOP"
+    assert report["universe_selection"]["filters"]["min_current_day_volume"] == 12345
+    assert captured["screen_kwargs"]["max_symbols"] == 25
+    assert captured["bundle_args"]["symbol"] == "INFY"
+    assert captured["bundle_args"]["quote_data"]["last_price"] == 1500.0
+    assert captured["bundle_args"]["include_daily_candles"] is False
+    assert report["candidates"][0]["data_verified_live"] is True
+    assert report["advisory_only"] is True
+    assert report["orders_placed_or_modified"] is False
+
+
+def test_nse_equity_universe_requires_kite_provider():
+    with pytest.raises(ValueError, match="requires --provider kite"):
+        advisory_engine.run_scan(
+            symbols=[],
+            now=datetime(2026, 10, 30, 11, 0, tzinfo=IST),
+            data_provider="yahoo",
+            universe_mode="nse_equity",
+        )
+
 def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result):
     """Exercise the real scanner/risk path with deterministic data and a mocked read-only Kite adapter."""
     now = datetime(2026, 10, 26, 11, 0, tzinfo=IST)

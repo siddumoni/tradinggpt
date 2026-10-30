@@ -114,6 +114,32 @@ python -m src.prospective_strategy_evaluator --candles-dir data/paper_candles_ki
 
 The first launch seeds a per-symbol watermark at the current archive head and skips pre-start bars. Keep it running as new completed candles are appended. It uses the same baseline strategy callbacks, ₹20,000 individual-signal sizing, ₹500 risk budget, fixed 1.5 after-cost Target 2 net R:R gate (matching the historical single-target backtest), and 2/5/8 bps per-side slippage scenarios. Only signals rejected specifically by the net R:R gate get a separate research-only shadow outcome; other risk/data failures stay fail-closed. Reports are written to `reports/prospective_strategy_evaluation`. Individual signals may overlap, so their summed P&L is not portfolio P&L. Read [the forward evaluator guide](docs/PROSPECTIVE_STRATEGY_EVALUATOR.md) before interpreting results. This process has no order-placement path and does not change the integrated paper broker.
 
+## NSE equity universe scanner
+
+A separate, read-only market-wide scan mode can screen the available Kite NSE cash-equity instrument universe by fresh quotes and liquidity, then run the existing technical/risk/news pipeline on the highest-ranked symbols. It does **not** automatically add the whole exchange universe to the integrated paper account.
+
+After authenticating with Kite, run:
+
+```powershell
+python -m src.main login
+python -m src.main check
+python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 50 --output-dir reports --verbose
+```
+
+The scanner obtains the current NSE instrument dump (cached for the IST calendar day), requests full quotes in batches of at most 500, and selects fresh NSE EQ quotes using configurable price, current-day volume and turnover-proxy filters. Quote requests are paced at one request per second, historical candles at approximately three requests per second, and other read-only API calls (such as margin estimates) at no more than roughly nine per second. The default deep-analysis limit is 50 stocks. Current turnover ranking uses `average_price × current-day volume`; it is a screening proxy, **not** an exchange-reported turnover value or an average-daily-volume calculation. Symbols with missing/stale/invalid quotes or failed filters are excluded and counted in the JSON report.
+
+The selected symbols reuse their already-fetched quote snapshots. For each selected symbol, the scanner fetches current-session 5-minute and 15-minute candles and reuses the existing indicator, signal, risk, news and read-only margin checks. It skips the daily-history request in this fast intraday path. The report includes the universe filter settings, available instrument count, quote coverage, eligible count, exclusions and selected symbols.
+
+Optional thresholds:
+
+```powershell
+python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 75 --universe-min-price 50 --universe-max-price 10000 --universe-min-volume 10000 --universe-min-turnover 5000000 --universe-max-quote-age-minutes 15 --output-dir reports --verbose
+```
+
+This universe mode is deliberately separate from the existing three-symbol integrated paper service. It produces an advisory research report only; it does not place, modify or cancel orders, change Champion/Challenger/Watch-Shadow books, or relax the minimum after-cost R:R / risk gates. Review scan time, quote coverage, API errors and the report's exclusions before interpreting a result. A top-50 ranking is not a prediction of future returns or proof that the selected symbols are tradable.
+
+See [the NSE universe scanner guide](docs/NSE_UNIVERSE_SCANNER.md) for the filtering methodology, Kite API pacing and operational limitations.
+
 ## Use authenticated Kite market data
 
 The scanner now accepts `--provider kite` for read-only stock quotes and 5/15-minute candles from the authenticated Kite Connect API. Log in through the existing manual flow first:

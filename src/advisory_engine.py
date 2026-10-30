@@ -131,6 +131,13 @@ def run_scan(
     paper_capital_inr: float | None = None,
     paper_risk_per_trade_inr: float | None = None,
     paper_minimum_net_rr: float | None = None,
+    universe_mode: str = "watchlist",
+    universe_max_symbols: int = 50,
+    universe_min_price_inr: float = 50.0,
+    universe_max_price_inr: float = 10000.0,
+    universe_min_current_day_volume: int = 10000,
+    universe_min_current_day_turnover_inr: float = 5000000.0,
+    universe_max_quote_age_minutes: float = 15.0,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
@@ -140,15 +147,31 @@ def run_scan(
     provider_name = str(data_provider).strip().lower()
     if provider_name not in {"yahoo", "kite"}:
         raise ValueError("data_provider must be 'yahoo' or 'kite'")
-    selected = list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
-    if max_symbols is not None:
-        selected = selected[:max_symbols]
-    if not selected and watchlist_path:
-        selected = load_watchlist(watchlist_path)
+    mode = str(universe_mode).strip().lower()
+    if mode not in {"watchlist", "nse_equity"}:
+        raise ValueError("universe_mode must be 'watchlist' or 'nse_equity'")
+    if mode == "nse_equity" and provider_name != "kite":
+        raise ValueError("The nse_equity universe requires --provider kite and fresh Kite quotes")
+    if universe_max_symbols < 1:
+        raise ValueError("universe_max_symbols must be at least 1")
+
+    selected = (
+        []
+        if mode == "nse_equity"
+        else list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
+    )
+    if mode == "watchlist":
         if max_symbols is not None:
             selected = selected[:max_symbols]
-    if not selected:
-        raise ValueError("No symbols supplied and no usable watchlist was found")
+        if not selected and watchlist_path:
+            selected = load_watchlist(watchlist_path)
+            if max_symbols is not None:
+                selected = selected[:max_symbols]
+        if not selected:
+            raise ValueError("No symbols supplied and no usable watchlist was found")
+
+    universe_selection: dict[str, Any] = {"mode": mode}
+    universe_quotes: dict[str, dict[str, Any]] = {}
 
     instruments_by_symbol: dict[str, dict[str, Any]] = {}
     if provider_name == "yahoo":
@@ -166,9 +189,37 @@ def run_scan(
             instruments_by_symbol = {
                 str(row.get("tradingsymbol", "")).upper(): row
                 for row in instrument_rows
-                if row.get("segment") == "NSE" and row.get("instrument_type") == "EQ"
+                if str(row.get("exchange", "NSE")).upper() == "NSE"
+                and row.get("segment") == "NSE"
+                and row.get("instrument_type") == "EQ"
                 and row.get("tradingsymbol")
             }
+            if mode == "nse_equity":
+                selected_rows, universe_quotes, universe_selection = provider.screen_liquid_nse_equities(
+                    instrument_rows,
+                    now=current if now is not None else None,
+                    max_symbols=universe_max_symbols,
+                    min_price_inr=universe_min_price_inr,
+                    max_price_inr=universe_max_price_inr,
+                    min_current_day_volume=universe_min_current_day_volume,
+                    min_current_day_turnover_inr=universe_min_current_day_turnover_inr,
+                    max_quote_age_minutes=universe_max_quote_age_minutes,
+                )
+                selected = [
+                    str(row.get("tradingsymbol", "")).strip().upper()
+                    for row in selected_rows
+                ]
+                if not selected:
+                    raise RuntimeError(
+                        "The NSE equity universe screen found no stocks matching the configured "
+                        "fresh-quote, price, volume and turnover filters. Review universe_selection "
+                        "thresholds or verify the Kite quote feed; no technical scan was run."
+                    )
+            else:
+                universe_selection.update({
+                    "instrument_universe": "configured symbols/watchlist resolved against Kite NSE EQ instruments",
+                    "selected_symbols": selected,
+                })
             stock_provider_label = "Zerodha Kite Connect authenticated NSE equity API; quote freshness checked"
         except Exception as exc:
             raise RuntimeError(
@@ -214,10 +265,18 @@ def run_scan(
                 if instrument is None:
                     fetch_errors.append(f"{symbol}: not found as an NSE equity in the current Kite instrument list")
                     continue
-                bundle = provider.fetch_symbol_bundle(instrument, now=current)
-                # The candle window is anchored to scan start, but the quote is fetched
-                # later. For live scans, verify freshness against the observation time
-                # immediately after the quote request, not the earlier scan timestamp.
+                if mode == "nse_equity":
+                    bundle = provider.fetch_symbol_bundle(
+                        instrument,
+                        now=current,
+                        quote_data=universe_quotes.get(symbol),
+                        include_daily_candles=False,
+                    )
+                else:
+                    bundle = provider.fetch_symbol_bundle(instrument, now=current)
+                # In universe mode, the bulk quote is reused rather than issuing
+                # another per-symbol quote call. For live scans, verify freshness
+                # against the observation time immediately after the bulk quote request.
                 # An explicitly injected 'now' remains deterministic for tests/replays.
                 quote_check_time = datetime.now(IST) if now is None else current
                 verified, quote_warning = _kite_quote_verification(
@@ -369,6 +428,7 @@ def run_scan(
             "square_off_time_ist": risk_settings.square_off_time_ist,
             "require_margin_verification": risk_settings.require_margin_verification,
         },
+        "universe_selection": universe_selection,
         "symbols_requested": selected,
         "symbols_evaluated": len(candidates),
         "fetch_errors": fetch_errors,
@@ -397,7 +457,18 @@ def run_scan(
 def main() -> int:
     parser = argparse.ArgumentParser(description="NSE advisory-only market scanner (research data mode)")
     parser.add_argument("--symbols", help="Comma-separated NSE symbols, e.g. RELIANCE,HDFCBANK,INFY")
-    parser.add_argument("--max-symbols", type=int, default=10, help="Maximum symbols to scan (default: 10 to limit unofficial feed requests)")
+    parser.add_argument("--universe", choices=("watchlist", "nse_equity"), default="watchlist",
+                        help="watchlist scans configured symbols; nse_equity screens available Kite NSE cash equities by fresh quote/liquidity")
+    parser.add_argument("--universe-max-symbols", type=int, default=50,
+                        help="Maximum liquid NSE equities to deeply analyse in nse_equity mode (default: 50)")
+    parser.add_argument("--universe-min-price", type=float, default=50.0)
+    parser.add_argument("--universe-max-price", type=float, default=10000.0)
+    parser.add_argument("--universe-min-volume", type=int, default=10000,
+                        help="Minimum current-day traded volume from the Kite quote")
+    parser.add_argument("--universe-min-turnover", type=float, default=5000000.0,
+                        help="Minimum average_price × current-day volume proxy in INR")
+    parser.add_argument("--universe-max-quote-age-minutes", type=float, default=15.0)
+    parser.add_argument("--max-symbols", type=int, default=10, help="Maximum configured symbols in watchlist mode (default: 10)")
     parser.add_argument("--watchlist", type=Path, default=Path("config/watchlist.yaml"))
     parser.add_argument("--news-feeds", type=Path, default=Path("config/news_feeds.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
@@ -411,7 +482,15 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
-    symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()] if args.symbols else load_watchlist(args.watchlist)
+    if args.universe == "nse_equity" and args.provider != "kite":
+        parser.error("--universe nse_equity requires --provider kite")
+    if args.universe_max_symbols < 1:
+        parser.error("--universe-max-symbols must be at least 1")
+    symbols = (
+        []
+        if args.universe == "nse_equity"
+        else ([x.strip().upper() for x in args.symbols.split(",") if x.strip()] if args.symbols else load_watchlist(args.watchlist))
+    )
     candle_archive_dir = args.candle_archive_dir
     if args.paper_journal is not None and candle_archive_dir is None:
         candle_archive_dir = Path("data/paper_candles")
@@ -421,6 +500,13 @@ def main() -> int:
         data_provider=args.provider, candle_archive_dir=candle_archive_dir,
         paper_capital_inr=args.account_capital, paper_risk_per_trade_inr=args.risk_per_trade,
         paper_minimum_net_rr=args.minimum_net_rr,
+        universe_mode=args.universe,
+        universe_max_symbols=args.universe_max_symbols,
+        universe_min_price_inr=args.universe_min_price,
+        universe_max_price_inr=args.universe_max_price,
+        universe_min_current_day_volume=args.universe_min_volume,
+        universe_min_current_day_turnover_inr=args.universe_min_turnover,
+        universe_max_quote_age_minutes=args.universe_max_quote_age_minutes,
     )
     journal_result = None
     if args.paper_journal is not None and report.get("report_path"):

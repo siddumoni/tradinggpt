@@ -80,3 +80,25 @@ def test_archive_rejects_bad_symbol_and_unknown_provider(tmp_path):
         append_completed_candles("../INFY", sample_candles(), tmp_path, now=now, provider_mode="kite")
     with pytest.raises(ValueError, match="provider_mode"):
         append_completed_candles("INFY", sample_candles(), tmp_path, now=now, provider_mode="unknown")
+
+def test_archive_keeps_final_modeled_1510_candle_and_excludes_later_bars(tmp_path):
+    index = pd.date_range("2026-10-22 15:05:00", periods=3, freq="5min", tz=IST)
+    frame = pd.DataFrame({
+        "open": [100.0, 100.5, 101.0],
+        "high": [101.0, 101.5, 102.0],
+        "low": [99.0, 100.0, 100.5],
+        "close": [100.5, 101.0, 101.5],
+        "volume": [1000, 1100, 1200],
+    }, index=index)
+    frame.index.name = "timestamp"
+    result = append_completed_candles(
+        "INFY", frame.reset_index().rename(columns={"timestamp": "date"}).to_dict("records"),
+        tmp_path, now=datetime(2026, 10, 22, 15, 21, tzinfo=IST), provider_mode="kite",
+    )
+    saved = pd.read_csv(tmp_path / "INFY.csv")
+
+    assert result.rows_observed == 2
+    assert saved["date"].tolist() == [
+        "2026-10-22T15:05:00+0530",
+        "2026-10-22T15:10:00+0530",
+    ]

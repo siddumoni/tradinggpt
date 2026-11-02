@@ -4,7 +4,7 @@
 
 The NSE equity-universe mode is a read-only, intraday research scan. It screens the available instruments from the authenticated Kite NSE instrument dump, selects the most liquid names using a current-session quote snapshot, and then runs the existing TradingGPT technical and risk pipeline against those selected stocks.
 
-It is intentionally separate from the integrated paper account. A universe scan does not add new instruments to the Champion, Challenger, or Watch-Shadow books and does not place, modify, or cancel a real Kite order.
+The standalone scanner command writes a research report and does not change a paper book. The integrated paper service also invokes this same NSE universe screen after each completed five-minute candle (default top 50), then sends the resulting conditional candidates to the Champion virtual broker for quality ranking and shared-capital allocation. Its WebSocket monitors the latest selected top-N symbols plus all open Champion and Watch-Shadow positions; it does not subscribe to every NSE instrument. No real Kite orders are placed.
 
 ## Run
 
@@ -15,11 +15,19 @@ python -m src.main login
 python -m src.main check
 ```
 
-Run a default top-50 scan:
+Run a standalone top-50 advisory scan:
 
 ```powershell
 python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 50 --output-dir reports --verbose
 ```
+
+Run the integrated paper service (market-wide scanning is the default):
+
+```powershell
+python -m src.paper_trading_service
+```
+
+To use a fixed watchlist instead, run `python -m src.paper_trading_service --universe watchlist --symbols RELIANCE,HDFCBANK,INFY`.
 
 Example with explicit screening settings:
 

@@ -116,7 +116,7 @@ The first launch seeds a per-symbol watermark at the current archive head and sk
 
 ## NSE equity universe scanner
 
-A separate, read-only market-wide scan mode can screen the available Kite NSE cash-equity instrument universe by fresh quotes and liquidity, then run the existing technical/risk/news pipeline on the highest-ranked symbols. It does **not** automatically add the whole exchange universe to the integrated paper account.
+The read-only market-wide scanner screens Kite's NSE cash-equity instrument universe by fresh quotes and liquidity, then runs the technical/risk/news pipeline on the top-ranked symbols. The integrated paper service invokes this same scan after each completed five-minute candle (default top 50) and passes all conditional LONG/SHORT candidates to the ₹1 lakh Champion virtual account for quality ranking and shared-capital allocation. The paper WebSocket follows the latest selected top-N list plus open Champion/Watch-Shadow positions; it does not subscribe to every NSE instrument.
 
 After authenticating with Kite, run:
 
@@ -138,7 +138,7 @@ Optional thresholds:
 python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 75 --universe-min-price 50 --universe-max-price 10000 --universe-min-volume 10000 --universe-min-turnover 5000000 --universe-max-quote-age-minutes 15 --output-dir reports --verbose
 ```
 
-This universe mode is deliberately separate from the existing three-symbol integrated paper service. It produces an advisory research report only; it does not place, modify or cancel orders, change Champion/Challenger/Watch-Shadow books, or relax the minimum after-cost R:R / risk gates. Review scan time, quote coverage, API errors and the report's exclusions before interpreting a result. A top-50 ranking is not a prediction of future returns or proof that the selected symbols are tradable.
+The standalone scanner command produces an advisory research report only. The integrated paper service uses the same universe screen as its input, but the broker only simulates entries for conditional candidates that pass its independent cash, quote, position, daily-loss, portfolio-risk and after-cost R:R gates. No real orders are placed. Review scan duration, quote coverage, API errors and the report's exclusions; a top-50 liquidity ranking is not a prediction of future returns or proof that the selected symbols are tradable.
 
 See [the NSE universe scanner guide](docs/NSE_UNIVERSE_SCANNER.md) for the filtering methodology, Kite API pacing and operational limitations.
 
@@ -188,7 +188,9 @@ The integrated service now runs the scheduler, live read-only Kite tick monitor,
 
 The integrated service runs the candle scheduler, read-only Kite WebSocket monitor, champion virtual account, isolated challenger shadow portfolios, the watch-candidate shadow book, localhost dashboard and daily reports together.
 
-Foreground command: python -m src.paper_trading_service --symbols RELIANCE,HDFCBANK,INFY
+Foreground command: `python -m src.paper_trading_service`
+
+By default, the service screens the full available Kite NSE EQ universe and deeply analyses the top 50 liquid names on every five-minute candle. Use `--universe-max-symbols 75` to increase the technical-analysis limit after measuring scan time. The legacy fixed-symbol mode is available explicitly with `--universe watchlist --symbols RELIANCE,HDFCBANK,INFY`.
 
 Open http://127.0.0.1:8000. After pulling updates, rerun the Windows task installer once so Task Scheduler starts src.paper_trading_service instead of the old scan-only module. Keep the Windows user signed in and the PC awake. If the Kite session expires, authenticate again using python -m src.main login.
 

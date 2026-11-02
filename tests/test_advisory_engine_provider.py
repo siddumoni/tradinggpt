@@ -330,7 +330,7 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
     """Exercise the real scanner/risk path with deterministic data and a mocked read-only Kite adapter."""
     now = datetime(2026, 10, 26, 11, 0, tzinfo=IST)
     start = datetime(2026, 10, 26, 9, 15, tzinfo=IST)
-    calls = {"margin": [], "news": 0}
+    calls = {"margin": [], "news": 0, "quote_refresh": []}
 
     def make_candles(count, interval_minutes):
         rows = []
@@ -385,6 +385,14 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
                 "candles_15m": candles_15m,
                 "provider": "test Kite",
             }
+
+        def quotes(self, symbols):
+            calls["quote_refresh"].append(list(symbols))
+            return {"NSE:INFY": {
+                "last_price": 14.0,
+                "timestamp": now,
+                "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
+            }}
 
         def estimate_mis_margin_per_share(self, tradingsymbol, side, price):
             calls["margin"].append((tradingsymbol, side, price))
@@ -473,7 +481,9 @@ def test_directional_kite_candidate_passes_quote_margin_risk_and_news_gates(monk
         "entry_price_used": 14.01,
         "entry_price_source": "best_ask",
     }]
-    assert calls["margin"] == [("INFY", "LONG", candidate["entry_validation"]["executable_entry_price"])]
+    assert calls["margin"] == [("INFY", "LONG", candidate["entry_validation"]["executable_entry_price"])] * 2
+    assert calls["quote_refresh"] == [["INFY"]]
+    assert report["entry_quote_refresh"][0]["verified"] is True
     assert candidate["entry_validation"]["status"] == "REVALIDATED"
     assert candidate["entry_validation"]["entry_price_source"] == "best_ask"
     assert candidate["entry_validation"]["risk_breakdown"]["costs_at_stop"] is not None
@@ -502,7 +512,8 @@ def test_invalid_kite_margin_estimate_fails_closed_in_full_candidate_pipeline(
     report, calls = _run_directional_kite_scan(monkeypatch, tmp_path, margin_result=invalid_margin)
     candidate = report["candidates"][0]
 
-    assert len(calls["margin"]) == 1
+    assert len(calls["margin"]) == 2
+    assert calls["quote_refresh"] == [["INFY"]]
     assert report["margin_checks"][0]["verified"] is False
     assert "finite positive number" in report["margin_checks"][0]["reason"]
     assert candidate["data_verified_live"] is True

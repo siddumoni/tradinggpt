@@ -286,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     log_file = _resolve_path(repo_root, args.log_file)
     _configure_logging(log_file)
     LOGGER.info(
-        "Paper scan scheduler started; root=%s symbols=%s poll=%ss grace=%ss. "
+        "Paper scan scheduler started; root=%s universe=%s top_n=%s fallback_symbols=%s poll=%ss grace=%ss. "
         "Scans run on weekdays after completed 5-minute candle boundaries from 09:20 through 15:15 IST.",
         repo_root, args.universe, args.universe_max_symbols, args.symbols, args.poll_seconds, args.grace_seconds,
     )

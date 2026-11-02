@@ -326,7 +326,7 @@ def main(argv=None)->int:
      if date_key not in reported_dates:
       _finalize_reports(root=root,db_path=db_path,archive=archive,reports=reports,
        daily_state_file=daily_state,paper_journal=journal,scan_ledger=ledger,
-       scheduler_state_file=scan_state,service_log=log_path,symbols=symbols,
+       scheduler_state_file=scan_state,service_log=log_path,symbols=(broker.monitored_symbols() or symbols),
        reason="market close daily summary")
       reported_dates.add(date_key)
    except Exception:LOGGER.exception("Paper service cycle failed; continuing")

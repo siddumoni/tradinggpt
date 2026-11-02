@@ -278,3 +278,6 @@ Transaction-charge rates are configurable estimates. Verify the current broker/e
 4. Report net-of-cost metrics, sample size, drawdown, exclusions, and slippage sensitivity.
 5. Prefer robust performance across unseen time periods and symbols over the highest in-sample P&L.
 6. Do not promote a candidate to live trading on the basis of this tool's backtest alone.
+
+
+See [docs/PAPER_PORTFOLIO_ALLOCATION.md](docs/PAPER_PORTFOLIO_ALLOCATION.md) for shared-capital paper allocation and aggregate portfolio-risk controls.

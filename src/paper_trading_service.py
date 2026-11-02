@@ -179,16 +179,18 @@ def main(argv=None)->int:
  p.add_argument("--dashboard-host",choices=("127.0.0.1","localhost"),default="127.0.0.1");p.add_argument("--dashboard-port",type=int,default=8000)
  p.add_argument("--account-capital",type=float,default=100000);p.add_argument("--risk-per-trade",type=float,default=500)
  p.add_argument("--daily-loss-limit",type=float,default=2000);p.add_argument("--max-open-positions",type=int,default=3)
+ p.add_argument("--max-portfolio-risk",type=float,default=None,help="Maximum combined planned stop-out risk across open champion positions; defaults to risk-per-trade × max-open-positions.")
  a=p.parse_args(argv)
  if a.poll_seconds<=0 or a.grace_seconds<0 or a.max_lateness_seconds<a.grace_seconds or a.scan_timeout_seconds<=0:p.error("Invalid scheduler timing configuration")
  if a.account_capital<=0 or a.risk_per_trade<=0 or a.daily_loss_limit<=0 or a.max_open_positions<1:p.error("Capital and risk limits must be positive")
+ if a.max_portfolio_risk is not None and a.max_portfolio_risk<=0:p.error("--max-portfolio-risk must be positive")
  if not a.symbols.strip() or not all(s.strip() for s in a.symbols.split(",")):p.error("--symbols must contain comma-separated non-empty symbols")
  root=Path(__file__).resolve().parents[1]
  journal=_resolve_path(root,a.paper_journal);ledger=_resolve_path(root,a.scan_ledger);archive=_resolve_path(root,a.candle_archive_dir)
  scan_state=_resolve_path(root,a.scan_state_file);daily_state=_resolve_path(root,a.daily_state_file);db_path=_resolve_path(root,a.db_path)
  reports=_resolve_path(root,a.reports_dir);log_path=_resolve_path(root,a.log_file);_configure_logging(log_path)
  symbols=list(dict.fromkeys(s.strip().upper() for s in a.symbols.split(",") if s.strip()))
- broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
+ broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions,max_portfolio_risk_inr=a.max_portfolio_risk)
  watch_shadow=WatchShadowPortfolio(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
  stop=threading.Event();server=None;server_thread=None;reported_dates=set()
  try:
@@ -197,7 +199,7 @@ def main(argv=None)->int:
   server_thread.start();LOGGER.info("Local dashboard listening at http://%s:%s",a.dashboard_host,a.dashboard_port)
  except OSError:LOGGER.exception("Dashboard could not bind; scan service continues but dashboard is unavailable")
  tick_thread=threading.Thread(target=_ticker_thread,args=(broker,watch_shadow,symbols,stop),daemon=True,name="kite-tick-monitor");tick_thread.start()
- LOGGER.info("Paper service started: capital=%.2f risk=%.2f daily-loss=%.2f symbols=%s",a.account_capital,a.risk_per_trade,a.daily_loss_limit,",".join(symbols))
+ LOGGER.info("Paper service started: capital=%.2f risk/trade=%.2f portfolio-risk-cap=%.2f daily-loss=%.2f max-positions=%s symbols=%s",a.account_capital,a.risk_per_trade,broker.max_portfolio_risk_inr,a.daily_loss_limit,a.max_open_positions,",".join(symbols))
  LOGGER.info("Paper-only boundary enforced: no real order placement/modification/cancellation.")
  try:
   while True:

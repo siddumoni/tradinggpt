@@ -78,7 +78,7 @@ def _is_etf_like_instrument(row: dict[str, Any]) -> bool:
 def is_nse_cash_equity_instrument(row: dict[str, Any]) -> bool:
     """Return true for NSE EQ shares, excluding ETF-like instrument rows."""
     return (
-        str(row.get("exchange", "")).strip().upper() == "NSE"
+        str(row.get("exchange", "NSE")).strip().upper() == "NSE"
         and str(row.get("segment", "")).strip().upper() == "NSE"
         and str(row.get("instrument_type", "")).strip().upper() == "EQ"
         and bool(row.get("tradingsymbol"))

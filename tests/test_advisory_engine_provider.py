@@ -323,7 +323,7 @@ def test_nse_equity_universe_requires_kite_provider():
             universe_mode="nse_equity",
         )
 
-def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result):
+def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=13.99, quote_ask=14.01):
     """Exercise the real scanner/risk path with deterministic data and a mocked read-only Kite adapter."""
     now = datetime(2026, 10, 26, 11, 0, tzinfo=IST)
     start = datetime(2026, 10, 26, 9, 15, tzinfo=IST)
@@ -376,7 +376,7 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result):
                 "quote": {
                     "last_price": 14.0,
                     "timestamp": now,
-                    "depth": {"buy": [{"price": 13.99}], "sell": [{"price": 14.01}]},
+                    "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
                 },
                 "candles_5m": candles_5m,
                 "candles_15m": candles_15m,
@@ -479,19 +479,20 @@ def test_directional_kite_candidate_passes_quote_margin_risk_and_news_gates(monk
     assert report["orders_placed_or_modified"] is False
 
 
-@pytest.mark.parametrize("invalid_margin"
-
-
 def test_directional_candidate_is_demoted_when_live_ask_destroys_net_rr(monkeypatch, tmp_path):
-    report, _calls = _run_directional_kite_scan(monkeypatch, tmp_path, margin_result=15.0)
+    report, _calls = _run_directional_kite_scan(
+        monkeypatch, tmp_path, margin_result=15.0, quote_bid=14.99, quote_ask=15.00
+    )
     candidate = report["candidates"][0]
-    # The test quote in the fixture is deliberately ask=14.01. The original
-    # candle reference is 14.00, so the report must expose separate values.
-    assert candidate["entry_validation"]["executable_entry_price"] == pytest.approx(14.01)
-    assert candidate["entry_validation"]["price_drift_pct"] == pytest.approx(0.0714, abs=0.001)
+    assert candidate["entry_validation"]["executable_entry_price"] == pytest.approx(15.00)
+    assert candidate["entry_validation"]["price_drift_pct"] == pytest.approx(7.1429, abs=0.001)
+    assert candidate["entry_validation"]["status"] == "REJECTED_NET_RR"
+    assert candidate["action"] == "WATCH_CANDIDATE"
+    assert candidate["quantity"] == 0
     assert candidate["entry_validation"]["risk_breakdown"]["costs_at_t1"] is not None
 
-, [None, 0.0, -1.0, float("nan"), float("inf")])
+
+@pytest.mark.parametrize("invalid_margin", [None, 0.0, -1.0, float("nan"), float("inf")])
 def test_invalid_kite_margin_estimate_fails_closed_in_full_candidate_pipeline(
     monkeypatch, tmp_path, invalid_margin
 ):

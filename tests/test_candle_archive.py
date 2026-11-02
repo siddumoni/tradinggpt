@@ -81,6 +81,17 @@ def test_archive_rejects_bad_symbol_and_unknown_provider(tmp_path):
     with pytest.raises(ValueError, match="provider_mode"):
         append_completed_candles("INFY", sample_candles(), tmp_path, now=now, provider_mode="unknown")
 
+
+@pytest.mark.parametrize("symbol", ["M&M", "GVT&D"])
+def test_archive_accepts_nse_tickers_containing_ampersands(symbol, tmp_path):
+    now = datetime(2026, 10, 22, 9, 42, tzinfo=IST)
+    result = append_completed_candles(
+        symbol, sample_candles(), tmp_path, now=now, provider_mode="kite",
+    )
+
+    assert result.symbol == symbol
+    assert (tmp_path / f"{symbol}.csv").is_file()
+
 def test_archive_keeps_final_modeled_1510_candle_and_excludes_later_bars(tmp_path):
     index = pd.date_range("2026-10-22 15:05:00", periods=3, freq="5min", tz=IST)
     frame = pd.DataFrame({

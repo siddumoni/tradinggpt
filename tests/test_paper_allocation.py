@@ -115,7 +115,10 @@ def test_shared_portfolio_risk_cap_reduces_later_position_risk(tmp_path):
     )
     assert len(state["open_positions"]) == 2
     risks = [position["planned_net_risk_inr"] for position in state["open_positions"]]
+    budgets = [position["risk_budget_inr"] for position in state["open_positions"]]
     assert all(0 < value <= 500 for value in risks)
+    assert all(0 < risk <= budget <= 500 for risk, budget in zip(risks, budgets))
+    assert budgets[1] < budgets[0]  # Later entries only receive the remaining portfolio-risk budget.
     assert sum(risks) <= 650
 
 

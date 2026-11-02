@@ -258,7 +258,7 @@ class PaperBroker:
               position_value_inr,planned_net_risk_inr,market_regime,entry_reason,created_at)
               VALUES(?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (signal_id,strategy,"champion_v1",symbol,side,signal_time,now.isoformat(),reference_entry,
-               entry_reference,entry_fill,stop,t1,t2,int(assessment.quantity),self.risk_per_trade,
+               entry_reference,entry_fill,stop,t1,t2,int(assessment.quantity),allocated_risk_budget,
                float(assessment.quantity)*entry_fill,assessment.net_risk_inr,
                str(candidate.get("market_regime") or "UNKNOWN"),entry_reason,now.isoformat()))
         except sqlite3.IntegrityError as exc: raise _RejectedSignal("Duplicate signal already processed.") from exc
@@ -266,8 +266,9 @@ class PaperBroker:
             symbol=symbol,details={"signal_id":signal_id,"strategy":strategy,"strategy_version":"champion_v1",
             "quantity":int(assessment.quantity),"entry_reference_price":entry_reference,"entry_fill_price":entry_fill,
             "signal_reference_entry":reference_entry,"stop_loss":stop,"target_1":t1,"target_2":t2,
-            "entry_reason":entry_reason,"risk_budget_inr":self.risk_per_trade,
-            "allocated_risk_budget_inr":allocated_risk_budget,"planned_net_risk_inr":assessment.net_risk_inr,
+            "entry_reason":entry_reason,"risk_budget_inr":allocated_risk_budget,
+            "per_trade_risk_limit_inr":self.risk_per_trade,"allocated_risk_budget_inr":allocated_risk_budget,
+            "planned_net_risk_inr":assessment.net_risk_inr,
             "open_portfolio_risk_after_entry_inr":existing_open_risk+assessment.net_risk_inr,
             "max_portfolio_risk_inr":self.max_portfolio_risk_inr,
             "allocation_rank":(allocation or {}).get("allocation_rank"),

@@ -133,7 +133,10 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
     class ControlledDatetime(RealDatetime):
         @classmethod
         def now(cls, tz=None):
-            value = times.pop(0)
+            # Live-entry revalidation checks freshness again after company-news
+            # triage, so keep returning a stable observation time after the
+            # initial quote-observation timestamp has been consumed.
+            value = times.pop(0) if times else quote_check
             return cls.fromtimestamp(value.timestamp(), tz) if tz else cls.fromtimestamp(value.timestamp())
 
     monkeypatch.setattr(advisory_engine, "datetime", ControlledDatetime)
@@ -188,11 +191,146 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
 
 
 
-def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result):
+
+def test_nse_equity_universe_uses_bulk_quote_screen_and_selected_instruments(monkeypatch, tmp_path):
+    now = datetime(2026, 10, 30, 11, 0, tzinfo=IST)
+    captured = {}
+
+    class FakeUniverseKite:
+        def instruments(self, now=None):
+            return [
+                {"tradingsymbol": "INFY", "instrument_token": 408065,
+                 "exchange": "NSE", "segment": "NSE", "instrument_type": "EQ"},
+                {"tradingsymbol": "NIFTY 50", "instrument_token": 256265,
+                 "exchange": "NSE", "segment": "INDICES", "instrument_type": "EQ"},
+            ]
+
+        def screen_liquid_nse_equities(self, instrument_rows, **kwargs):
+            captured["screen_rows"] = instrument_rows
+            captured["screen_kwargs"] = kwargs
+            quote = {
+                "last_price": 1500.0,
+                "timestamp": now,
+                "volume": 100000,
+                "average_price": 1499.0,
+                "depth": {"buy": [{"price": 1499.5}], "sell": [{"price": 1500.5}]},
+            }
+            return [instrument_rows[0]], {"INFY": quote}, {
+                "mode": "NSE_EQ_LIQUID_TOP",
+                "instruments_total": 1,
+                "selected_for_technical_analysis": 1,
+                "selected_symbols": ["INFY"],
+                "filters": {"min_current_day_volume": kwargs["min_current_day_volume"]},
+            }
+
+        def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
+            return []
+
+        def fetch_symbol_bundle(self, instrument, now=None, *, quote_data=None, include_daily_candles=True):
+            captured["bundle_args"] = {
+                "symbol": instrument["tradingsymbol"],
+                "quote_data": quote_data,
+                "include_daily_candles": include_daily_candles,
+            }
+            return {
+                "quote": quote_data,
+                "candles_5m": [],
+                "candles_15m": [],
+                "provider": "fake Kite",
+            }
+
+    fake = FakeUniverseKite()
+    monkeypatch.setattr(
+        "src.data_fetcher.KiteMarketData.from_cached_session",
+        lambda: fake,
+    )
+    monkeypatch.setattr(
+        advisory_engine, "fetch_news",
+        lambda *args, **kwargs: {"items": [], "errors": []},
+    )
+
+    report = advisory_engine.run_scan(
+        symbols=[],
+        now=now,
+        output_dir=tmp_path,
+        data_provider="kite",
+        universe_mode="nse_equity",
+        universe_max_symbols=25,
+        universe_min_current_day_volume=12345,
+    )
+
+    assert report["symbols_requested"] == ["INFY"]
+    assert report["symbols_evaluated"] == 1
+    assert report["universe_selection"]["mode"] == "NSE_EQ_LIQUID_TOP"
+    assert report["universe_selection"]["filters"]["min_current_day_volume"] == 12345
+    assert captured["screen_kwargs"]["max_symbols"] == 25
+    assert captured["bundle_args"]["symbol"] == "INFY"
+    assert captured["bundle_args"]["quote_data"]["last_price"] == 1500.0
+    assert captured["bundle_args"]["include_daily_candles"] is False
+    assert report["candidates"][0]["data_verified_live"] is True
+    assert report["advisory_only"] is True
+    assert report["orders_placed_or_modified"] is False
+
+
+
+def test_empty_nse_equity_universe_writes_diagnostic_report(monkeypatch, tmp_path):
+    now = datetime(2026, 10, 30, 11, 0, tzinfo=IST)
+
+    class EmptyUniverseKite:
+        def instruments(self, now=None):
+            return [{
+                "tradingsymbol": "NIFTY 50", "instrument_token": 256265,
+                "exchange": "NSE", "segment": "INDICES", "instrument_type": "EQ",
+            }]
+
+        def screen_liquid_nse_equities(self, instrument_rows, **kwargs):
+            return [], {}, {
+                "mode": "NSE_EQ_LIQUID_TOP",
+                "instruments_total": 0,
+                "quotes_requested": 0,
+                "quotes_received": 0,
+                "eligible_before_top_n": 0,
+                "selected_for_technical_analysis": 0,
+                "selected_symbols": [],
+                "exclusions": {"QUOTE_STALE": 10},
+            }
+
+        def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
+            return []
+
+    monkeypatch.setattr(
+        "src.data_fetcher.KiteMarketData.from_cached_session",
+        lambda: EmptyUniverseKite(),
+    )
+    monkeypatch.setattr(
+        advisory_engine, "fetch_news",
+        lambda *args, **kwargs: {"items": [], "errors": []},
+    )
+    report = advisory_engine.run_scan(
+        symbols=[], now=now, output_dir=tmp_path,
+        data_provider="kite", universe_mode="nse_equity",
+    )
+
+    assert report["candidates"] == []
+    assert report["universe_selection"]["exclusions"]["QUOTE_STALE"] == 10
+    assert report["symbols_evaluated"] == 0
+    assert (tmp_path / "phase6_scan_20261030_110000.json").exists()
+
+
+def test_nse_equity_universe_requires_kite_provider():
+    with pytest.raises(ValueError, match="requires --provider kite"):
+        advisory_engine.run_scan(
+            symbols=[],
+            now=datetime(2026, 10, 30, 11, 0, tzinfo=IST),
+            data_provider="yahoo",
+            universe_mode="nse_equity",
+        )
+
+def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=13.99, quote_ask=14.01):
     """Exercise the real scanner/risk path with deterministic data and a mocked read-only Kite adapter."""
     now = datetime(2026, 10, 26, 11, 0, tzinfo=IST)
     start = datetime(2026, 10, 26, 9, 15, tzinfo=IST)
-    calls = {"margin": [], "news": 0}
+    calls = {"margin": [], "news": 0, "quote_refresh": []}
 
     def make_candles(count, interval_minutes):
         rows = []
@@ -238,11 +376,23 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result):
         def fetch_symbol_bundle(self, instrument, now=None):
             assert instrument["tradingsymbol"] == "INFY"
             return {
-                "quote": {"last_price": 14.0, "timestamp": now},
+                "quote": {
+                    "last_price": 14.0,
+                    "timestamp": now,
+                    "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
+                },
                 "candles_5m": candles_5m,
                 "candles_15m": candles_15m,
                 "provider": "test Kite",
             }
+
+        def quotes(self, symbols):
+            calls["quote_refresh"].append(list(symbols))
+            return {"NSE:INFY": {
+                "last_price": 14.0,
+                "timestamp": now,
+                "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
+            }}
 
         def estimate_mis_margin_per_share(self, tradingsymbol, side, price):
             calls["margin"].append((tradingsymbol, side, price))
@@ -328,11 +478,31 @@ def test_directional_kite_candidate_passes_quote_margin_risk_and_news_gates(monk
         "side": "LONG",
         "verified": True,
         "margin_per_share_inr": 15.0,
+        "entry_price_used": 14.01,
+        "entry_price_source": "best_ask",
     }]
-    assert calls["margin"] == [("INFY", "LONG", candidate["reference_entry"])]
+    assert calls["margin"] == [("INFY", "LONG", candidate["entry_validation"]["executable_entry_price"])] * 2
+    assert calls["quote_refresh"] == [["INFY"]]
+    assert report["entry_quote_refresh"][0]["verified"] is True
+    assert candidate["entry_validation"]["status"] == "REVALIDATED"
+    assert candidate["entry_validation"]["entry_price_source"] == "best_ask"
+    assert candidate["entry_validation"]["risk_breakdown"]["costs_at_stop"] is not None
     assert report["news"]["company_news_checked"] == ["INFY"]
     assert report["advisory_only"] is True
     assert report["orders_placed_or_modified"] is False
+
+
+def test_directional_candidate_is_demoted_when_live_ask_destroys_net_rr(monkeypatch, tmp_path):
+    report, _calls = _run_directional_kite_scan(
+        monkeypatch, tmp_path, margin_result=15.0, quote_bid=14.99, quote_ask=15.00
+    )
+    candidate = report["candidates"][0]
+    assert candidate["entry_validation"]["executable_entry_price"] == pytest.approx(15.00)
+    assert candidate["entry_validation"]["price_drift_pct"] == pytest.approx(7.1429, abs=0.001)
+    assert candidate["entry_validation"]["status"] == "REJECTED_NET_RR"
+    assert candidate["action"] == "WATCH_CANDIDATE"
+    assert candidate["quantity"] == 0
+    assert candidate["entry_validation"]["risk_breakdown"]["costs_at_t1"] is not None
 
 
 @pytest.mark.parametrize("invalid_margin", [None, 0.0, -1.0, float("nan"), float("inf")])
@@ -342,7 +512,8 @@ def test_invalid_kite_margin_estimate_fails_closed_in_full_candidate_pipeline(
     report, calls = _run_directional_kite_scan(monkeypatch, tmp_path, margin_result=invalid_margin)
     candidate = report["candidates"][0]
 
-    assert len(calls["margin"]) == 1
+    assert len(calls["margin"]) == 2
+    assert calls["quote_refresh"] == [["INFY"]]
     assert report["margin_checks"][0]["verified"] is False
     assert "finite positive number" in report["margin_checks"][0]["reason"]
     assert candidate["data_verified_live"] is True

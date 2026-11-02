@@ -14,11 +14,15 @@ python -m src.paper_dashboard --db-path data/paper_trading.sqlite3 --host 127.0.
 
 Open `http://127.0.0.1:8000`. The API binds to a loopback interface and does not accept remote binding. Refresh happens every three seconds.
 
-The dashboard shows virtual equity, realised/unrealised P&L, open exposure, virtual cash, positions, closed trades, fees, slippage, exits, strategy grouping and recent decision events. The research registry is seeded with the frozen champion and named challenger candidates; it does not automatically promote or rewrite any strategy.
+The dashboard shows virtual equity, realised/unrealised P&L, open exposure, virtual cash, positions, closed trades, fees, slippage, exits, strategy grouping, latest screened NSE universe and recent allocation events. The research registry is seeded with the frozen champion and named challenger candidates; it does not automatically promote or rewrite any strategy.
 
 ## Integrated automation
 
-The Windows scheduled task runs the integrated service rather than the scan-only loop. It starts the localhost dashboard, subscribes to read-only Kite WebSocket ticks to monitor virtual exits, runs the frozen champion scanner after completed five-minute candles, updates independent challenger shadow portfolios, and creates Markdown/JSON/CSV daily reports.
+The Windows scheduled task runs the integrated service rather than the scan-only loop. By default, it screens Kite's NSE cash-equity universe after every completed five-minute candle, applies the quote/liquidity filters, deeply analyses the top 50 eligible shares, and sends all conditional LONG/SHORT candidates to the Champion paper broker for quality ranking and shared-capital allocation. It no longer defaults to only RELIANCE, HDFCBANK and INFY. Use `--universe watchlist --symbols RELIANCE,HDFCBANK,INFY` only when you explicitly want the legacy fixed-symbol mode.
+
+The service persists the latest selected top-N list and dynamically subscribes the read-only Kite WebSocket to those symbols plus all still-open Champion and Watch-Shadow positions. When the top-N changes, it removes obsolete subscriptions unless a paper position still needs monitoring. It does not subscribe to all NSE instruments continuously. The default market-wide deep-analysis limit is 50; adjust it with `--universe-max-symbols` after measuring scan time and API pacing. Directional candidates receive a final executable-quote refresh after company-news triage; the refreshed quote must be no older than two minutes by default, matching the broker's 120-second entry freshness gate.
+
+The service also starts the localhost dashboard, updates independent challenger shadow portfolios, and creates Markdown/JSON/CSV daily reports.
 
 After pulling the new version, rerun the installer once so Task Scheduler replaces the old module target. The signed-in Windows user and the PC must remain active, and the daily Kite session must be valid. No real broker orders are submitted.
 
@@ -43,6 +47,7 @@ The live quote monitor should call `update_market_price()` as ticks arrive. The 
 - Database: `data/paper_trading.sqlite3` (SQLite; WAL mode).
 - `trades`: every virtual entry, exit, quantity, price, reason, fee and net result.
 - `market_marks`: latest trusted mark per symbol.
+- `paper_universe_watchlist`: latest top-N screened symbol set and scan timestamp; the live ticker monitor unions this list with all open paper positions.
 - `events`: scan processing, entries, rejected setups, exits and reasons.
 - `strategy_registry`: frozen champion and named challenger candidates.
 

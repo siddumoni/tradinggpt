@@ -114,6 +114,34 @@ python -m src.prospective_strategy_evaluator --candles-dir data/paper_candles_ki
 
 The first launch seeds a per-symbol watermark at the current archive head and skips pre-start bars. Keep it running as new completed candles are appended. It uses the same baseline strategy callbacks, ₹20,000 individual-signal sizing, ₹500 risk budget, fixed 1.5 after-cost Target 2 net R:R gate (matching the historical single-target backtest), and 2/5/8 bps per-side slippage scenarios. Only signals rejected specifically by the net R:R gate get a separate research-only shadow outcome; other risk/data failures stay fail-closed. Reports are written to `reports/prospective_strategy_evaluation`. Individual signals may overlap, so their summed P&L is not portfolio P&L. Read [the forward evaluator guide](docs/PROSPECTIVE_STRATEGY_EVALUATOR.md) before interpreting results. This process has no order-placement path and does not change the integrated paper broker.
 
+## NSE equity universe scanner
+
+The read-only market-wide scanner screens Kite's NSE cash-equity instrument universe by fresh quotes and liquidity, then runs the technical/risk/news pipeline on the top-ranked symbols. The integrated paper service invokes this same scan after each completed five-minute candle (default top 50) and passes all conditional LONG/SHORT candidates to the ₹1 lakh Champion virtual account for quality ranking and shared-capital allocation. The paper WebSocket follows the latest selected top-N list plus open Champion/Watch-Shadow positions; it does not subscribe to every NSE instrument.
+
+After authenticating with Kite, run:
+
+```powershell
+python -m src.main login
+python -m src.main check
+python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 50 --output-dir reports --verbose
+```
+
+The scanner obtains the current NSE instrument dump (cached for the IST calendar day), requests full quotes in batches of at most 500, and selects fresh NSE EQ quotes using configurable price, current-day volume and turnover-proxy filters. Quote requests are paced at one request per second, historical candles at approximately three requests per second, and other read-only API calls (such as margin estimates) at no more than roughly nine per second. The default deep-analysis limit is 50 stocks. Current turnover ranking uses `average_price × current-day volume`; it is a screening proxy, **not** an exchange-reported turnover value or an average-daily-volume calculation. Symbols with missing/stale/invalid quotes or failed filters are excluded and counted in the JSON report.
+
+The selected symbols reuse their already-fetched quote snapshots. For each selected symbol, the scanner fetches current-session 5-minute and 15-minute candles and reuses the existing indicator, signal, risk, news and read-only margin checks. It skips the daily-history request in this fast intraday path. The report includes the universe filter settings, available instrument count, quote coverage, eligible count, exclusions and selected symbols.
+
+Before a Kite directional candidate can retain `CONDITIONAL_BUY` / `CONDITIONAL_SHORT`, the scanner now revalidates it at the best executable ask (LONG) or bid (SHORT). MIS margin, position size, estimated charges, slippage and after-cost net R:R are recalculated at that price while the original candle-derived stop/target levels remain fixed. Missing/crossed/stale book data, an invalidated level, or a failed risk/news/data gate leaves the setup watch-only. Reports expose quote time, price drift and a full stop/target cost breakdown. ETF-like records whose security name identifies an ETF or whose symbol ends in `BEES` are excluded from the cash-equity universe; this is a practical metadata filter, not a complete exchange security-master classification.
+
+Optional thresholds:
+
+```powershell
+python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 75 --universe-min-price 50 --universe-max-price 10000 --universe-min-volume 10000 --universe-min-turnover 5000000 --universe-max-quote-age-minutes 15 --output-dir reports --verbose
+```
+
+The standalone scanner command produces an advisory research report only. The integrated paper service uses the same universe screen as its input, but the broker only simulates entries for conditional candidates that pass its independent cash, quote, position, daily-loss, portfolio-risk and after-cost R:R gates. No real orders are placed. Review scan duration, quote coverage, API errors and the report's exclusions; a top-50 liquidity ranking is not a prediction of future returns or proof that the selected symbols are tradable.
+
+See [the NSE universe scanner guide](docs/NSE_UNIVERSE_SCANNER.md) for the filtering methodology, Kite API pacing and operational limitations.
+
 ## Use authenticated Kite market data
 
 The scanner now accepts `--provider kite` for read-only stock quotes and 5/15-minute candles from the authenticated Kite Connect API. Log in through the existing manual flow first:
@@ -160,7 +188,9 @@ The integrated service now runs the scheduler, live read-only Kite tick monitor,
 
 The integrated service runs the candle scheduler, read-only Kite WebSocket monitor, champion virtual account, isolated challenger shadow portfolios, the watch-candidate shadow book, localhost dashboard and daily reports together.
 
-Foreground command: python -m src.paper_trading_service --symbols RELIANCE,HDFCBANK,INFY
+Foreground command: `python -m src.paper_trading_service`
+
+By default, the service screens the full available Kite NSE EQ universe and deeply analyses the top 50 liquid names on every five-minute candle. Use `--universe-max-symbols 75` to increase the technical-analysis limit after measuring scan time. The legacy fixed-symbol mode is available explicitly with `--universe watchlist --symbols RELIANCE,HDFCBANK,INFY`.
 
 Open http://127.0.0.1:8000. After pulling updates, rerun the Windows task installer once so Task Scheduler starts src.paper_trading_service instead of the old scan-only module. Keep the Windows user signed in and the PC awake. If the Kite session expires, authenticate again using python -m src.main login.
 
@@ -250,3 +280,6 @@ Transaction-charge rates are configurable estimates. Verify the current broker/e
 4. Report net-of-cost metrics, sample size, drawdown, exclusions, and slippage sensitivity.
 5. Prefer robust performance across unseen time periods and symbols over the highest in-sample P&L.
 6. Do not promote a candidate to live trading on the basis of this tool's backtest alone.
+
+
+See [docs/PAPER_PORTFOLIO_ALLOCATION.md](docs/PAPER_PORTFOLIO_ALLOCATION.md) for shared-capital paper allocation and aggregate portfolio-risk controls.

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from src.cost_calculator import estimate_intraday_round_trip_cost
+from src.paper_allocator import rank_paper_candidates
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
 
 IST=ZoneInfo("Asia/Kolkata")
@@ -37,7 +38,8 @@ class PaperBroker:
     def __init__(self,db_path:Path=DEFAULT_DB,*,initial_capital:float=DEFAULT_CAPITAL_INR,
         risk_per_trade:float=DEFAULT_RISK_PER_TRADE_INR,max_daily_loss:float=DEFAULT_DAILY_LOSS_LIMIT_INR,
         max_open_positions:int=DEFAULT_MAX_OPEN_POSITIONS,slippage_bps:float=DEFAULT_SLIPPAGE_BPS,
-        minimum_net_rr:float=1.5,max_entry_quote_age_seconds:float=MAX_ENTRY_QUOTE_AGE_SECONDS):
+        minimum_net_rr:float=1.5,max_entry_quote_age_seconds:float=MAX_ENTRY_QUOTE_AGE_SECONDS,
+        max_portfolio_risk_inr:float|None=None):
         for label,value in (("initial_capital",initial_capital),("risk_per_trade",risk_per_trade),
           ("max_daily_loss",max_daily_loss),("minimum_net_rr",minimum_net_rr),
           ("max_entry_quote_age_seconds",max_entry_quote_age_seconds)):
@@ -47,7 +49,13 @@ class PaperBroker:
         self.db_path=Path(db_path); self.initial_capital=float(initial_capital); self.risk_per_trade=float(risk_per_trade)
         self.max_daily_loss=float(max_daily_loss); self.max_open_positions=int(max_open_positions)
         self.slippage_bps=float(slippage_bps); self.minimum_net_rr=float(minimum_net_rr)
-        self.max_entry_quote_age_seconds=float(max_entry_quote_age_seconds); self.db_path.parent.mkdir(parents=True,exist_ok=True)
+        self.max_entry_quote_age_seconds=float(max_entry_quote_age_seconds)
+        configured_portfolio_risk = (float(max_portfolio_risk_inr) if max_portfolio_risk_inr is not None
+                                     else self.risk_per_trade * self.max_open_positions)
+        if not math.isfinite(configured_portfolio_risk) or configured_portfolio_risk <= 0:
+            raise ValueError("max_portfolio_risk_inr must be finite and positive")
+        self.max_portfolio_risk_inr=configured_portfolio_risk
+        self.db_path.parent.mkdir(parents=True,exist_ok=True)
         self._initialize()
     def _connect(self)->sqlite3.Connection:
         c=sqlite3.connect(self.db_path,timeout=15); c.row_factory=sqlite3.Row
@@ -63,11 +71,15 @@ class PaperBroker:
               status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),signal_time TEXT NOT NULL,entry_time TEXT NOT NULL,
               signal_reference_entry REAL NOT NULL,entry_reference_price REAL NOT NULL,entry_fill_price REAL NOT NULL,
               stop_loss REAL NOT NULL,target_1 REAL NOT NULL,target_2 REAL NOT NULL,quantity INTEGER NOT NULL CHECK(quantity>0),
-              risk_budget_inr REAL NOT NULL,position_value_inr REAL NOT NULL,market_regime TEXT NOT NULL,entry_reason TEXT NOT NULL,
+              risk_budget_inr REAL NOT NULL,position_value_inr REAL NOT NULL,planned_net_risk_inr REAL NOT NULL DEFAULT 0,
+              market_regime TEXT NOT NULL,entry_reason TEXT NOT NULL,
               exit_time TEXT,exit_reference_price REAL,exit_fill_price REAL,exit_reason TEXT,exit_detail TEXT,gross_pnl REAL,
               brokerage REAL,stt REAL,exchange_charges REAL,sebi_charges REAL,gst REAL,stamp_duty REAL,ipft REAL,
               transaction_charges REAL,slippage_cost REAL,total_estimated_costs REAL,net_pnl REAL,created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+            CREATE TABLE IF NOT EXISTS paper_universe_watchlist(
+              id INTEGER PRIMARY KEY CHECK(id=1),symbols_json TEXT NOT NULL,universe_mode TEXT NOT NULL,
+              scan_as_of TEXT NOT NULL,updated_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time);
             CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy,strategy_version);
             CREATE TABLE IF NOT EXISTS market_marks(symbol TEXT PRIMARY KEY,last_price REAL NOT NULL,bid REAL,ask REAL,market_time TEXT NOT NULL,received_at TEXT NOT NULL);
@@ -86,6 +98,11 @@ class PaperBroker:
               slippage_cost REAL,total_estimated_costs REAL,net_pnl REAL,reason TEXT NOT NULL,created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_shadow_version_status ON shadow_signals(strategy_version,status);
             """)
+            trade_columns={row["name"] for row in db.execute("PRAGMA table_info(trades)")}
+            if "planned_net_risk_inr" not in trade_columns:
+                db.execute("ALTER TABLE trades ADD COLUMN planned_net_risk_inr REAL NOT NULL DEFAULT 0")
+            # Legacy open positions reserve their full per-trade budget conservatively.
+            db.execute("UPDATE trades SET planned_net_risk_inr=risk_budget_inr WHERE status='OPEN' AND planned_net_risk_inr=0")
             now=datetime.now(IST).isoformat()
             db.execute("INSERT OR IGNORE INTO account(id,starting_capital,created_at) VALUES(1,?,?)",(self.initial_capital,now))
             defaults=[
@@ -104,6 +121,20 @@ class PaperBroker:
         closed=db.execute("SELECT COALESCE(SUM(net_pnl),0) pnl FROM trades WHERE status='CLOSED'").fetchone()
         return float(account["starting_capital"]),float(closed["pnl"])
     def _open_rows(self,db): return list(db.execute("SELECT * FROM trades WHERE status='OPEN' ORDER BY entry_time"))
+    def monitored_symbols(self)->list[str]:
+        """Latest selected scan symbols plus all still-open Champion paper positions."""
+        with self._connect() as db:
+            row=db.execute("SELECT symbols_json FROM paper_universe_watchlist WHERE id=1").fetchone()
+            scanned=[]
+            if row:
+                try:
+                    values=json.loads(row["symbols_json"])
+                    if isinstance(values,list): scanned=[str(x).strip().upper() for x in values if str(x).strip()]
+                except (TypeError,json.JSONDecodeError):
+                    scanned=[]
+            opened=[str(row["symbol"]).strip().upper() for row in db.execute(
+                "SELECT DISTINCT symbol FROM trades WHERE status='OPEN'")]
+        return sorted(set(scanned)|set(opened))
     def _today_net_pnl(self,db,now):
         day=now.astimezone(IST).date().isoformat()
         closed=db.execute("SELECT COALESCE(SUM(net_pnl),0) pnl FROM trades WHERE status='CLOSED' AND substr(exit_time,1,10)=?",(day,)).fetchone()
@@ -119,7 +150,7 @@ class PaperBroker:
         symbol=str(candidate.get("symbol") or "").strip().upper() or None
         key=hashlib.sha256(f"{report_as_of}|{symbol}|{_signal_key(candidate)}|{reason}".encode()).hexdigest()[:32]
         self._event(db,"SIGNAL_REJECTED",reason,symbol=symbol,severity="WARNING",details={"candidate":candidate,"scan_as_of":report_as_of},event_key=key)
-    def process_scan_report(self,report_path:Path)->dict[str,int]:
+    def process_scan_report(self,report_path:Path)->dict[str,Any]:
         path=Path(report_path)
         try: report=json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError,json.JSONDecodeError) as exc: raise ValueError(f"Could not read scan report {path}: {exc}") from exc
@@ -131,22 +162,56 @@ class PaperBroker:
         as_of=str(report.get("as_of") or "")
         if not as_of: raise ValueError("Scan report is missing as_of timestamp")
         scan_time=to_ist(as_of); opened=rejected=neutral=0; action_counts={}
+        allocation_order=[]
+        universe=report.get("universe_selection") if isinstance(report.get("universe_selection"),dict) else {}
+        tracked_source=universe.get("selected_symbols")
+        if not isinstance(tracked_source,list): tracked_source=report.get("symbols_requested",[])
+        tracked_symbols=sorted(set(str(x).strip().upper() for x in tracked_source
+                                   if isinstance(x,str) and x.strip())) if isinstance(tracked_source,list) else []
+        universe_mode=str(universe.get("mode") or "watchlist").strip().lower()
         with self._connect() as db:
+            if isinstance(tracked_source,list):
+                db.execute("""INSERT INTO paper_universe_watchlist(id,symbols_json,universe_mode,scan_as_of,updated_at)
+                  VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET symbols_json=excluded.symbols_json,
+                  universe_mode=excluded.universe_mode,scan_as_of=excluded.scan_as_of,updated_at=excluded.updated_at""",
+                  (_json(tracked_symbols),universe_mode,as_of,datetime.now(IST).isoformat()))
+                self._event(db,"SCAN_UNIVERSE_UPDATED",
+                    f"Paper market-data watchlist refreshed with {len(tracked_symbols)} selected symbols.",
+                    details={"universe_mode":universe_mode,"symbols":tracked_symbols,"scan_as_of":as_of},
+                    event_key=f"universe:{as_of}",at=scan_time)
             directional=sum(1 for c in candidates if isinstance(c,dict) and str(c.get("action") or "").upper() in {"CONDITIONAL_BUY","CONDITIONAL_SHORT"})
             self._event(db,"SCAN_PROCESSED",f"Processed scan report: {len(candidates)} candidates; conditional-entry actions={directional}.",
                 details={"report_path":str(path),"provider":report.get("provider"),"scan_as_of":as_of},
                 event_key=f"scan:{path.resolve()}:{as_of}",at=scan_time)
+            eligible=[]
             for item in candidates:
-                if not isinstance(item,dict): rejected+=1; continue
+                if not isinstance(item,dict):
+                    rejected+=1
+                    continue
                 action=str(item.get("action") or "UNKNOWN").upper()
                 action_counts[action]=action_counts.get(action,0)+1
                 if action not in {"CONDITIONAL_BUY","CONDITIONAL_SHORT"}:
-                    neutral+=1; self._record_rejection(db,item,as_of,"No approved directional entry: scanner action is "+(action or "UNKNOWN")+"."); continue
+                    neutral+=1
+                    self._record_rejection(db,item,as_of,"No approved directional entry: scanner action is "+(action or "UNKNOWN")+".")
+                else:
+                    eligible.append(item)
+
+            ranked=rank_paper_candidates(eligible,snapshots)
+            for ranked_item in ranked:
+                item=ranked_item["candidate"]
+                symbol=ranked_item["symbol"]
+                audit={key:value for key,value in ranked_item.items() if key!="candidate"}
+                allocation_order.append(audit)
+                self._event(db,"ALLOCATION_RANKED",
+                    f"Paper allocation rank {ranked_item['allocation_rank']}: {symbol} scored {ranked_item['allocation_score']:.2f}/100.",
+                    symbol=symbol or None,details=audit,
+                    event_key=f"allocation:{as_of}:{_signal_key(item)}",at=scan_time)
                 try:
-                    self._open_candidate(db,item,snapshots.get(str(item.get("symbol","")).upper()))
+                    self._open_candidate(db,item,snapshots.get(symbol),allocation=ranked_item)
                     opened+=1
                 except _RejectedSignal as exc:
-                    rejected+=1; self._record_rejection(db,item,as_of,str(exc))
+                    rejected+=1
+                    self._record_rejection(db,item,as_of,str(exc))
         conditional_count=action_counts.get("CONDITIONAL_BUY",0)+action_counts.get("CONDITIONAL_SHORT",0)
         watch_count=action_counts.get("WATCH_CANDIDATE",0)
         no_trade_count=action_counts.get("NO_TRADE",0)
@@ -154,8 +219,11 @@ class PaperBroker:
                         if action not in {"CONDITIONAL_BUY","CONDITIONAL_SHORT","WATCH_CANDIDATE","NO_TRADE"})
         return {"opened":opened,"rejected":rejected,"neutral":neutral,"candidate_count":len(candidates),
                 "conditional_candidates":conditional_count,"watch_candidates":watch_count,
-                "no_trade":no_trade_count,"other_actions":other_count}
-    def _open_candidate(self,db,candidate,snapshot):
+                "no_trade":no_trade_count,"other_actions":other_count,
+                "ranked_candidates":len(ranked),"allocation_order":allocation_order,
+                "allocation_method":"quality_first_greedy_with_shared_cash_and_risk_caps",
+                "tracked_symbols":self.monitored_symbols(),"universe_mode":universe_mode}
+    def _open_candidate(self,db,candidate,snapshot,*,allocation:dict[str,Any]|None=None):
         symbol=str(candidate.get("symbol") or "").strip().upper(); side=str(candidate.get("side") or "").upper()
         strategy=str(candidate.get("strategy") or "").strip(); signal_time=str(candidate.get("signal_time") or "")
         signal_id=_signal_key(candidate)
@@ -176,11 +244,12 @@ class PaperBroker:
             stop=_finite_positive(candidate.get("stop_loss"),"stop_loss"); t1=_finite_positive(candidate.get("target_1"),"target_1")
             t2=_finite_positive(candidate.get("target_2"),"target_2"); last=_finite_positive(snapshot.get("last_price"),"quote.last_price")
         except ValueError as exc: raise _RejectedSignal(str(exc)) from exc
-        def opt_price(v):
-            try: p=float(v)
-            except (TypeError,ValueError,OverflowError): return last
-            return p if math.isfinite(p) and p>0 else last
-        bid=opt_price(snapshot.get("bid")); ask=opt_price(snapshot.get("ask"))
+        try:
+            bid=_finite_positive(snapshot.get("bid"),"quote.bid")
+            ask=_finite_positive(snapshot.get("ask"),"quote.ask")
+        except ValueError as exc:
+            raise _RejectedSignal(f"Executable bid/ask is missing or invalid: {exc}") from exc
+        if bid>ask: raise _RejectedSignal("Executable quote is crossed; paper entry rejected.")
         entry_reference=ask if side=="LONG" else bid
         entry_fill=entry_reference*(1+self.slippage_bps/10000) if side=="LONG" else entry_reference*(1-self.slippage_bps/10000)
         valid=stop<entry_fill<t1<=t2 if side=="LONG" else t2<=t1<entry_fill<stop
@@ -195,8 +264,16 @@ class PaperBroker:
         initial,realized=self._account_values(db); used=sum(float(r["position_value_inr"]) for r in opens)
         available=max(0.0,initial+realized-used)
         if available<entry_fill: raise _RejectedSignal("Insufficient virtual cash for one share; leverage is disabled.")
+        existing_open_risk=sum(
+            float(r["planned_net_risk_inr"] or r["risk_budget_inr"] or self.risk_per_trade)
+            for r in opens
+        )
+        remaining_portfolio_risk=max(0.0,self.max_portfolio_risk_inr-existing_open_risk)
+        if remaining_portfolio_risk<=0:
+            raise _RejectedSignal("Aggregate open portfolio-risk limit is fully allocated.")
+        allocated_risk_budget=min(self.risk_per_trade,remaining_portfolio_risk)
         _,rates=load_phase2_settings()
-        settings=RiskSettings(capital_inr=available,risk_per_trade_inr=self.risk_per_trade,
+        settings=RiskSettings(capital_inr=available,risk_per_trade_inr=allocated_risk_budget,
             minimum_net_risk_reward=self.minimum_net_rr,require_margin_verification=False,
             skip_if_margin_unavailable=False,slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist="14:45",square_off_time_ist="15:15")
@@ -204,22 +281,32 @@ class PaperBroker:
             settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
         except ValueError as exc: raise _RejectedSignal(f"Current quote failed the risk validator: {exc}") from exc
         if not assessment.accepted or assessment.quantity<1: raise _RejectedSignal("Virtual risk/after-cost R:R gate: "+assessment.reason)
+        if existing_open_risk+assessment.net_risk_inr>self.max_portfolio_risk_inr+1e-6:
+            raise _RejectedSignal("Aggregate open portfolio-risk limit would be exceeded.")
         reasons=candidate.get("reasons",[]); entry_reason=" ".join(str(x) for x in reasons) if isinstance(reasons,list) else str(reasons)
         try:
             db.execute("""INSERT INTO trades(
               signal_id,strategy,strategy_version,symbol,side,status,signal_time,entry_time,signal_reference_entry,
               entry_reference_price,entry_fill_price,stop_loss,target_1,target_2,quantity,risk_budget_inr,
-              position_value_inr,market_regime,entry_reason,created_at)
-              VALUES(?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              position_value_inr,planned_net_risk_inr,market_regime,entry_reason,created_at)
+              VALUES(?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (signal_id,strategy,"champion_v1",symbol,side,signal_time,now.isoformat(),reference_entry,
-               entry_reference,entry_fill,stop,t1,t2,int(assessment.quantity),self.risk_per_trade,
-               float(assessment.quantity)*entry_fill,str(candidate.get("market_regime") or "UNKNOWN"),entry_reason,now.isoformat()))
+               entry_reference,entry_fill,stop,t1,t2,int(assessment.quantity),allocated_risk_budget,
+               float(assessment.quantity)*entry_fill,assessment.net_risk_inr,
+               str(candidate.get("market_regime") or "UNKNOWN"),entry_reason,now.isoformat()))
         except sqlite3.IntegrityError as exc: raise _RejectedSignal("Duplicate signal already processed.") from exc
         self._event(db,"PAPER_ENTRY",f"Simulated {side} entry: {assessment.quantity} {symbol} @ ₹{entry_fill:.2f}.",
             symbol=symbol,details={"signal_id":signal_id,"strategy":strategy,"strategy_version":"champion_v1",
             "quantity":int(assessment.quantity),"entry_reference_price":entry_reference,"entry_fill_price":entry_fill,
             "signal_reference_entry":reference_entry,"stop_loss":stop,"target_1":t1,"target_2":t2,
-            "entry_reason":entry_reason,"risk_budget_inr":self.risk_per_trade,"assessed_net_rr_t1":assessment.net_rr_t1},
+            "entry_reason":entry_reason,"risk_budget_inr":allocated_risk_budget,
+            "per_trade_risk_limit_inr":self.risk_per_trade,"allocated_risk_budget_inr":allocated_risk_budget,
+            "planned_net_risk_inr":assessment.net_risk_inr,
+            "open_portfolio_risk_after_entry_inr":existing_open_risk+assessment.net_risk_inr,
+            "max_portfolio_risk_inr":self.max_portfolio_risk_inr,
+            "allocation_rank":(allocation or {}).get("allocation_rank"),
+            "allocation_score":(allocation or {}).get("allocation_score"),
+            "assessed_net_rr_t1":assessment.net_rr_t1},
             event_key=f"entry:{signal_id}",at=now)
     def update_market_price(self,symbol:str,last_price:float,*,bid:float|None=None,ask:float|None=None,
         market_time:datetime|None=None,received_at:datetime|None=None)->int:
@@ -314,6 +401,8 @@ class PaperBroker:
             capital,realized=self._account_values(db); opens=self._open_rows(db)
             marks={r["symbol"]:dict(r) for r in db.execute("SELECT * FROM market_marks")}
             positions=[]; unreal=0.0; exposure=0.0; _,rates=load_phase2_settings()
+            open_planned_risk=sum(float(r["planned_net_risk_inr"] or r["risk_budget_inr"] or self.risk_per_trade) for r in opens)
+            available_portfolio_risk=max(0.0,self.max_portfolio_risk_inr-open_planned_risk)
             for row in opens:
                 trade=dict(row); mark=marks.get(trade["symbol"]); last=float(mark["last_price"]) if mark else float(trade["entry_reference_price"])
                 if mark and row["side"]=="LONG": exit_ref=float(mark["bid"] or mark["last_price"])
@@ -372,7 +461,12 @@ class PaperBroker:
                 "open_positions":len(positions),"closed_trades":count,"wins":wins,"losses":losses,
                 "win_rate_pct":100.0*wins/count if count else 0.0,"profit_factor":gw/gl if gl else (None if gw==0 else "infinite"),
                 "expectancy_per_trade":expectancy,"max_drawdown":dd,"today_net_pnl":today,"max_daily_loss":self.max_daily_loss,
-                "risk_per_trade":self.risk_per_trade,"max_open_positions":self.max_open_positions,"created_at":account_row["created_at"]},
+                "risk_per_trade":self.risk_per_trade,"max_open_positions":self.max_open_positions,
+                "open_planned_risk_inr":open_planned_risk,
+                "max_portfolio_risk_inr":self.max_portfolio_risk_inr,
+                "available_portfolio_risk_inr":available_portfolio_risk,
+                "portfolio_risk_utilization_pct":(100.0*open_planned_risk/self.max_portfolio_risk_inr if self.max_portfolio_risk_inr else 0.0),
+                "created_at":account_row["created_at"]},
               "open_positions":positions,"shadow_open_positions":shadow_open,"closed_trades":[dict(r) for r in closed[:100]],"shadow_closed_trades":shadow_closed,"strategies":strategies,
               "strategy_registry":registry,"events":events,"updated_at":datetime.now(IST).isoformat()}
 

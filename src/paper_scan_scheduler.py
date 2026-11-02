@@ -141,54 +141,65 @@ def run_scanner_process(
     after_report: Callable[[Path], None] | None = None,
     account_capital: float = 100_000.0,
     risk_per_trade: float = 500.0,
+    universe_mode: str = "nse_equity",
+    universe_max_symbols: int = 50,
+    universe_min_price: float = 50.0,
+    universe_max_price: float = 10000.0,
+    universe_min_volume: int = 10000,
+    universe_min_turnover: float = 5000000.0,
+    universe_max_quote_age_minutes: float = 15.0,
+    paper_entry_max_quote_age_minutes: float = 2.0,
 ) -> int:
-    """Run the scanner and process its saved snapshot through the virtual account."""
+    """Run the selected Kite market scan and process its snapshot through the virtual account."""
+    if universe_mode not in {"watchlist", "nse_equity"}:
+        raise ValueError("universe_mode must be 'watchlist' or 'nse_equity'")
+    if universe_max_symbols < 1:
+        raise ValueError("universe_max_symbols must be at least 1")
     command = [
-        sys.executable,
-        "-m",
-        "src.advisory_engine",
+        sys.executable, "-m", "src.advisory_engine",
         "--provider", "kite",
-        "--symbols", symbols,
+        "--universe", universe_mode,
         "--paper-journal", str(paper_journal),
         "--scan-ledger", str(scan_ledger),
         "--candle-archive-dir", str(candle_archive_dir),
         "--account-capital", str(account_capital),
         "--risk-per-trade", str(risk_per_trade),
         "--minimum-net-rr", "1.5",
-        "--verbose",
+        "--paper-entry-max-quote-age-minutes", str(paper_entry_max_quote_age_minutes),
     ]
+    if universe_mode == "nse_equity":
+        command += [
+            "--universe-max-symbols", str(universe_max_symbols),
+            "--universe-min-price", str(universe_min_price),
+            "--universe-max-price", str(universe_max_price),
+            "--universe-min-volume", str(universe_min_volume),
+            "--universe-min-turnover", str(universe_min_turnover),
+            "--universe-max-quote-age-minutes", str(universe_max_quote_age_minutes),
+        ]
+    else:
+        command += ["--symbols", symbols]
+    command.append("--verbose")
     LOGGER.info("Command for %s: %s", _to_ist(boundary).isoformat(), subprocess.list2cmdline(command))
     try:
         completed = subprocess.run(
-            command,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
-            check=False,
+            command, cwd=repo_root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout_seconds, check=False,
         )
     except subprocess.TimeoutExpired as exc:
         LOGGER.error("Scanner timed out after %s seconds at %s", timeout_seconds, _to_ist(boundary).isoformat())
         stdout = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        if stdout.strip():
-            LOGGER.info("Scanner partial stdout:\n%s", stdout.rstrip())
-        if stderr.strip():
-            LOGGER.error("Scanner partial stderr:\n%s", stderr.rstrip())
+        if stdout.strip(): LOGGER.info("Scanner partial stdout:\n%s", stdout.rstrip())
+        if stderr.strip(): LOGGER.error("Scanner partial stderr:\n%s", stderr.rstrip())
         return 124
     except OSError:
         LOGGER.exception("Could not start the scanner process")
         return 127
 
-    if completed.stdout.strip():
-        LOGGER.info("Scanner output:\n%s", completed.stdout.rstrip())
+    if completed.stdout.strip(): LOGGER.info("Scanner output:\n%s", completed.stdout.rstrip())
     if completed.stderr.strip():
-        if completed.returncode == 0:
-            LOGGER.warning("Scanner stderr:\n%s", completed.stderr.rstrip())
-        else:
-            LOGGER.error("Scanner stderr:\n%s", completed.stderr.rstrip())
+        if completed.returncode == 0: LOGGER.warning("Scanner stderr:\n%s", completed.stderr.rstrip())
+        else: LOGGER.error("Scanner stderr:\n%s", completed.stderr.rstrip())
     if completed.returncode == 0:
         report_path = _extract_report_path(completed.stdout, repo_root)
         if report_path is None:
@@ -198,22 +209,19 @@ def run_scanner_process(
                 try:
                     result = paper_broker.process_scan_report(report_path)
                     LOGGER.info(
-                        "Virtual broker scan actions: conditional candidates=%s; virtual entries opened=%s; "
-                        "conditional-entry rejections=%s; WATCH_CANDIDATE=%s; NO_TRADE=%s; other actions=%s "
-                        "(all candidates=%s). WATCH_CANDIDATE is a directional research signal, not a conditional entry.",
-                        result.get("conditional_candidates", 0), result.get("opened"), result.get("rejected"),
-                        result.get("watch_candidates", 0), result.get("no_trade", 0),
-                        result.get("other_actions", 0), result.get("candidate_count"),
+                        "Virtual broker: universe=%s selected=%s; conditional=%s ranked=%s opened=%s "
+                        "rejected=%s watch=%s no_trade=%s (all candidates=%s). No real orders were sent.",
+                        result.get("universe_mode", universe_mode),len(result.get("tracked_symbols",[])),
+                        result.get("conditional_candidates",0),result.get("ranked_candidates",0),
+                        result.get("opened"),result.get("rejected"),result.get("watch_candidates",0),
+                        result.get("no_trade",0),result.get("candidate_count"),
                     )
                 except Exception:
                     LOGGER.exception("Virtual broker could not process the scan report; no real orders were sent.")
             if after_report is not None:
-                try:
-                    after_report(report_path)
-                except Exception:
-                    LOGGER.exception("Post-scan shadow research processing failed.")
+                try: after_report(report_path)
+                except Exception: LOGGER.exception("Post-scan shadow research processing failed.")
     return int(completed.returncode)
-
 
 def _extract_report_path(stdout: str, repo_root: Path) -> Path | None:
     for line in (stdout or "").splitlines():
@@ -242,7 +250,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run read-only Kite paper scans after each completed 5-minute candle."
     )
-    parser.add_argument("--symbols", default=DEFAULT_SYMBOLS, help="Comma-separated NSE symbols")
+    parser.add_argument("--symbols", default=DEFAULT_SYMBOLS, help="Used only with --universe watchlist")
+    parser.add_argument("--universe", choices=("watchlist", "nse_equity"), default="nse_equity")
+    parser.add_argument("--universe-max-symbols", type=int, default=50)
     parser.add_argument("--poll-seconds", type=float, default=5.0, help="Scheduler polling interval")
     parser.add_argument("--grace-seconds", type=int, default=10, help="Wait after candle close before scanning")
     parser.add_argument("--max-lateness-seconds", type=int, default=120,
@@ -255,8 +265,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-file", type=Path, default=Path("logs/paper_scan_scheduler.log"))
     args = parser.parse_args(argv)
 
-    if not args.symbols.strip() or not all(s.strip() for s in args.symbols.split(",")):
-        parser.error("--symbols must contain non-empty comma-separated symbols")
+    if args.universe == "watchlist" and (not args.symbols.strip() or not all(s.strip() for s in args.symbols.split(","))):
+        parser.error("--symbols must contain non-empty comma-separated symbols in watchlist mode")
+    if args.universe_max_symbols < 1:
+        parser.error("--universe-max-symbols must be at least 1")
     if args.poll_seconds <= 0:
         parser.error("--poll-seconds must be positive")
     if args.grace_seconds < 0:
@@ -274,9 +286,9 @@ def main(argv: list[str] | None = None) -> int:
     log_file = _resolve_path(repo_root, args.log_file)
     _configure_logging(log_file)
     LOGGER.info(
-        "Paper scan scheduler started; root=%s symbols=%s poll=%ss grace=%ss. "
+        "Paper scan scheduler started; root=%s universe=%s top_n=%s fallback_symbols=%s poll=%ss grace=%ss. "
         "Scans run on weekdays after completed 5-minute candle boundaries from 09:20 through 15:15 IST.",
-        repo_root, args.symbols, args.poll_seconds, args.grace_seconds,
+        repo_root, args.universe, args.universe_max_symbols, args.symbols, args.poll_seconds, args.grace_seconds,
     )
     LOGGER.info("Journal=%s ledger=%s candle_archive=%s state=%s", paper_journal, scan_ledger, candle_archive_dir, state_file)
 
@@ -286,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=repo_root,
             symbols=args.symbols,
             paper_journal=paper_journal,
+            universe_mode=args.universe,
+            universe_max_symbols=args.universe_max_symbols,
             scan_ledger=scan_ledger,
             candle_archive_dir=candle_archive_dir,
             timeout_seconds=args.scan_timeout_seconds,

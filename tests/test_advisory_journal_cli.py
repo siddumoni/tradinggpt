@@ -88,3 +88,32 @@ def test_cli_does_not_journal_market_closed_report_without_saved_snapshot(monkey
         lambda *args: (_ for _ in ()).throw(AssertionError("journal should not run")),
     )
     assert advisory_engine.main() == 0
+
+
+
+def test_cli_formats_entry_price_with_windows_safe_currency_text(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["advisory_engine", "--symbols", "INFY"])
+    monkeypatch.setattr(
+        advisory_engine,
+        "run_scan",
+        lambda **kwargs: {
+            "status": "RESEARCH_SCAN_ONLY",
+            "as_of": "2026-11-02T14:40:00+05:30",
+            "candidates": [{
+                "symbol": "INFY",
+                "action": "CONDITIONAL_LONG",
+                "side": "LONG",
+                "confidence": 70,
+                "strategy": "vwap_ema_momentum",
+                "entry_validation": {
+                    "executable_entry_price": 2500.5,
+                    "status": "VALID",
+                },
+            }],
+        },
+    )
+
+    assert advisory_engine.main() == 0
+    output = capsys.readouterr().out
+    assert "entry=INR 2500.50" in output
+    assert "\u20b9" not in output

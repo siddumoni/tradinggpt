@@ -661,7 +661,7 @@ def main() -> int:
     for item in report.get("candidates", []):
         validation = item.get("entry_validation") or {}
         executable_entry = validation.get("executable_entry_price")
-        entry_text = f" entry=₹{float(executable_entry):.2f}" if executable_entry is not None else ""
+        entry_text = f" entry=INR {float(executable_entry):.2f}" if executable_entry is not None else ""
         validation_text = f" live={validation.get('status')}" if validation.get("status") else ""
         print(f"{item['symbol']:<14} {item['action']:<18} side={item['side'] or '-':<5} confidence={item['confidence']:>2} strategy={item['strategy'] or '-'}{entry_text}{validation_text}")
     print("No orders were placed, modified, or cancelled.")

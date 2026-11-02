@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, time as dtime
 from pathlib import Path
+import re
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -43,7 +44,9 @@ def append_completed_candles(
     """
     cleaned_symbol = str(symbol).strip().upper()
     mode = str(provider_mode).strip().lower()
-    if not cleaned_symbol or not cleaned_symbol.replace("-", "").isalnum():
+    # NSE symbols can contain ampersands (for example M&M and GVT&D).
+    # Keep validation strict so the ticker remains safe as a filename.
+    if not re.fullmatch(r"[A-Z0-9]+(?:[&-][A-Z0-9]+)*", cleaned_symbol):
         raise ValueError("symbol must be a non-empty NSE-style ticker")
     if mode not in {"yahoo", "kite"}:
         raise ValueError("provider_mode must be 'yahoo' or 'kite'")

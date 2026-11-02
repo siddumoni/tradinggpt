@@ -20,65 +20,148 @@ from src.paper_scan_scheduler import latest_completed_boundary,process_due_bound
 IST=ZoneInfo("Asia/Kolkata")
 LOGGER=logging.getLogger("paper_trading_service")
 
-def _ticker_thread(broker:PaperBroker,watch_shadow:WatchShadowPortfolio,symbols:list[str],stop:threading.Event)->None:
- """Monitor fresh Kite WebSocket ticks and close virtual positions only."""
- while not stop.is_set():
-  ticker=None
-  try:
-   api_key,_=load_credentials();cached=load_token_cache(api_key)
-   if cached is None:
-    LOGGER.error("Kite session is missing/expired. Run python -m src.main login; tick monitor retries in 30 seconds.")
-    stop.wait(30);continue
-   try:from kiteconnect import KiteTicker
-   except ImportError:
-    LOGGER.exception("kiteconnect dependency missing for WebSocket monitor");stop.wait(30);continue
-   provider=KiteMarketData.from_cached_session();instruments=provider.instruments()
-   token_map={int(r["instrument_token"]):str(r["tradingsymbol"]).upper() for r in instruments
-    if r.get("instrument_token") and r.get("tradingsymbol") and r.get("segment")=="NSE"
-    and r.get("instrument_type")=="EQ" and str(r["tradingsymbol"]).upper() in symbols}
-   if not token_map:
-    LOGGER.error("No requested NSE EQ instruments resolved for tick monitor: %s",symbols);stop.wait(30);continue
-   tokens=list(token_map);reconnect_exhausted=threading.Event();ticker=KiteTicker(api_key,cached.access_token)
-   def on_connect(ws,response):
-    ws.subscribe(tokens);ws.set_mode(ws.MODE_FULL,tokens)
-    LOGGER.info("Kite WebSocket connected. Subscribed instruments: %s",",".join(token_map.values()))
-   def on_ticks(ws,ticks):
-    now=datetime.now(IST)
-    for tick in ticks:
-     try:
-      symbol=token_map.get(int(tick.get("instrument_token",0)))
-      if not symbol:continue
-      stamp=tick.get("exchange_timestamp") or tick.get("last_trade_time") or tick.get("timestamp")
-      if stamp is None:continue
-      stamp=stamp.replace(tzinfo=IST) if stamp.tzinfo is None else stamp.astimezone(IST)
-      age=(now-stamp).total_seconds()
-      if age < -2 or age > 60:continue
-      last=float(tick.get("last_price"))
-      depth=tick.get("depth") or {}
-      buys=depth.get("buy",[]) if isinstance(depth,dict) else []
-      sells=depth.get("sell",[]) if isinstance(depth,dict) else []
-      bid=float(buys[0]["price"]) if buys and isinstance(buys[0],dict) and buys[0].get("price") else None
-      ask=float(sells[0]["price"]) if sells and isinstance(sells[0],dict) and sells[0].get("price") else None
-      closed=broker.update_market_price(symbol,last,bid=bid,ask=ask,market_time=stamp,received_at=now)
-      shadow_closed=watch_shadow.update_market_price(symbol,last,bid=bid,ask=ask,market_time=stamp,received_at=now)
-      if closed:LOGGER.info("Kite ticks triggered %s champion virtual exit(s) for %s",closed,symbol)
-      if shadow_closed:LOGGER.info("Kite ticks triggered %s watch-shadow virtual exit(s) for %s",shadow_closed,symbol)
-     except (TypeError,ValueError,KeyError,OverflowError):LOGGER.exception("Ignored malformed Kite tick")
-   def on_error(ws,code,reason):LOGGER.error("Kite WebSocket error code=%s reason=%s",code,reason)
-   def on_close(ws,code,reason):LOGGER.warning("Kite WebSocket closed code=%s reason=%s",code,reason)
-   def on_noreconnect(ws):
-    LOGGER.error("Kite WebSocket exhausted reconnect attempts; rebuilding connection.")
-    reconnect_exhausted.set()
-   ticker.on_connect=on_connect;ticker.on_ticks=on_ticks;ticker.on_error=on_error;ticker.on_close=on_close;ticker.on_noreconnect=on_noreconnect
-   LOGGER.info("Starting live tick monitor for %s",",".join(token_map.values()))
-   ticker.connect(threaded=True)
-   while not stop.is_set() and not reconnect_exhausted.wait(1):pass
-  except Exception:LOGGER.exception("Kite tick monitor could not start; retrying after a short delay")
-  finally:
-   if ticker is not None:
-    try:ticker.close()
-    except Exception:pass
-  stop.wait(10)
+def _desired_market_symbols(broker,watch_shadow,symbols:list[str],universe_mode:str)->list[str]:
+    """Latest screened symbol set plus every position that still needs tick monitoring."""
+    desired=set(broker.monitored_symbols())
+    if universe_mode=="watchlist": desired.update(symbols)
+    desired.update(watch_shadow.open_symbols())
+    return sorted(value for value in desired if value)
+
+
+def _sync_websocket_subscriptions(ws,symbol_to_token,active_tokens,broker,watch_shadow,symbols,universe_mode):
+    desired_symbols=_desired_market_symbols(broker,watch_shadow,symbols,universe_mode)
+    missing=sorted(set(desired_symbols)-set(symbol_to_token))
+    if missing:
+        LOGGER.warning("Selected/open symbols absent from Kite NSE EQ instrument list: %s",",".join(missing))
+    desired_tokens={symbol_to_token[symbol] for symbol in desired_symbols if symbol in symbol_to_token}
+    additions=sorted(desired_tokens-active_tokens)
+    removals=sorted(active_tokens-desired_tokens)
+    if additions:
+        ws.subscribe(additions)
+        ws.set_mode(ws.MODE_FULL,additions)
+        active_tokens.update(additions)
+        LOGGER.info("Kite WebSocket subscribed to %s additional selected/open symbol(s).",len(additions))
+    if removals:
+        ws.unsubscribe(removals)
+        active_tokens.difference_update(removals)
+        LOGGER.info("Kite WebSocket unsubscribed %s symbols no longer selected or open.",len(removals))
+    return active_tokens
+
+
+def _ticker_thread(broker:PaperBroker,watch_shadow:WatchShadowPortfolio,symbols:list[str],stop:threading.Event,*,universe_mode:str="nse_equity")->None:
+    """Monitor top-N screened symbols and all open virtual positions; never place orders."""
+    while not stop.is_set():
+        ticker=None
+        try:
+            api_key,_=load_credentials()
+            cached=load_token_cache(api_key)
+            if cached is None:
+                LOGGER.error("Kite session is missing/expired. Run python -m src.main login; tick monitor retries in 30 seconds.")
+                stop.wait(30)
+                continue
+            try:
+                from kiteconnect import KiteTicker
+            except ImportError:
+                LOGGER.exception("kiteconnect dependency missing for WebSocket monitor")
+                stop.wait(30)
+                continue
+
+            fallback=symbols if universe_mode=="watchlist" else []
+            desired=_desired_market_symbols(broker,watch_shadow,fallback,universe_mode)
+            if not desired:
+                # The first five-minute universe scan populates the persisted top-N list.
+                stop.wait(5)
+                continue
+            provider=KiteMarketData.from_cached_session()
+            instruments=provider.instruments()
+            symbol_to_token={
+                str(row["tradingsymbol"]).strip().upper():int(row["instrument_token"])
+                for row in instruments if row.get("instrument_token") and row.get("tradingsymbol")
+                and row.get("segment")=="NSE" and row.get("instrument_type")=="EQ"
+            }
+            initial_tokens=sorted({symbol_to_token[s] for s in desired if s in symbol_to_token})
+            if not initial_tokens:
+                LOGGER.warning("No monitored symbols resolve to current Kite NSE EQ instruments: %s",",".join(desired[:20]))
+                stop.wait(10)
+                continue
+
+            token_to_symbol={token:symbol for symbol,token in symbol_to_token.items()}
+            reconnect_exhausted=threading.Event()
+            connected=threading.Event()
+            active_tokens:set[int]=set()
+            subscription_lock=threading.Lock()
+            ticker=KiteTicker(api_key,cached.access_token)
+
+            def sync(ws):
+                with subscription_lock:
+                    _sync_websocket_subscriptions(
+                        ws,symbol_to_token,active_tokens,broker,watch_shadow,fallback,universe_mode
+                    )
+
+            def on_connect(ws,response):
+                with subscription_lock:
+                    active_tokens.clear()
+                    connected.set()
+                    _sync_websocket_subscriptions(
+                        ws,symbol_to_token,active_tokens,broker,watch_shadow,fallback,universe_mode
+                    )
+                LOGGER.info("Kite WebSocket connected; subscribed to %s current selected/open symbols.",len(active_tokens))
+
+            def on_ticks(ws,ticks):
+                now=datetime.now(IST)
+                for tick in ticks:
+                    try:
+                        symbol=token_to_symbol.get(int(tick.get("instrument_token",0)))
+                        if not symbol: continue
+                        stamp=tick.get("exchange_timestamp") or tick.get("last_trade_time") or tick.get("timestamp")
+                        if stamp is None: continue
+                        stamp=stamp.replace(tzinfo=IST) if stamp.tzinfo is None else stamp.astimezone(IST)
+                        age=(now-stamp).total_seconds()
+                        if age < -2 or age > 60: continue
+                        last=float(tick.get("last_price"))
+                        depth=tick.get("depth") or {}
+                        buys=depth.get("buy",[]) if isinstance(depth,dict) else []
+                        sells=depth.get("sell",[]) if isinstance(depth,dict) else []
+                        bid=float(buys[0]["price"]) if buys and isinstance(buys[0],dict) and buys[0].get("price") else None
+                        ask=float(sells[0]["price"]) if sells and isinstance(sells[0],dict) and sells[0].get("price") else None
+                        closed=broker.update_market_price(symbol,last,bid=bid,ask=ask,market_time=stamp,received_at=now)
+                        shadow_closed=watch_shadow.update_market_price(symbol,last,bid=bid,ask=ask,market_time=stamp,received_at=now)
+                        if closed: LOGGER.info("Kite ticks triggered %s Champion paper exit(s) for %s",closed,symbol)
+                        if shadow_closed: LOGGER.info("Kite ticks triggered %s Watch-Shadow exit(s) for %s",shadow_closed,symbol)
+                    except (TypeError,ValueError,KeyError,OverflowError):
+                        LOGGER.exception("Ignored malformed Kite tick")
+
+            def on_error(ws,code,reason):
+                LOGGER.error("Kite WebSocket error code=%s reason=%s",code,reason)
+
+            def on_close(ws,code,reason):
+                connected.clear()
+                LOGGER.warning("Kite WebSocket closed code=%s reason=%s",code,reason)
+
+            def on_noreconnect(ws):
+                connected.clear()
+                LOGGER.error("Kite WebSocket exhausted reconnect attempts; rebuilding connection.")
+                reconnect_exhausted.set()
+
+            ticker.on_connect=on_connect
+            ticker.on_ticks=on_ticks
+            ticker.on_error=on_error
+            ticker.on_close=on_close
+            ticker.on_noreconnect=on_noreconnect
+            LOGGER.info("Starting dynamic Kite tick monitor for %s screened/open symbol(s).",len(initial_tokens))
+            ticker.connect(threaded=True)
+            while not stop.is_set() and not reconnect_exhausted.wait(1):
+                if connected.is_set():
+                    try: sync(ticker)
+                    except Exception: LOGGER.exception("Could not update dynamic Kite WebSocket subscriptions.")
+                stop.wait(4)
+        except Exception:
+            LOGGER.exception("Kite tick monitor could not start; retrying after a short delay")
+        finally:
+            if ticker is not None:
+                try: ticker.close()
+                except Exception: pass
+        stop.wait(5)
 
 def _configure_logging(path:Path)->None:
  import logging.handlers
@@ -167,9 +250,17 @@ def _finalize_reports(
 
 def main(argv=None)->int:
  p=argparse.ArgumentParser(description="Integrated read-only Kite paper broker, tick monitor and local dashboard.")
- p.add_argument("--symbols",default="RELIANCE,HDFCBANK,INFY")
+ p.add_argument("--symbols",default="RELIANCE,HDFCBANK,INFY",help="Used only with --universe watchlist")
+ p.add_argument("--universe",choices=("nse_equity","watchlist"),default="nse_equity",help="Default screens the liquid NSE cash-equity universe")
+ p.add_argument("--universe-max-symbols",type=int,default=50)
+ p.add_argument("--universe-min-price",type=float,default=50.0)
+ p.add_argument("--universe-max-price",type=float,default=10000.0)
+ p.add_argument("--universe-min-volume",type=int,default=10000)
+ p.add_argument("--universe-min-turnover",type=float,default=5000000.0)
+ p.add_argument("--universe-max-quote-age-minutes",type=float,default=15.0)
+ p.add_argument("--paper-entry-max-quote-age-minutes",type=float,default=2.0)
  p.add_argument("--poll-seconds",type=float,default=5);p.add_argument("--grace-seconds",type=int,default=10)
- p.add_argument("--max-lateness-seconds",type=int,default=120);p.add_argument("--scan-timeout-seconds",type=int,default=240)
+ p.add_argument("--max-lateness-seconds",type=int,default=120);p.add_argument("--scan-timeout-seconds",type=int,default=300)
  p.add_argument("--paper-journal",type=Path,default=Path("logs/paper_signals.csv"));p.add_argument("--scan-ledger",type=Path,default=Path("logs/paper_scan_runs.csv"))
  p.add_argument("--candle-archive-dir",type=Path,default=Path("data/paper_candles_kite"))
  p.add_argument("--scan-state-file",type=Path,default=Path("logs/paper_scan_scheduler_state.json"))
@@ -184,7 +275,9 @@ def main(argv=None)->int:
  if a.poll_seconds<=0 or a.grace_seconds<0 or a.max_lateness_seconds<a.grace_seconds or a.scan_timeout_seconds<=0:p.error("Invalid scheduler timing configuration")
  if a.account_capital<=0 or a.risk_per_trade<=0 or a.daily_loss_limit<=0 or a.max_open_positions<1:p.error("Capital and risk limits must be positive")
  if a.max_portfolio_risk is not None and a.max_portfolio_risk<=0:p.error("--max-portfolio-risk must be positive")
- if not a.symbols.strip() or not all(s.strip() for s in a.symbols.split(",")):p.error("--symbols must contain comma-separated non-empty symbols")
+ if a.universe_max_symbols<1:p.error("--universe-max-symbols must be at least 1")
+ if a.universe_max_quote_age_minutes<=0 or a.paper_entry_max_quote_age_minutes<=0:p.error("Quote age limits must be positive")
+ if a.universe=="watchlist" and (not a.symbols.strip() or not all(s.strip() for s in a.symbols.split(","))):p.error("--symbols must contain comma-separated non-empty symbols in watchlist mode")
  root=Path(__file__).resolve().parents[1]
  journal=_resolve_path(root,a.paper_journal);ledger=_resolve_path(root,a.scan_ledger);archive=_resolve_path(root,a.candle_archive_dir)
  scan_state=_resolve_path(root,a.scan_state_file);daily_state=_resolve_path(root,a.daily_state_file);db_path=_resolve_path(root,a.db_path)
@@ -198,8 +291,8 @@ def main(argv=None)->int:
   server_thread=threading.Thread(target=server.serve_forever,kwargs={"poll_interval":.5},daemon=True,name="paper-dashboard")
   server_thread.start();LOGGER.info("Local dashboard listening at http://%s:%s",a.dashboard_host,a.dashboard_port)
  except OSError:LOGGER.exception("Dashboard could not bind; scan service continues but dashboard is unavailable")
- tick_thread=threading.Thread(target=_ticker_thread,args=(broker,watch_shadow,symbols,stop),daemon=True,name="kite-tick-monitor");tick_thread.start()
- LOGGER.info("Paper service started: capital=%.2f risk/trade=%.2f portfolio-risk-cap=%.2f daily-loss=%.2f max-positions=%s symbols=%s",a.account_capital,a.risk_per_trade,broker.max_portfolio_risk_inr,a.daily_loss_limit,a.max_open_positions,",".join(symbols))
+ tick_thread=threading.Thread(target=_ticker_thread,args=(broker,watch_shadow,symbols,stop),kwargs={"universe_mode":a.universe},daemon=True,name="kite-tick-monitor");tick_thread.start()
+ LOGGER.info("Paper service started: capital=%.2f risk/trade=%.2f portfolio-risk-cap=%.2f daily-loss=%.2f max-positions=%s universe=%s top_n=%s",a.account_capital,a.risk_per_trade,broker.max_portfolio_risk_inr,a.daily_loss_limit,a.max_open_positions,a.universe,a.universe_max_symbols)
  LOGGER.info("Paper-only boundary enforced: no real order placement/modification/cancellation.")
  try:
   while True:
@@ -217,7 +310,12 @@ def main(argv=None)->int:
     def scan(at):
      return run_scanner_process(at,repo_root=root,symbols=a.symbols,paper_journal=journal,scan_ledger=ledger,
       candle_archive_dir=archive,timeout_seconds=a.scan_timeout_seconds,paper_broker=broker,after_report=after_report,
-      account_capital=a.account_capital,risk_per_trade=a.risk_per_trade)
+      account_capital=a.account_capital,risk_per_trade=a.risk_per_trade,
+      universe_mode=a.universe,universe_max_symbols=a.universe_max_symbols,
+      universe_min_price=a.universe_min_price,universe_max_price=a.universe_max_price,
+      universe_min_volume=a.universe_min_volume,universe_min_turnover=a.universe_min_turnover,
+      universe_max_quote_age_minutes=a.universe_max_quote_age_minutes,
+      paper_entry_max_quote_age_minutes=a.paper_entry_max_quote_age_minutes)
     process_due_boundary(boundary,scan_state,scan)
     closed=broker.square_off_due_positions(now)
     shadow_closed=watch_shadow.square_off_due_positions(now)
@@ -242,7 +340,7 @@ def main(argv=None)->int:
   tick_thread.join(timeout=3)
   _finalize_reports(root=root,db_path=db_path,archive=archive,reports=reports,
    daily_state_file=daily_state,paper_journal=journal,scan_ledger=ledger,
-   scheduler_state_file=scan_state,service_log=log_path,symbols=symbols,
+   scheduler_state_file=scan_state,service_log=log_path,symbols=(broker.monitored_symbols() or symbols),
    reason="manual stop / graceful shutdown")
  return 0
 if __name__=="__main__":raise SystemExit(main())

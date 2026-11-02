@@ -139,6 +139,7 @@ def run_scan(
     universe_min_current_day_volume: int = 10000,
     universe_min_current_day_turnover_inr: float = 5000000.0,
     universe_max_quote_age_minutes: float = 15.0,
+    paper_entry_max_quote_age_minutes: float = 2.0,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
@@ -155,6 +156,8 @@ def run_scan(
         raise ValueError("The nse_equity universe requires --provider kite and fresh Kite quotes")
     if universe_max_symbols < 1:
         raise ValueError("universe_max_symbols must be at least 1")
+    if not isfinite(float(paper_entry_max_quote_age_minutes)) or paper_entry_max_quote_age_minutes <= 0:
+        raise ValueError("paper_entry_max_quote_age_minutes must be finite and positive")
 
     selected = (
         []
@@ -410,10 +413,81 @@ def run_scan(
             ))
         candidates = revised
 
-    # Revalidate every directional Kite setup at the latest executable quote.
-    # This occurs after company-news triage so the final action reflects all gates.
-    entry_validation_time = datetime.now(IST) if now is None else current
+    # Refresh directional candidate quotes after company-news triage. Market-wide
+    # scans take longer than watchlist scans, so the initial bulk quote is not used
+    # as the final executable paper-entry reference.
+    entry_quote_refresh_checks: list[dict[str, Any]] = []
+    entry_quote_refresh_errors: list[str] = []
     if provider_name == "kite":
+        directional_symbols = list(dict.fromkeys(c.symbol for c in candidates if c.side is not None))
+        refreshed_quotes: dict[str, Any] = {}
+        if directional_symbols:
+            try:
+                refreshed_quotes = provider.quotes(directional_symbols)
+            except Exception as exc:
+                entry_quote_refresh_errors.append(f"{type(exc).__name__}: {exc}")
+                LOGGER.warning("Final executable quote refresh failed: %s", exc)
+
+        refresh_time = datetime.now(IST) if now is None else current
+        for candidate in candidates:
+            if candidate.side is None:
+                continue
+            bundle = bundles.get(candidate.symbol, {})
+            latest_quote = refreshed_quotes.get(f"NSE:{candidate.symbol}")
+            if not isinstance(latest_quote, dict):
+                bundle["quote"] = None
+                bundle["verified_live_data"] = False
+                bundle["data_quality_warning"] = "Final executable quote refresh returned no quote."
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                entry_quote_refresh_checks.append({"symbol": candidate.symbol, "verified": False,
+                    "reason": "Final executable quote refresh returned no quote."})
+                continue
+
+            bundle["quote"] = latest_quote
+            quote_verified, quote_warning = _kite_quote_verification(
+                latest_quote, refresh_time, max_age_minutes=paper_entry_max_quote_age_minutes
+            )
+            bundle["verified_live_data"] = quote_verified
+            bundle["data_quality_warning"] = quote_warning
+            audit: dict[str, Any] = {
+                "symbol": candidate.symbol, "verified": quote_verified,
+                "quote_timestamp": latest_quote.get("timestamp") or latest_quote.get("last_trade_time"),
+                "reason": quote_warning or "",
+            }
+            if not quote_verified:
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                entry_quote_refresh_checks.append(audit)
+                continue
+
+            executable = inspect_executable_quote(
+                latest_quote, candidate.side, now=refresh_time,
+                max_age_minutes=paper_entry_max_quote_age_minutes,
+            )
+            audit.update({"bid": executable.get("bid"), "ask": executable.get("ask"),
+                          "executable_quote_valid": executable.get("valid") is True})
+            if not executable.get("valid"):
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                audit["reason"] = executable.get("reason")
+                entry_quote_refresh_checks.append(audit)
+                continue
+
+            try:
+                margin_value = float(provider.estimate_mis_margin_per_share(
+                    candidate.symbol, candidate.side, float(executable["executable_entry_price"])
+                ))
+                if not isfinite(margin_value) or margin_value <= 0:
+                    raise ValueError("Kite returned a non-positive or non-finite MIS margin estimate.")
+                margin_per_share_by_symbol[candidate.symbol] = margin_value
+                audit.update({"margin_verified": True, "margin_per_share_inr": round(margin_value, 4),
+                              "entry_price_used": round(float(executable["executable_entry_price"]), 4)})
+            except Exception as exc:
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                audit.update({"margin_verified": False,
+                              "reason": f"MIS margin refresh failed: {type(exc).__name__}: {exc}"})
+            entry_quote_refresh_checks.append(audit)
+
+        # Timestamp the final validation after quote and margin refresh.
+        entry_validation_time = datetime.now(IST) if now is None else current
         candidates = [
             revalidate_candidate_at_quote(
                 candidate,
@@ -424,16 +498,17 @@ def run_scan(
                 quote_verified=(
                     bundles.get(candidate.symbol, {}).get("verified_live_data") is True
                     and _kite_quote_verification(
-                        bundles.get(candidate.symbol, {}).get("quote"),
-                        entry_validation_time,
-                        max_age_minutes=universe_max_quote_age_minutes,
+                        bundles.get(candidate.symbol, {}).get("quote"), entry_validation_time,
+                        max_age_minutes=paper_entry_max_quote_age_minutes,
                     )[0]
                 ),
                 now=entry_validation_time,
-                max_quote_age_minutes=universe_max_quote_age_minutes,
+                max_quote_age_minutes=paper_entry_max_quote_age_minutes,
             )
             for candidate in candidates
         ]
+    else:
+        entry_validation_time = datetime.now(IST) if now is None else current
 
     ranked = rank_candidates(candidates)
     scan_completed_at = entry_validation_time.isoformat()
@@ -472,6 +547,9 @@ def run_scan(
         },
         "universe_selection": universe_selection,
         "symbols_requested": selected,
+        "entry_quote_refresh": entry_quote_refresh_checks,
+        "entry_quote_refresh_errors": entry_quote_refresh_errors,
+        "paper_entry_max_quote_age_minutes": paper_entry_max_quote_age_minutes,
         "symbols_evaluated": len(candidates),
         "fetch_errors": fetch_errors,
         "news": news_result,
@@ -510,6 +588,8 @@ def main() -> int:
     parser.add_argument("--universe-min-turnover", type=float, default=5000000.0,
                         help="Minimum average_price × current-day volume proxy in INR")
     parser.add_argument("--universe-max-quote-age-minutes", type=float, default=15.0)
+    parser.add_argument("--paper-entry-max-quote-age-minutes", type=float, default=2.0,
+                        help="Maximum age for the final refreshed executable entry quote")
     parser.add_argument("--max-symbols", type=int, default=10, help="Maximum configured symbols in watchlist mode (default: 10)")
     parser.add_argument("--watchlist", type=Path, default=Path("config/watchlist.yaml"))
     parser.add_argument("--news-feeds", type=Path, default=Path("config/news_feeds.yaml"))
@@ -549,6 +629,7 @@ def main() -> int:
         universe_min_current_day_volume=args.universe_min_volume,
         universe_min_current_day_turnover_inr=args.universe_min_turnover,
         universe_max_quote_age_minutes=args.universe_max_quote_age_minutes,
+        paper_entry_max_quote_age_minutes=args.paper_entry_max_quote_age_minutes,
     )
     journal_result = None
     if args.paper_journal is not None and report.get("report_path"):

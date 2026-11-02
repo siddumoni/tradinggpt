@@ -21,3 +21,40 @@ def test_scanner_command_processes_virtual_broker_and_callback(tmp_path,monkeypa
  code=scheduler.run_scanner_process(boundary,repo_root=tmp_path,symbols="INFY",paper_journal=tmp_path/"journal.csv",scan_ledger=tmp_path/"ledger.csv",candle_archive_dir=tmp_path/"candles",timeout_seconds=10,paper_broker=Broker(),after_report=lambda path:captured["after"].append(path),account_capital=100000,risk_per_trade=500)
  assert code==0 and captured["processed"]==[report] and captured["after"]==[report]
  assert "--account-capital" in captured["command"] and "100000" in captured["command"]
+ assert "--universe" in captured["command"] and "nse_equity" in captured["command"]
+ assert "--universe-max-symbols" in captured["command"] and "50" in captured["command"]
+ assert "--symbols" not in captured["command"]
+
+
+def test_dynamic_websocket_subscriptions_follow_screened_set_and_open_positions():
+ from src import paper_trading_service as service
+
+ class Broker:
+  selected = ["RELIANCE", "SBIN"]
+  opened = ["RELIANCE"]
+  def monitored_symbols(self): return sorted(set(self.selected + self.opened))
+
+ class Shadow:
+  opened = ["OLDWATCH"]
+  def open_symbols(self): return list(self.opened)
+
+ class FakeWs:
+  MODE_FULL = "full"
+  def __init__(self): self.added=[]; self.modes=[]; self.removed=[]
+  def subscribe(self,tokens): self.added.append(list(tokens))
+  def set_mode(self,mode,tokens): self.modes.append((mode,list(tokens)))
+  def unsubscribe(self,tokens): self.removed.append(list(tokens))
+
+ broker=Broker(); shadow=Shadow(); ws=FakeWs()
+ token_map={"RELIANCE":1,"SBIN":2,"OLDWATCH":3,"TCS":5}
+ active=set()
+ service._sync_websocket_subscriptions(ws,token_map,active,broker,shadow,["INFY"],"nse_equity")
+ assert active=={1,2,3}
+ assert ws.added==[[1,2,3]]
+ broker.selected=["TCS"]
+ broker.opened=["RELIANCE"]
+ shadow.opened=[]
+ service._sync_websocket_subscriptions(ws,token_map,active,broker,shadow,["INFY"],"nse_equity")
+ assert active=={1,5}
+ assert ws.added[-1]==[5]
+ assert ws.removed[-1]==[2,3]

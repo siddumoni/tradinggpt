@@ -52,7 +52,7 @@ def _quote(**changes):
     return quote
 
 
-def _report(tmp_path, candidates, snapshots):
+def _report(tmp_path, candidates, snapshots, universe=None):
     path = Path(tmp_path) / "scan.json"
     path.write_text(json.dumps({
         "status": "RESEARCH_SCAN_ONLY",
@@ -63,6 +63,8 @@ def _report(tmp_path, candidates, snapshots):
         "orders_placed_or_modified": False,
         "candidates": candidates,
         "market_snapshots": snapshots,
+        "universe_selection": universe or {},
+        "symbols_requested": (universe or {}).get("selected_symbols", []),
     }), encoding="utf-8")
     return path
 
@@ -150,3 +152,18 @@ def test_paper_entry_requires_a_valid_non_crossed_executable_quote(tmp_path, quo
     assert result["opened"] == 0
     assert result["rejected"] == 1
     assert any(reason.lower() in event["message"].lower() for event in broker.snapshot()["events"])
+
+
+def test_paper_broker_tracks_current_top_n_and_keeps_open_position_symbols(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    first = _candidate("FIRST", confidence=90, rr=2.5, signal_time="2026-11-02T10:00:00+05:30")
+    first_universe = {"mode": "nse_equity", "selected_symbols": ["FIRST", "SECOND"]}
+    result = broker.process_scan_report(_report(
+        tmp_path, [first], {"FIRST": _quote()}, universe=first_universe
+    ))
+    assert result["opened"] == 1
+    assert set(broker.monitored_symbols()) == {"FIRST", "SECOND"}
+
+    next_universe = {"mode": "nse_equity", "selected_symbols": ["THIRD", "FOURTH"]}
+    broker.process_scan_report(_report(tmp_path, [], {}, universe=next_universe))
+    assert set(broker.monitored_symbols()) == {"FIRST", "THIRD", "FOURTH"}

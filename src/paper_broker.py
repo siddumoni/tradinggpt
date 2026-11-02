@@ -77,6 +77,9 @@ class PaperBroker:
               brokerage REAL,stt REAL,exchange_charges REAL,sebi_charges REAL,gst REAL,stamp_duty REAL,ipft REAL,
               transaction_charges REAL,slippage_cost REAL,total_estimated_costs REAL,net_pnl REAL,created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+            CREATE TABLE IF NOT EXISTS paper_universe_watchlist(
+              id INTEGER PRIMARY KEY CHECK(id=1),symbols_json TEXT NOT NULL,universe_mode TEXT NOT NULL,
+              scan_as_of TEXT NOT NULL,updated_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time);
             CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy,strategy_version);
             CREATE TABLE IF NOT EXISTS market_marks(symbol TEXT PRIMARY KEY,last_price REAL NOT NULL,bid REAL,ask REAL,market_time TEXT NOT NULL,received_at TEXT NOT NULL);
@@ -118,6 +121,20 @@ class PaperBroker:
         closed=db.execute("SELECT COALESCE(SUM(net_pnl),0) pnl FROM trades WHERE status='CLOSED'").fetchone()
         return float(account["starting_capital"]),float(closed["pnl"])
     def _open_rows(self,db): return list(db.execute("SELECT * FROM trades WHERE status='OPEN' ORDER BY entry_time"))
+    def monitored_symbols(self)->list[str]:
+        """Latest selected scan symbols plus all still-open Champion paper positions."""
+        with self._connect() as db:
+            row=db.execute("SELECT symbols_json FROM paper_universe_watchlist WHERE id=1").fetchone()
+            scanned=[]
+            if row:
+                try:
+                    values=json.loads(row["symbols_json"])
+                    if isinstance(values,list): scanned=[str(x).strip().upper() for x in values if str(x).strip()]
+                except (TypeError,json.JSONDecodeError):
+                    scanned=[]
+            opened=[str(row["symbol"]).strip().upper() for row in db.execute(
+                "SELECT DISTINCT symbol FROM trades WHERE status='OPEN'")]
+        return sorted(set(scanned)|set(opened))
     def _today_net_pnl(self,db,now):
         day=now.astimezone(IST).date().isoformat()
         closed=db.execute("SELECT COALESCE(SUM(net_pnl),0) pnl FROM trades WHERE status='CLOSED' AND substr(exit_time,1,10)=?",(day,)).fetchone()
@@ -146,7 +163,22 @@ class PaperBroker:
         if not as_of: raise ValueError("Scan report is missing as_of timestamp")
         scan_time=to_ist(as_of); opened=rejected=neutral=0; action_counts={}
         allocation_order=[]
+        universe=report.get("universe_selection") if isinstance(report.get("universe_selection"),dict) else {}
+        tracked_source=universe.get("selected_symbols")
+        if not isinstance(tracked_source,list): tracked_source=report.get("symbols_requested",[])
+        tracked_symbols=sorted(set(str(x).strip().upper() for x in tracked_source
+                                   if isinstance(x,str) and x.strip())) if isinstance(tracked_source,list) else []
+        universe_mode=str(universe.get("mode") or "watchlist").strip().lower()
         with self._connect() as db:
+            if isinstance(tracked_source,list):
+                db.execute("""INSERT INTO paper_universe_watchlist(id,symbols_json,universe_mode,scan_as_of,updated_at)
+                  VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET symbols_json=excluded.symbols_json,
+                  universe_mode=excluded.universe_mode,scan_as_of=excluded.scan_as_of,updated_at=excluded.updated_at""",
+                  (_json(tracked_symbols),universe_mode,as_of,datetime.now(IST).isoformat()))
+                self._event(db,"SCAN_UNIVERSE_UPDATED",
+                    f"Paper market-data watchlist refreshed with {len(tracked_symbols)} selected symbols.",
+                    details={"universe_mode":universe_mode,"symbols":tracked_symbols,"scan_as_of":as_of},
+                    event_key=f"universe:{as_of}",at=scan_time)
             directional=sum(1 for c in candidates if isinstance(c,dict) and str(c.get("action") or "").upper() in {"CONDITIONAL_BUY","CONDITIONAL_SHORT"})
             self._event(db,"SCAN_PROCESSED",f"Processed scan report: {len(candidates)} candidates; conditional-entry actions={directional}.",
                 details={"report_path":str(path),"provider":report.get("provider"),"scan_as_of":as_of},
@@ -189,7 +221,8 @@ class PaperBroker:
                 "conditional_candidates":conditional_count,"watch_candidates":watch_count,
                 "no_trade":no_trade_count,"other_actions":other_count,
                 "ranked_candidates":len(ranked),"allocation_order":allocation_order,
-                "allocation_method":"quality_first_greedy_with_shared_cash_and_risk_caps"}
+                "allocation_method":"quality_first_greedy_with_shared_cash_and_risk_caps",
+                "tracked_symbols":self.monitored_symbols(),"universe_mode":universe_mode}
     def _open_candidate(self,db,candidate,snapshot,*,allocation:dict[str,Any]|None=None):
         symbol=str(candidate.get("symbol") or "").strip().upper(); side=str(candidate.get("side") or "").upper()
         strategy=str(candidate.get("strategy") or "").strip(); signal_time=str(candidate.get("signal_time") or "")

@@ -436,6 +436,12 @@ class WatchShadowPortfolio:
                 exit_reason, exit_reference, exit_fill,
             )
 
+    def open_symbols(self) -> list[str]:
+        """Symbols that still need WebSocket marks for open Watch-Shadow positions."""
+        with self._connect() as db:
+            rows=db.execute("SELECT DISTINCT symbol FROM watch_shadow_trades WHERE status='OPEN'")
+            return sorted({str(row["symbol"]).strip().upper() for row in rows if row["symbol"]})
+
     def snapshot(self) -> dict[str, Any]:
         with self._connect() as db:
             opened = list(db.execute("SELECT * FROM watch_shadow_trades WHERE status='OPEN' ORDER BY entry_time DESC"))

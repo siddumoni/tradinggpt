@@ -133,7 +133,10 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
     class ControlledDatetime(RealDatetime):
         @classmethod
         def now(cls, tz=None):
-            value = times.pop(0)
+            # Live-entry revalidation checks freshness again after company-news
+            # triage, so keep returning a stable observation time after the
+            # initial quote-observation timestamp has been consumed.
+            value = times.pop(0) if times else quote_check
             return cls.fromtimestamp(value.timestamp(), tz) if tz else cls.fromtimestamp(value.timestamp())
 
     monkeypatch.setattr(advisory_engine, "datetime", ControlledDatetime)

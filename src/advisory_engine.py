@@ -24,6 +24,7 @@ from src.news_events import DEFAULT_FEEDS, fetch_news, google_news_search_url
 from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_ledger, append_scan_report
 from src.candle_archive import append_completed_candles
+from src.live_entry_validation import inspect_executable_quote, revalidate_candidate_at_quote
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -183,15 +184,13 @@ def run_scan(
         stock_provider_label = "Yahoo Finance unofficial; not verified live exchange data"
     else:
         try:
-            from src.data_fetcher import KiteMarketData
+            from src.data_fetcher import KiteMarketData, is_nse_cash_equity_instrument
             provider = KiteMarketData.from_cached_session()
             instrument_rows = provider.instruments(now=current)
             instruments_by_symbol = {
                 str(row.get("tradingsymbol", "")).upper(): row
                 for row in instrument_rows
-                if str(row.get("exchange", "NSE")).upper() == "NSE"
-                and row.get("segment") == "NSE"
-                and row.get("instrument_type") == "EQ"
+                if is_nse_cash_equity_instrument(row)
                 and row.get("tradingsymbol")
             }
             if mode == "nse_equity":
@@ -209,12 +208,6 @@ def run_scan(
                     str(row.get("tradingsymbol", "")).strip().upper()
                     for row in selected_rows
                 ]
-                if not selected:
-                    raise RuntimeError(
-                        "The NSE equity universe screen found no stocks matching the configured "
-                        "fresh-quote, price, volume and turnover filters. Review universe_selection "
-                        "thresholds or verify the Kite quote feed; no technical scan was run."
-                    )
             else:
                 universe_selection.update({
                     "instrument_universe": "configured symbols/watchlist resolved against Kite NSE EQ instruments",
@@ -324,12 +317,25 @@ def run_scan(
     margin_per_share_by_symbol: dict[str, float] = {}
     margin_checks: list[dict[str, Any]] = []
     if provider_name == "kite":
+        margin_validation_time = datetime.now(IST) if now is None else current
         for candidate in candidates:
             if not candidate.side or not candidate.reference_entry:
                 continue
             try:
+                quote_bundle = bundles.get(candidate.symbol, {})
+                if not quote_bundle.get("verified_live_data"):
+                    raise ValueError("Kite quote did not pass live freshness verification.")
+                executable_quote = inspect_executable_quote(
+                    quote_bundle.get("quote"),
+                    candidate.side,
+                    now=margin_validation_time,
+                    max_age_minutes=universe_max_quote_age_minutes,
+                )
+                if not executable_quote.get("valid"):
+                    raise ValueError(str(executable_quote.get("reason") or "Executable bid/ask is unavailable."))
+                margin_entry_price = float(executable_quote["executable_entry_price"])
                 raw_margin_value = provider.estimate_mis_margin_per_share(
-                    candidate.symbol, candidate.side, candidate.reference_entry
+                    candidate.symbol, candidate.side, margin_entry_price
                 )
                 try:
                     margin_value = float(raw_margin_value)
@@ -347,6 +353,8 @@ def run_scan(
                     "side": candidate.side,
                     "verified": True,
                     "margin_per_share_inr": round(margin_value, 4),
+                    "entry_price_used": round(margin_entry_price, 4),
+                    "entry_price_source": executable_quote["entry_price_source"],
                 })
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
@@ -402,14 +410,48 @@ def run_scan(
             ))
         candidates = revised
 
+    # Revalidate every directional Kite setup at the latest executable quote.
+    # This occurs after company-news triage so the final action reflects all gates.
+    entry_validation_time = datetime.now(IST) if now is None else current
+    if provider_name == "kite":
+        candidates = [
+            revalidate_candidate_at_quote(
+                candidate,
+                bundles.get(candidate.symbol, {}).get("quote"),
+                margin_per_share=margin_per_share_by_symbol.get(candidate.symbol),
+                settings=risk_settings,
+                charge_rates=charge_rates,
+                quote_verified=(
+                    bundles.get(candidate.symbol, {}).get("verified_live_data") is True
+                    and _kite_quote_verification(
+                        bundles.get(candidate.symbol, {}).get("quote"),
+                        entry_validation_time,
+                        max_age_minutes=universe_max_quote_age_minutes,
+                    )[0]
+                ),
+                now=entry_validation_time,
+                max_quote_age_minutes=universe_max_quote_age_minutes,
+            )
+            for candidate in candidates
+        ]
+
     ranked = rank_candidates(candidates)
+    scan_completed_at = entry_validation_time.isoformat()
+    entry_status_counts: dict[str, int] = {}
+    for candidate in candidates:
+        validation_status = candidate.entry_validation.get("status", "NOT_APPLICABLE")
+        entry_status_counts[validation_status] = entry_status_counts.get(validation_status, 0) + 1
     report = {
         "status": "RESEARCH_SCAN_ONLY",
-        "as_of": current.isoformat(),
+        "as_of": scan_completed_at,
+        "scan_started_at": current.isoformat(),
+        "scan_completed_at": scan_completed_at,
+        "as_of_semantics": "Report completion time; each candidate retains its own quote timestamp.",
         "provider": stock_provider_label,
         "stock_data_provider": stock_provider_label,
         "index_regime_provider": index_provider_label,
         "margin_checks": margin_checks,
+        "entry_validation_summary": entry_status_counts,
         "data_provider_mode": provider_name,
         "candle_archive": ({
             "directory": str(candle_archive_dir),
@@ -536,7 +578,11 @@ def main() -> int:
     if report.get("message"):
         print(report["message"])
     for item in report.get("candidates", []):
-        print(f"{item['symbol']:<14} {item['action']:<18} side={item['side'] or '-':<5} confidence={item['confidence']:>2} strategy={item['strategy'] or '-'}")
+        validation = item.get("entry_validation") or {}
+        executable_entry = validation.get("executable_entry_price")
+        entry_text = f" entry=₹{float(executable_entry):.2f}" if executable_entry is not None else ""
+        validation_text = f" live={validation.get('status')}" if validation.get("status") else ""
+        print(f"{item['symbol']:<14} {item['action']:<18} side={item['side'] or '-':<5} confidence={item['confidence']:>2} strategy={item['strategy'] or '-'}{entry_text}{validation_text}")
     print("No orders were placed, modified, or cancelled.")
     return 0
 

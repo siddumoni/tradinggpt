@@ -57,6 +57,36 @@ def is_weekend(day: date) -> bool:
     return day.weekday() >= 5
 
 
+def _is_etf_like_instrument(row: dict[str, Any]) -> bool:
+    """Identify ETF rows that Kite may still label as NSE/EQ instruments.
+
+    Kite's instrument_type=EQ alone does not distinguish every ETF from an
+    operating-company share. Use the descriptive name and common BEES suffix;
+    keep this explicit and auditable rather than pretending the flag is a
+    complete issuer/security-master classification.
+    """
+    symbol = str(row.get("tradingsymbol", "")).strip().upper()
+    name_tokens = str(row.get("name", "")).upper().replace("-", " ").split()
+    return (
+        str(row.get("instrument_type", "")).strip().upper() == "ETF"
+        or "ETF" in name_tokens
+        or symbol.endswith("BEES")
+        or "EXCHANGE TRADED FUND" in " ".join(name_tokens)
+    )
+
+
+def is_nse_cash_equity_instrument(row: dict[str, Any]) -> bool:
+    """Return true for NSE EQ shares, excluding ETF-like instrument rows."""
+    return (
+        str(row.get("exchange", "")).strip().upper() == "NSE"
+        and str(row.get("segment", "")).strip().upper() == "NSE"
+        and str(row.get("instrument_type", "")).strip().upper() == "EQ"
+        and bool(row.get("tradingsymbol"))
+        and bool(row.get("instrument_token"))
+        and not _is_etf_like_instrument(row)
+    )
+
+
 def is_regular_market_hours(now: datetime) -> bool:
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -143,7 +173,7 @@ class KiteMarketData:
         missing: list[str] = []
         for symbol in requested:
             row = by_symbol.get(symbol)
-            if row and row.get("segment") == "NSE" and row.get("instrument_type") == "EQ":
+            if row and is_nse_cash_equity_instrument(row):
                 resolved.append(row)
             else:
                 missing.append(symbol)
@@ -254,16 +284,26 @@ class KiteMarketData:
 
         equities: list[dict[str, Any]] = []
         seen: set[str] = set()
+        instrument_exclusions = {"ETF_LIKE_INSTRUMENT": 0, "DUPLICATE_SYMBOL": 0}
         for row in instrument_rows:
-            symbol = str(row.get("tradingsymbol", "")).strip().upper()
             if (
-                not symbol
-                or symbol in seen
-                or str(row.get("exchange", "NSE")).upper() != "NSE"
-                or str(row.get("segment", "")).upper() != "NSE"
-                or str(row.get("instrument_type", "")).upper() != "EQ"
+                str(row.get("exchange", "")).strip().upper() != "NSE"
+                or str(row.get("segment", "")).strip().upper() != "NSE"
+            ):
+                continue
+            symbol = str(row.get("tradingsymbol", "")).strip().upper()
+            if not symbol:
+                continue
+            if _is_etf_like_instrument(row):
+                instrument_exclusions["ETF_LIKE_INSTRUMENT"] += 1
+                continue
+            if (
+                str(row.get("instrument_type", "")).strip().upper() != "EQ"
                 or not row.get("instrument_token")
             ):
+                continue
+            if symbol in seen:
+                instrument_exclusions["DUPLICATE_SYMBOL"] += 1
                 continue
             seen.add(symbol)
             equities.append(row)
@@ -336,8 +376,9 @@ class KiteMarketData:
         selected_quotes = {item[2]: item[4] for item in selected_rows}
         summary = {
             "mode": "NSE_EQ_LIQUID_TOP",
-            "instrument_universe": "Kite NSE instruments where exchange=NSE, segment=NSE, instrument_type=EQ",
+            "instrument_universe": "Kite NSE EQ shares after ETF-like name/symbol exclusions",
             "instruments_total": len(equities),
+            "instrument_exclusions": instrument_exclusions,
             "quotes_requested": len(symbols),
             "quotes_received": sum(1 for symbol in symbols if f"NSE:{symbol}" in quote_map),
             "eligible_before_top_n": len(ranked),

@@ -32,7 +32,7 @@ The universe mode requires `--provider kite`. It does not silently fall back to 
 ## Screening sequence
 
 1. Read the Kite NSE instrument dump. The existing local cache is refreshed once per IST calendar day.
-2. Retain unique records whose exchange is NSE, segment is NSE, instrument type is EQ, and instrument token is present. Index and ETF records are excluded.
+2. Retain unique NSE EQ records with an instrument token. Exclude explicit ETF instrument types, names containing the `ETF` token / `EXCHANGE TRADED FUND`, and common `BEES`-suffix ETF symbols. Kite's `instrument_type=EQ` alone does not distinguish every ETF from company shares, so this metadata/name filter is documented as a practical guard rather than a complete exchange security-master classification.
 3. Request full quotes for the eligible instrument symbols in batches of up to 500 symbols. Requests are paced at the configured one-second quote interval.
 4. Reject missing quotes, malformed timestamps, timestamps more than one minute in the future, and quotes older than the configured maximum quote age.
 5. Apply the configured last-price, current-day volume, and turnover-proxy filters.
@@ -60,11 +60,22 @@ The existing technical indicators, strategy callbacks, market-regime context, ne
 
 The scanner may request read-only hypothetical MIS margin estimates for a directional candidate. This is not an order submission.
 
+### Latest executable-entry validation
+
+For a LONG candidate, the executable reference is the best ask; for a SHORT candidate, it is the best bid. The scanner requires both sides of the quote book, a valid timestamp, a non-crossed spread and a quote within the configured freshness window. It deliberately does not fall back to last traded price or the last candle close when executable depth is missing.
+
+The strategy's candle-derived stop-loss and targets remain fixed. The risk engine then recalculates quantity, cash/margin constraints, estimated charges, slippage and net R:R at the executable entry. If the current entry has already crossed the original stop/target levels, the setup is invalidated. If after-cost net R:R falls below the configured minimum, or a margin/data/news gate fails, the action is downgraded to `WATCH_CANDIDATE`; risk thresholds are not relaxed.
+
+The candidate's `entry_validation` section reports the original candle reference, executable entry, bid/ask, quote timestamp and age, spread, percentage price drift, validation status and risk breakdown. The breakdown includes gross/net risk and reward, target-specific net R:R, estimated margin, slippage and the line-item cost estimate at the stop and both targets. A passed validation remains a conditional research signal, not an order instruction.
+
 ## Output
 
 The standard `phase6_scan_YYYYMMDD_HHMMSS.json` report contains:
 
-- The universe selection mode and configured filters.
+- The universe selection mode and configured filters, including ETF-like instrument exclusions.
+- Separate scan start/completion timestamps (`as_of` is the report completion time).
+- Per-directional-candidate live executable-entry validation, quote timestamp/age and price drift.
+- Gross/net risk, reward, estimated charges, slippage and target-specific after-cost R:R breakdowns.
 - Number of NSE EQ instruments identified.
 - Quote count requested and received.
 - Number eligible before the top-N cut and number selected.

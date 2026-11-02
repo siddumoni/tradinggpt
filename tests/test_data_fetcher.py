@@ -229,7 +229,11 @@ def test_screen_liquid_nse_equities_ranks_fresh_quotes_and_explains_exclusions()
         {"tradingsymbol": "NIFTY 50", "instrument_token": 999, "exchange": "NSE",
          "segment": "INDICES", "instrument_type": "EQ"},
         {"tradingsymbol": "GOLDBEES", "instrument_token": 998, "exchange": "NSE",
-         "segment": "NSE", "instrument_type": "ETF"},
+         "segment": "NSE", "instrument_type": "ETF", "name": "Nippon India ETF Gold BeES"},
+        {"tradingsymbol": "SILVERBEES", "instrument_token": 997, "exchange": "NSE",
+         "segment": "NSE", "instrument_type": "EQ", "name": "Nippon India Silver ETF"},
+        {"tradingsymbol": "ITBEES", "instrument_token": 996, "exchange": "NSE",
+         "segment": "NSE", "instrument_type": "EQ", "name": "Nippon India ETF Nifty IT"},
     ]
     client = KiteMarketData(
         ScreenKite(),
@@ -243,6 +247,7 @@ def test_screen_liquid_nse_equities_ranks_fresh_quotes_and_explains_exclusions()
     assert [row["tradingsymbol"] for row in selected] == ["TCS"]
     assert quotes["TCS"]["last_price"] == 4000.0
     assert summary["instruments_total"] == 6
+    assert summary["instrument_exclusions"]["ETF_LIKE_INSTRUMENT"] == 3
     assert summary["eligible_before_top_n"] == 2
     assert summary["selected_for_technical_analysis"] == 1
     assert summary["selection_metric"] == "average_price × current-day volume"

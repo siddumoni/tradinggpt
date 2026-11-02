@@ -130,6 +130,8 @@ The scanner obtains the current NSE instrument dump (cached for the IST calendar
 
 The selected symbols reuse their already-fetched quote snapshots. For each selected symbol, the scanner fetches current-session 5-minute and 15-minute candles and reuses the existing indicator, signal, risk, news and read-only margin checks. It skips the daily-history request in this fast intraday path. The report includes the universe filter settings, available instrument count, quote coverage, eligible count, exclusions and selected symbols.
 
+Before a Kite directional candidate can retain `CONDITIONAL_BUY` / `CONDITIONAL_SHORT`, the scanner now revalidates it at the best executable ask (LONG) or bid (SHORT). MIS margin, position size, estimated charges, slippage and after-cost net R:R are recalculated at that price while the original candle-derived stop/target levels remain fixed. Missing/crossed/stale book data, an invalidated level, or a failed risk/news/data gate leaves the setup watch-only. Reports expose quote time, price drift and a full stop/target cost breakdown. ETF-like records whose security name identifies an ETF or whose symbol ends in `BEES` are excluded from the cash-equity universe; this is a practical metadata filter, not a complete exchange security-master classification.
+
 Optional thresholds:
 
 ```powershell

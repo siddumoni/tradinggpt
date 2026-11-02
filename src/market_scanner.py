@@ -6,7 +6,7 @@ or modifies orders. Yahoo data is explicitly treated as unverified for live use.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, time as dtime, timedelta
 from html import unescape
 import re
@@ -57,6 +57,7 @@ class ScanCandidate:
     market_context_risk: str = "UNKNOWN"
     company_headline_match_status: str = "UNKNOWN"
     company_specific_risk: str = "UNKNOWN"
+    entry_validation: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

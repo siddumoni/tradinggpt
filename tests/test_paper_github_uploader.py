@@ -103,6 +103,10 @@ def test_upload_creates_one_private_daily_commit_and_dated_folder(tmp_path):
     paths = {item["path"] for item in fake.tree_entries}
     assert "daily/2026-11-03/reports/paper_daily_2026-11-03.md" in paths
     assert "daily/2026-11-03/manifest.json" in paths
+    assert any(
+        method == "GET" and path == "/repos/acme/research/contents/daily/2026-11-03"
+        for method, path, *_ in fake.calls
+    )
     assert any(method == "PATCH" for method, *_ in fake.calls)
 
 

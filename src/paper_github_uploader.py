@@ -351,12 +351,19 @@ def _prepare_files(root: Path, artifacts: list[dict]) -> tuple[list[dict], list[
         category = str(item.get("category") or "")
         if category not in ALLOWED_CATEGORIES:
             raise GitHubUploadError(f"Unsupported artifact category for {relative.as_posix()}.")
-        content = resolved.read_bytes()
-        if len(content) > MAX_FILE_BYTES:
-            skipped.append(
-                f"{relative.as_posix()}: {len(content)} bytes exceeds the 90 MiB GitHub API upload limit"
+        file_size = resolved.stat().st_size
+        if file_size > MAX_FILE_BYTES:
+            message = (
+                f"{relative.as_posix()}: {file_size} bytes exceeds the 90 MiB GitHub API upload limit"
             )
+            if item.get("required"):
+                raise GitHubUploadError(
+                    f"Required artifact is too large for the GitHub API: {relative.as_posix()}. "
+                    "Use Git LFS or object storage before enabling automatic uploads."
+                )
+            skipped.append(message)
             continue
+        content = resolved.read_bytes()
         if any(pattern.search(content) for pattern in SECRET_TEXT_PATTERNS):
             raise GitHubUploadError(
                 f"Potential credential/token pattern found in {relative.as_posix()}; "

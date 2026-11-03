@@ -53,7 +53,7 @@ At the 15:20 IST report finalization, or during Ctrl+C graceful shutdown:
 
 A failed or incomplete report skips the upload. Authentication, network, privacy-check, file-validation or GitHub errors are logged and do **not** stop the paper service or its shutdown.
 
-Repeated finalization on the same day is safe: files with unchanged Git blob hashes are skipped. A later graceful shutdown can update files (for example, the service log) that changed after the first end-of-day snapshot.
+Repeated finalization on the same day is safe: files with unchanged Git blob hashes are skipped. A later graceful shutdown can update date-scoped files that changed after the first end-of-day snapshot. The manifest is deterministic for the same daily file set, so an unchanged batch does not create another commit.
 
 ## Folder layout
 
@@ -84,6 +84,8 @@ daily/
 ~~~
 
 The exact stock archives depend on the screened/open symbols and candle files updated on that IST date.
+
+**Daily-only export policy:** the local candle archives, scan-run ledger, signal journal, and service log are cumulative. The uploader stages only candle rows whose `date` is the report date, ledger/journal rows whose `scan_as_of` (or `recorded_at`) is that date, and log entries timestamped on that date. The original cumulative source files remain unchanged on the PC. This prevents every new date folder from duplicating all previous sessions.
 
 The SQLite paper-account database is **not uploaded**. '.env', credential/token files, browser profiles, and files outside the project root are also excluded. A credential-pattern scan is performed over each candidate text artifact before any GitHub writes; if a suspicious token pattern is found, the whole upload is cancelled. Files above 60 MiB are not sent through the GitHub API; an oversized required artifact fails the batch rather than silently publishing an incomplete required package.
 

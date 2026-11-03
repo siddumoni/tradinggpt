@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -71,6 +73,16 @@ def _write_daily_log_export(source: Path, destination: Path, *, day: str) -> tup
     return len(selected), True
 
 
+
+
+def _daily_state_matches_report_date(path: Path, day: str) -> bool:
+    """Require the final-state JSON to be a valid snapshot for this IST report date."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("report_date") == day
+
 def write_upload_checklist(
     *,
     root: Path,
@@ -98,7 +110,19 @@ def write_upload_checklist(
     date_stamp = current.strftime("%Y%m%d")
     prefix = f"paper_daily_{day}"
     report_result = report_result or {}
-    staging = Path(reports_dir) / "github_upload_staging" / day
+    reports_root = Path(reports_dir).resolve()
+    staging = reports_root / "github_upload_staging" / day
+    if staging.is_symlink():
+        raise ValueError("Refusing to use a symlink as the daily GitHub upload staging directory.")
+    try:
+        staging.parent.resolve().relative_to(reports_root)
+    except ValueError:
+        raise ValueError("GitHub upload staging directory resolves outside the reports folder.") from None
+    # Rebuild this day's staging exports on every finalization. This prevents an
+    # older file from a previous attempt being uploaded when a fresh export fails.
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True, exist_ok=True)
 
     # label, upload path, required, purpose, category, upload automatically, source path
     artifacts: list[tuple[str, Path, bool, str, str, bool, Path | None]] = [
@@ -154,6 +178,15 @@ def write_upload_checklist(
             f"Daily service log extract could not be created; source={service_log}",
             "logs", True, Path(service_log),
         )
+
+    invalid_required_paths: set[str] = set()
+    if not _daily_state_matches_report_date(Path(daily_state_file), day):
+        invalid_required_paths.add(str(Path(daily_state_file).resolve()))
+    report_date_value = report_result.get("report_date")
+    if report_date_value and report_date_value != day:
+        for key in ("markdown_path", "json_path", "csv_path"):
+            report_path = Path(report_result.get(key, reports_dir / f"{prefix}.md"))
+            invalid_required_paths.add(str(report_path.resolve()))
 
     # Include every scan JSON produced on this IST date.
     for scan_path in sorted(Path(reports_dir).glob(f"phase6_scan_{date_stamp}_*.json")):
@@ -225,7 +258,11 @@ def write_upload_checklist(
     ready = 0
     missing_required = 0
     for label, path, required, purpose, category, upload, source in artifacts:
-        exists = path.is_file()
+        try:
+            path_key = str(path.resolve())
+        except OSError:
+            path_key = str(path)
+        exists = path.is_file() and path_key not in invalid_required_paths
         if exists:
             ready += 1
         elif required:
@@ -269,10 +306,10 @@ def write_upload_checklist(
             "relative_path": relative_path,
             "source_path": str(source) if source else None,
             "required": required,
-            "exists": path.is_file(),
+            "exists": path.is_file() and str(path.resolve()) not in invalid_required_paths,
             "purpose": purpose,
             "category": category,
-            "upload": upload and path.is_file(),
+            "upload": upload and path.is_file() and str(path.resolve()) not in invalid_required_paths,
         })
     artifact_records.append({
         "label": "Daily upload checklist",

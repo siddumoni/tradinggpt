@@ -85,7 +85,7 @@ daily/
 
 The exact stock archives depend on the screened/open symbols and candle files updated on that IST date.
 
-The SQLite paper-account database is **not uploaded**. '.env', credential/token files, browser profiles, and files outside the project root are also excluded. A credential-pattern scan is performed over each candidate text artifact before any GitHub writes; if a suspicious token pattern is found, the whole upload is cancelled. Files above 90 MiB are not sent through the GitHub API; an oversized required artifact fails the batch rather than silently publishing an incomplete required package.
+The SQLite paper-account database is **not uploaded**. '.env', credential/token files, browser profiles, and files outside the project root are also excluded. A credential-pattern scan is performed over each candidate text artifact before any GitHub writes; if a suspicious token pattern is found, the whole upload is cancelled. Files above 60 MiB are not sent through the GitHub API; an oversized required artifact fails the batch rather than silently publishing an incomplete required package.
 
 The uploader uses GitHub's Git Database API to add all changed files and the manifest in a single commit under 'daily/YYYY-MM-DD/'. It performs no action on the Kite account and has no order-placement path.
 

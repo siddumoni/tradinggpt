@@ -107,7 +107,7 @@ def write_upload_checklist(
         f"Created: {current.isoformat()}",
         f"Checklist trigger: {reason}",
         "",
-        "READY artifacts are uploaded to the configured PRIVATE GitHub research repository.",
+        "When configured and all REQUIRED files are present, READY artifacts are uploaded to the PRIVATE GitHub research repository.",
         "The upload creates/updates daily/" + day + "/ in that repository.",
         "Do not upload API credentials, access tokens, .env files, or browser/profile data.",
         "The SQLite paper-account database is intentionally excluded from automatic upload.",
@@ -140,7 +140,7 @@ def write_upload_checklist(
         f"Required files missing: {missing_required}",
         "",
         "Research-only note: all fills/P&L are hypothetical. No real Kite orders were submitted.",
-        "This checklist is itself included in the private GitHub daily package.",
+        "When automatic upload is enabled, this checklist is included in the private GitHub daily package.",
     ])
     body = "\n".join(lines) + "\n"
     checklist_path.parent.mkdir(parents=True, exist_ok=True)

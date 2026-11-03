@@ -52,7 +52,7 @@ def test_upload_checklist_marks_required_artifacts_ready_and_names_paths(tmp_pat
     assert "[READY] [REQUIRED] Daily Markdown report" in body
     assert "logs/paper_scan_runs.csv" in body
     assert "data/paper_candles_kite/RELIANCE.csv" in body
-    assert "SQLite paper account database (optional but useful)" in body
+    assert "SQLite paper account database (excluded from automatic upload)" in body
     assert "Destination: reports/paper_daily_2026-10-28.md" in body
     assert "This checklist is itself included in the private GitHub daily package." in body
     artifacts = {item["label"]: item for item in result["artifacts"]}

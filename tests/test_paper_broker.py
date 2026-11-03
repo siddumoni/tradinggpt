@@ -17,6 +17,8 @@ def test_virtual_trade_opens_then_closes_with_cost_breakdown(tmp_path):
  r=b.process_scan_report(p); assert r["opened"]==1 and r["rejected"]==0
  s=b.snapshot(); assert s["account"]["starting_capital"]==100000 and s["account"]["open_positions"]==1
  trade=s["open_positions"][0]; assert trade["quantity"]>0 and trade["entry_fill_price"]>trade["entry_reference_price"]
+ assert trade["target_1"]==pytest.approx(104.0) and trade["target_2"]==pytest.approx(108.0)
+ assert trade["net_rr_t1"]>0 and trade["net_rr_t2"]>trade["net_rr_t1"]
  assert b.update_market_price("INFY",108.1,bid=108.0,ask=108.1,market_time=datetime.now(IST))==1
  final=b.snapshot(); assert final["account"]["open_positions"]==0 and final["account"]["closed_trades"]==1
  t=final["closed_trades"][0]; assert t["exit_reason"]=="TARGET_2" and t["gross_pnl"]>0 and t["transaction_charges"]>0 and t["slippage_cost"]>0

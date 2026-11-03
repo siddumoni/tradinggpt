@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+import pandas as pd
 
 from src import advisory_engine, market_scanner
 from src.strategies.models import StrategySignal

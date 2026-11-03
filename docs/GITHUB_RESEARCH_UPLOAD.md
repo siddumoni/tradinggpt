@@ -100,7 +100,7 @@ After end-of-day finalization, inspect 'logs/paper_trading_service.log' for one 
 - 'Refusing upload ... not a private repository': the configured destination is public; use a private repository.
 - 'Private GitHub daily research upload failed': inspect the reason (permissions, branch, network or data validation).
 
-The daily folder's 'manifest.json' contains the report date, repository, generation timestamp, uploaded filenames, sizes and SHA-256 hashes. It does not contain the GitHub token.
+The daily folder's 'manifest.json' contains the report date, repository, uploaded filenames, sizes and SHA-256 hashes. Exact generation timestamps remain in the daily report/state files. The manifest does not contain the GitHub token.
 
 ## Manual verification
 

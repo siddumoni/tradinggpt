@@ -346,7 +346,12 @@ def _prepare_files(root: Path, artifacts: list[dict]) -> tuple[list[dict], list[
             skipped.append(f"{relative.as_posix()}: not a regular file")
             continue
         name_lower = resolved.name.lower()
-        if name_lower in DENIED_NAMES or name_lower.endswith((".sqlite", ".sqlite3", ".db", ".token")):
+        if (
+            name_lower in DENIED_NAMES
+            or name_lower.startswith(".env.")
+            or "credential" in name_lower
+            or name_lower.endswith((".sqlite", ".sqlite3", ".db", ".token"))
+        ):
             skipped.append(f"{relative.as_posix()}: excluded sensitive/runtime file")
             continue
         category = str(item.get("category") or "")

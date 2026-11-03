@@ -6,7 +6,7 @@ TradingGPT can automatically publish its finalized end-of-day research package t
 
 The source repository 'siddumoni/tradinggpt' is public. The uploader checks the destination repository metadata and refuses to write unless GitHub confirms 'private: true'. Do not point the uploader at the public source repository.
 
-Create a new empty private repository, for example:
+Create a new private repository initialized with a README (so the default branch exists), for example:
 
 - Repository: 'siddumoni/tradinggpt-research-data'
 - Visibility: **Private**

@@ -181,3 +181,27 @@ def test_upload_refuses_token_patterns_in_artifacts_before_network_write(tmp_pat
     assert result["ok"] is False
     assert "Potential credential/token pattern" in result["message"]
     assert fake.calls == []
+
+
+
+def test_required_artifact_over_github_api_limit_fails_closed(tmp_path, monkeypatch):
+    from src import paper_github_uploader as uploader
+
+    report = tmp_path / "paper_daily.md"
+    report.write_text("this content is larger than the configured upload limit", encoding="utf-8")
+    monkeypatch.setattr(uploader, "MAX_FILE_BYTES", 8)
+    result = uploader.upload_daily_artifacts(
+        root=tmp_path,
+        artifacts=[{
+            "path": str(report), "category": "reports",
+            "exists": True, "required": True, "upload": True,
+        }],
+        report_date="2026-11-03",
+        environ={
+            "TRADINGGPT_RESEARCH_REPO": "acme/research",
+            "TRADINGGPT_RESEARCH_TOKEN": "github_pat_test_token_value",
+        },
+        opener=FakeGitHub().open,
+    )
+    assert result["ok"] is False
+    assert "Required artifact is too large" in result["message"]

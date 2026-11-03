@@ -390,7 +390,7 @@ function render(s){
     {value:x=>fmtMoney(x.transaction_charges)},{value:x=>fmtMoney(x.slippage_cost)},
     {value:x=>fmtMoney(x.net_pnl),cls:x=>pnlClass(x.net_pnl)},{key:"exit_reason",cls:()=>"wrap"}
   ],"No completed Challenger shadow trades yet. Keep the service running to collect prospective results.");
-  renderTable("challenger-registry-rows",registry.filter(x=>String(x.track).toUpperCase()==="SHADOW"),[
+  renderTable("challenger-registry-rows",registry.filter(x=>String(x.track).toUpperCase()==="CHALLENGER"),[
     {key:"strategy_name"},
     {render:(td,x)=>{const st=String(x.status||"TESTING");statusCell(td,st==="REVIEW_CANDIDATE"?"Review candidate":st==="ACTIVE"?"Active":"Testing",st==="REVIEW_CANDIDATE"?"amber":"blue");}},
     {value:x=>x.description||"Still collecting paper observations.",cls:()=>"wrap"}

@@ -283,3 +283,10 @@ Transaction-charge rates are configurable estimates. Verify the current broker/e
 
 
 See [docs/PAPER_PORTFOLIO_ALLOCATION.md](docs/PAPER_PORTFOLIO_ALLOCATION.md) for shared-capital paper allocation and aggregate portfolio-risk controls.
+
+
+## Automatic private GitHub research uploads
+
+At end-of-day report finalization, TradingGPT can automatically upload the daily reports, per-scan JSON files, date-scoped scan/journal diagnostics, date-filtered service log, and date-scoped Kite candle extracts to a dated folder in a **separate private repository**. The uploader refuses public repositories and excludes the SQLite database, credentials, tokens, and files outside the project root. It batches each day into one Git commit and never changes paper-trading or Kite order behavior.
+
+See [Automatic private GitHub research uploads](docs/GITHUB_RESEARCH_UPLOAD.md) for repository setup, least-privilege token permissions, Windows environment variables, folder layout, and troubleshooting. The public source repository is not a permitted data-upload destination.

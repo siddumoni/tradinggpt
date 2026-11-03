@@ -17,7 +17,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#111827">
-<title>TradingGPT · Paper Desk</title>
+<title>TradingGPT Paper Desk</title>
 <style>
 :root{color-scheme:light;--canvas:#f4f6fb;--surface:#fff;--ink:#172033;--muted:#69758b;--line:#e5e9f1;--nav:#111827;--nav-muted:#aab4c6;--accent:#4f46e5;--accent-soft:#eef2ff;--green:#087f5b;--green-bg:#e7f7f0;--red:#c33b4b;--red-bg:#fff0f1;--amber:#9a6700;--amber-bg:#fff6df;--shadow:0 8px 28px rgba(25,38,66,.055)}
 *{box-sizing:border-box}

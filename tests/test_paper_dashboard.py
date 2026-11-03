@@ -27,3 +27,12 @@ def test_dashboard_has_clear_separate_navigation_and_explanations():
     assert "Challenger = alternative strategies. Shadow = how they are tested." in DASHBOARD_HTML
     assert "Watch = opportunities Champion did not take." in DASHBOARD_HTML
     assert "No real orders are sent." in DASHBOARD_HTML
+
+
+def test_dashboard_displays_both_targets_net_rrr_and_dark_theme():
+    from src.paper_dashboard import DASHBOARD_HTML
+
+    assert "Net RRR T1" in DASHBOARD_HTML
+    assert "Net RRR T2" in DASHBOARD_HTML
+    assert 'color-scheme:dark' in DASHBOARD_HTML
+    assert "<th>Target 1</th><th>Target 2</th>" in DASHBOARD_HTML

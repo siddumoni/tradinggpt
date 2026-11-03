@@ -140,3 +140,24 @@ costs:
     assert settings.entry_cutoff_ist == "14:40"
     assert settings.square_off_time_ist == "15:20"
     assert str(charges.ipft_rate) == "1E-9"
+
+
+
+def test_net_reward_risk_helper_matches_assess_trade_calculation() -> None:
+    from src.risk_engine import calculate_net_reward_risk
+
+    settings = RiskSettings(capital_inr=20_000, risk_per_trade_inr=200,
+                            slippage_bps_per_side=5)
+    assessment = assess_trade(
+        side="LONG", entry_price=100, stop_loss=99,
+        target_1=103, target_2=104, settings=settings,
+        estimated_margin_per_share=50,
+    )
+    metrics = calculate_net_reward_risk(
+        side="LONG", entry_price=assessment.entry_price, stop_loss=assessment.stop_loss,
+        target_1=assessment.target_1, target_2=assessment.target_2,
+        quantity=assessment.quantity, slippage_bps_per_side=settings.slippage_bps_per_side,
+    )
+    assert metrics["net_rr_t1"] == pytest.approx(assessment.net_rr_t1)
+    assert metrics["net_rr_t2"] == pytest.approx(assessment.net_rr_t2)
+    assert metrics["net_risk_inr"] == pytest.approx(assessment.net_risk_inr)

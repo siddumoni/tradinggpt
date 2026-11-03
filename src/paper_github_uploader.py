@@ -176,6 +176,20 @@ class GitHubPrivateResearchUploader:
         remote_root = f"daily/{day}"
         categories = sorted({str(item["category"]) for item in files})
         remote_items: dict[str, dict] = {}
+
+        # List the dated root as well as category folders. The root listing
+        # contains manifest.json, which allows unchanged daily batches to be
+        # recognized without producing another Git commit on graceful shutdown.
+        root_endpoint = (
+            f"{repo_path}/contents/{remote_root}"
+            f"?ref={urllib.parse.quote(branch, safe='')}"
+        )
+        root_entries = self._get_optional(root_endpoint) or []
+        if isinstance(root_entries, list):
+            for item in root_entries:
+                if item.get("type") == "file" and item.get("path"):
+                    remote_items[str(item["path"])] = item
+
         for category in categories:
             if category not in ALLOWED_CATEGORIES:
                 raise GitHubUploadError(f"Unsupported upload category: {category}")
@@ -234,8 +248,6 @@ class GitHubPrivateResearchUploader:
         manifest = {
             "project": "TradingGPT",
             "report_date": day,
-            "generated_at": generated_at.astimezone(IST).isoformat()
-            if generated_at.tzinfo else generated_at.replace(tzinfo=IST).isoformat(),
             "repository": self.repository,
             "research_only": True,
             "orders_sent_to_broker": False,

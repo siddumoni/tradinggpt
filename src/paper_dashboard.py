@@ -16,7 +16,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#111827">
+<meta name="theme-color" content="#070d18">
 <title>TradingGPT Paper Desk</title>
 <style>
 :root{color-scheme:light;--canvas:#f4f6fb;--surface:#fff;--ink:#172033;--muted:#69758b;--line:#e5e9f1;--nav:#111827;--nav-muted:#aab4c6;--accent:#4f46e5;--accent-soft:#eef2ff;--green:#087f5b;--green-bg:#e7f7f0;--red:#c33b4b;--red-bg:#fff0f1;--amber:#9a6700;--amber-bg:#fff6df;--shadow:0 8px 28px rgba(25,38,66,.055)}
@@ -132,6 +132,35 @@ td .pill{display:inline-block}
 @media(max-width:1100px){.app{grid-template-columns:200px minmax(0,1fr)}.content{padding:22px}.topbar{padding:18px 22px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.strategy-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.app{display:block}.sidebar{height:auto;position:sticky;top:0;z-index:20;padding:12px 14px;gap:10px}.brand{padding:0 3px}.sidebar .nav-label,.sidebar-note{display:none}.nav{display:flex;overflow-x:auto;gap:5px;padding-bottom:2px}.nav-link{width:auto;white-space:nowrap;padding:8px 10px;font-size:11px}.nav-icon{width:auto}.topbar{position:static;padding:17px 16px}.top-status{align-items:flex-end}.content{padding:16px}.welcome{padding:18px;align-items:flex-start;flex-direction:column}.split{grid-template-columns:1fr}.track-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.metric-card{padding:12px}.metric-value{font-size:18px}.strategy-grid{grid-template-columns:1fr}.track-grid{grid-template-columns:1fr}.topbar{gap:10px}.topbar h1{font-size:20px}.updated{white-space:normal;text-align:right;max-width:130px}.section-head{align-items:flex-start}.search{width:145px}.panel{padding:13px}}
+
+/* TradingGPT dark desk theme */
+:root{color-scheme:dark;--canvas:#080d18;--surface:#101827;--ink:#e8eef9;--muted:#9aa9bf;--line:#263449;--nav:#070c16;--nav-muted:#a7b5c9;--accent:#60a5fa;--accent-soft:#102943;--green:#4ade80;--green-bg:#0d2b22;--red:#fb7185;--red-bg:#351b25;--amber:#fbbf24;--amber-bg:#352a17;--shadow:0 10px 30px rgba(0,0,0,.24)}
+body{background:radial-gradient(ellipse at 70% -20%,#172744 0,transparent 45%),var(--canvas);color:var(--ink)}
+.topbar{background:rgba(8,13,24,.92);border-bottom-color:var(--line)}
+.welcome{background:linear-gradient(115deg,#102c3d,#172a4c);box-shadow:0 12px 32px rgba(0,0,0,.25)}
+.welcome p{color:#c8d7ee}.welcome-tag{background:rgba(96,165,250,.12);border-color:rgba(125,180,245,.28);color:#cfe6ff}
+.btn-link,.search{background:#111c2d;border-color:#2a3a50;color:#dce8fa}
+.btn-link:hover{background:#142b43;border-color:#3b82f6}
+.metric-card,.panel,.track-card{background:linear-gradient(150deg,#121d2d,#0e1725);border-color:#26364b;box-shadow:var(--shadow);color:var(--ink)}
+.track-card:hover{border-color:#4777a8}
+.metric-label,.metric-note,.panel-head p,.section-head p,.helper,.updated,.footer{color:var(--muted)}
+.positive{color:var(--green)!important}.negative{color:var(--red)!important}
+.status{border-color:#15543d;background:#0d2b22;color:#4ade80}.status.offline{color:var(--red);background:var(--red-bg);border-color:#713345}
+.pill{background:#1a2638;color:#c0cce0}.pill.blue{color:#93c5fd;background:#142c48}.pill.green{color:#4ade80;background:#103526}.pill.amber{color:#fbbf24;background:#392d17}.pill.red{color:#fb7185;background:#3b1c27}
+.progress{background:#26354a}.progress-fill{background:linear-gradient(90deg,#2dd4bf,#3b82f6)}
+.stat-item,.strategy-stats div{background:#0b1422;border:1px solid #202f43}
+.info-box{background:#102239;border-color:#274664;color:#c5d7ed}.info-box strong{color:#e7f2ff}
+.strategy-card{background:linear-gradient(150deg,#121d2d,#0e1725);border-color:#26364b;color:var(--ink)}
+.strategy-card .desc,.strategy-stats span{color:var(--muted)}
+.search:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #3b82f622}.search::placeholder{color:#73839b}
+th{background:#172437;color:#a9bad0;border-bottom-color:#2a3a50}
+td{color:#d5deec;border-bottom-color:#223147}tbody tr:hover td{background:#17263a}
+.empty-cell{color:#94a3b8}.api-error{background:var(--red-bg);border-color:#713345;color:#fecdd3}
+.footer strong{color:#dbe7f7}
+.nav-link.active{background:linear-gradient(90deg,#123a35,#182d49);box-shadow:inset 3px 0 #34d399}
+.brand-mark{background:linear-gradient(135deg,#34d399,#2563eb);box-shadow:0 5px 16px #2563eb44}
+.sidebar-note{border-color:#26364b;background:#111c2b}
+
 </style>
 </head>
 <body>
@@ -189,7 +218,7 @@ td .pill{display:inline-block}
         <section class="panel"><div class="panel-head"><div><h3>Portfolio risk usage</h3><p>Planned risk reserved by open positions.</p></div><span class="pill blue">Risk controls</span></div><div class="risk-wrap"><div class="risk-labels"><span>Used risk budget</span><strong id="champion-risk-text">—</strong></div><div class="progress"><div class="progress-fill" id="champion-risk-fill"></div></div><div class="helper" id="champion-risk-note">—</div></div><div class="stat-list" id="champion-guardrails"></div></section>
         <section class="panel"><div class="panel-head"><div><h3>Performance summary</h3><p>Calculated from closed Champion trades.</p></div><span class="pill">Closed trades only</span></div><div class="stat-list" id="champion-performance"></div></section>
       </div>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Open positions</h3><p>Live-marked virtual positions. Net P&amp;L includes estimated costs and slippage.</p></div><span class="pill" id="champion-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last price</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 2</th></tr></thead><tbody id="champion-open-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Open positions</h3><p>Both targets and after-cost reward-to-risk ratios. Net RRR includes estimated charges and slippage.</p></div><span class="pill" id="champion-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last price</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th></tr></thead><tbody id="champion-open-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Champion trade history</h3><p>Completed trades from the main virtual account. Net P&amp;L is after estimated charges and slippage.</p></div><input class="search" type="search" placeholder="Search history…" aria-label="Search Champion history" data-filter-for="champion-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Stock</th><th>Strategy</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="champion-history-rows"></tbody></table></div></section>
     </section>
 
@@ -197,7 +226,7 @@ td .pill{display:inline-block}
       <div class="info-box"><strong>Challenger = alternative strategies. Shadow = how they are tested.</strong><p>Each Challenger strategy has its own simulated paper book. These trades do not use Champion's cash and do not change Champion's profit/loss. A strategy marked “Review candidate” has only passed an initial screen; it is not automatically promoted.</p></div>
       <div class="section-head"><div><div class="section-kicker">Three experiments</div><h2>Challenger strategies</h2><p>Compare their results individually. More trades and more market days make the comparison more useful.</p></div><span class="pill blue" id="challenger-count">3 strategies</span></div>
       <div class="strategy-grid" id="challenger-strategy-cards"></div>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Open Challenger positions</h3><p>Hypothetical positions held by the experimental strategies, not Champion.</p></div><span class="pill" id="challenger-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last</th><th>Unrealised net</th><th>Status</th></tr></thead><tbody id="challenger-open-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Open Challenger positions</h3><p>Both target levels and after-cost RRR for each experimental strategy.</p></div><span class="pill" id="challenger-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Unrealised net</th><th>Status</th></tr></thead><tbody id="challenger-open-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Challenger trade history</h3><p>Closed shadow trades. Use this to compare each experimental strategy over time.</p></div><input class="search" type="search" placeholder="Search history…" aria-label="Search Challenger history" data-filter-for="challenger-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="challenger-history-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Strategy status</h3><p>What each strategy is currently being considered for.</p></div><span class="pill">No automatic promotion</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Status</th><th>What it means</th></tr></thead><tbody id="challenger-registry-rows"></tbody></table></div><div class="footer">Initial review screen: at least 50 closed trades across 20 exit dates, positive net P&amp;L, profit factor ≥ 1.2 and drawdown ≤ 10%. Passing this screen only makes a strategy a review candidate. It still needs untouched out-of-sample validation and manual review.</div></section>
     </section>
@@ -205,7 +234,7 @@ td .pill{display:inline-block}
     <section class="view" data-view="watch">
       <div class="info-box"><strong>Watch = opportunities Champion did not take.</strong><p>The system records scanner candidates rejected specifically by the Target 1 net reward-to-risk rule. It opens a hypothetical Watch position only when live data, margin, news, quote, price levels and account checks also pass. Other candidates appear below as “Not tracked”, with the reason.</p></div>
       <div class="kpis" id="watch-kpis"></div>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Open Watch positions</h3><p>What-if paper trades. These are not part of Champion's positions or P&amp;L.</p></div><span class="pill" id="watch-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 2</th></tr></thead><tbody id="watch-open-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Open Watch positions</h3><p>What-if paper trades, separate from Champion. Net RRR includes estimated costs and slippage.</p></div><span class="pill" id="watch-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Unrealised net</th></tr></thead><tbody id="watch-open-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Watch decision history</h3><p>Shows what was tracked and what was excluded, including the reason.</p></div><input class="search" type="search" placeholder="Search candidates…" aria-label="Search Watch candidates" data-filter-for="watch-audit-rows"></div><div class="table-wrap"><table><thead><tr><th>Time</th><th>Stock</th><th>Side</th><th>Decision</th><th>Target 1 net R:R</th><th>Reason / explanation</th></tr></thead><tbody id="watch-audit-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Closed Watch results</h3><p>Outcome of Watch positions after estimated charges and slippage.</p></div><input class="search" type="search" placeholder="Search closed trades…" aria-label="Search Watch history" data-filter-for="watch-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Stock</th><th>Strategy</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="watch-history-rows"></tbody></table></div></section>
     </section>
@@ -232,6 +261,7 @@ const val=v=>(v===null||v===undefined||v==="")?null:Number(v);
 const fmtMoney=v=>{const n=val(v);if(n===null||!Number.isFinite(n))return "—";return (n<0?"−":"")+"₹"+Math.abs(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});};
 const fmtNum=v=>{const n=val(v);return n===null||!Number.isFinite(n)?"—":n.toLocaleString("en-IN",{maximumFractionDigits:2});};
 const fmtPct=v=>{const n=val(v);return n===null||!Number.isFinite(n)?"—":n.toFixed(1)+"%";};
+const fmtRrr=v=>{const n=val(v);return n===null||!Number.isFinite(n)?"—":n.toFixed(2)+":1";};
 const fmtTime=v=>{if(!v)return "—";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString("en-IN",{hour12:false});};
 const pnlClass=v=>{const n=val(v);return n===null?"":n>0?"positive":n<0?"negative":"";};
 const safeText=v=>(v===null||v===undefined||v==="")?"—":String(v);
@@ -338,7 +368,8 @@ function render(s){
   renderTable("champion-open-rows",opens,[
     {key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},{value:x=>fmtMoney(x.entry_fill_price)},
     {value:x=>fmtMoney(x.last_price)},{value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)},
-    {value:x=>fmtMoney(x.stop_loss)},{value:x=>fmtMoney(x.target_2)}
+    {value:x=>fmtMoney(x.stop_loss)},{value:x=>fmtMoney(x.target_1)},{value:x=>fmtMoney(x.target_2)},
+    {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)}
   ],"No open Champion positions. A position will appear here when a qualifying simulated entry is accepted.");
   renderTable("champion-history-rows",closed,[
     {value:x=>fmtTime(x.exit_time)},{key:"symbol"},{key:"strategy"},{render:sideCell},{value:x=>fmtNum(x.quantity)},
@@ -381,6 +412,8 @@ function render(s){
   renderTable("challenger-open-rows",shadowOpen,[
     {key:"strategy_name"},{key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},
     {value:x=>fmtMoney(x.entry_fill_price)},{value:x=>fmtMoney(x.last_price)},
+    {value:x=>fmtMoney(x.stop_loss)},{value:x=>fmtMoney(x.target_1)},{value:x=>fmtMoney(x.target_2)},
+    {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)},
     {value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)},
     {render:(td,x)=>statusCell(td,"Shadow paper","blue")}
   ],"No open Challenger positions at the moment.");
@@ -408,8 +441,10 @@ function render(s){
   byId("watch-open-count").textContent=watchOpen.length+" open";
   renderTable("watch-open-rows",watchOpen,[
     {key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},{value:x=>fmtMoney(x.entry_fill_price)},
-    {value:x=>fmtMoney(x.last_price)},{value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)},
-    {value:x=>fmtMoney(x.stop_loss)},{value:x=>fmtMoney(x.target_2)}
+    {value:x=>fmtMoney(x.last_price)},{value:x=>fmtMoney(x.stop_loss)},
+    {value:x=>fmtMoney(x.target_1)},{value:x=>fmtMoney(x.target_2)},
+    {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)},
+    {value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)}
   ],"No Watch positions are open. This is normal when no eligible near-miss passes all safety checks.");
   renderTable("watch-audit-rows",watchSignals,[
     {value:x=>fmtTime(x.created_at)},{key:"symbol"},{render:sideCell},

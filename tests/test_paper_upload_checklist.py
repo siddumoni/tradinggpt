@@ -22,7 +22,7 @@ def test_upload_checklist_builds_date_scoped_artifact_exports(tmp_path):
     }
     for path in map(Path, report_paths.values()):
         path.write_text("test daily report", encoding="utf-8")
-    (logs / "paper_daily_report_state.json").write_text("{}", encoding="utf-8")
+    (logs / "paper_daily_report_state.json").write_text('{"report_date": "2026-10-28"}', encoding="utf-8")
     (logs / "paper_scan_scheduler_state.json").write_text("{}", encoding="utf-8")
 
     (logs / "paper_scan_runs.csv").write_text(
@@ -137,3 +137,45 @@ def test_checklist_includes_intraday_scan_json_files_as_optional_uploads(tmp_pat
     assert scan_item["category"] == "scans"
     assert scan_item["required"] is False
     assert scan_item["upload"] is True
+
+
+
+def test_checklist_rebuilds_staging_and_rejects_stale_daily_state(tmp_path):
+    reports = tmp_path / "reports"
+    logs = tmp_path / "logs"
+    reports.mkdir()
+    logs.mkdir()
+    staging = reports / "github_upload_staging" / "2026-10-28"
+    staging.mkdir(parents=True)
+    stale = staging / "logs" / "paper_trading_service.log"
+    stale.parent.mkdir()
+    stale.write_text("stale previous finalization", encoding="utf-8")
+    state = logs / "paper_daily_report_state.json"
+    state.write_text('{"report_date": "2026-10-27"}', encoding="utf-8")
+
+    result = write_upload_checklist(
+        root=tmp_path,
+        reports_dir=reports,
+        report_result=None,
+        daily_state_file=state,
+        scan_ledger=logs / "paper_scan_runs.csv",
+        paper_journal=logs / "paper_signals.csv",
+        scheduler_state_file=logs / "scheduler.json",
+        service_log=logs / "missing_service.log",
+        candle_archive_dir=tmp_path / "candles",
+        db_path=tmp_path / "data" / "paper.sqlite3",
+        symbols=[],
+        now=datetime(2026, 10, 28, 15, 25, tzinfo=IST),
+    )
+
+    state_record = next(
+        item for item in result["artifacts"] if item["label"] == "Daily report state JSON"
+    )
+    service_record = next(
+        item for item in result["artifacts"] if item["label"] == "Daily service log"
+    )
+    assert state_record["exists"] is False
+    assert state_record["upload"] is False
+    assert service_record["exists"] is False
+    assert not stale.exists()
+    assert result["missing_required_files"] >= 2

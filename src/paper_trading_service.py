@@ -13,6 +13,7 @@ from src.paper_broker import DEFAULT_DB,PaperBroker
 from src.paper_dashboard import make_server
 from src.paper_daily_report import generate_daily_report
 from src.paper_upload_checklist import write_upload_checklist
+from src.paper_github_uploader import upload_daily_artifacts
 from src.paper_strategy_lab import process_archive
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.paper_scan_scheduler import latest_completed_boundary,process_due_boundary,run_scanner_process,_resolve_path
@@ -228,6 +229,7 @@ def _finalize_reports(
     except Exception:
         LOGGER.exception("Could not persist the final daily report state.")
 
+    checklist = None
     try:
         checklist = write_upload_checklist(
             root=root, reports_dir=reports, report_result=report_result,
@@ -245,6 +247,51 @@ def _finalize_reports(
     except Exception:
         LOGGER.exception("Could not write the upload checklist.")
         print("\nTradingGPT final report attempted. Check the service log for report errors.", flush=True)
+
+    # Upload only after the daily report and checklist have both been finalized.
+    # A missing report or required local artifact skips the upload; any GitHub
+    # failure is logged but must never interrupt the paper service or its shutdown.
+    if report_result is None:
+        LOGGER.warning("Private GitHub upload skipped because daily report generation failed.")
+    elif checklist is None:
+        LOGGER.warning("Private GitHub upload skipped because the upload checklist was not generated.")
+    elif checklist.get("missing_required_files", 1):
+        LOGGER.warning(
+            "Private GitHub upload skipped: %s required artifact(s) are missing.",
+            checklist.get("missing_required_files"),
+        )
+    else:
+        try:
+            upload_result = upload_daily_artifacts(
+                root=root,
+                artifacts=checklist["artifacts"],
+                report_date=now.date(),
+                now=now,
+            )
+            if upload_result.get("ok"):
+                LOGGER.info(
+                    "Private GitHub daily research upload completed: repo=%s folder=%s "
+                    "uploaded=%s unchanged=%s commit=%s",
+                    upload_result.get("repository"),
+                    upload_result.get("remote_folder"),
+                    upload_result.get("uploaded_files"),
+                    upload_result.get("unchanged_files"),
+                    upload_result.get("commit_sha") or "no changes",
+                )
+                if upload_result.get("skipped_files"):
+                    LOGGER.warning(
+                        "Some optional GitHub upload files were skipped: %s",
+                        "; ".join(upload_result["skipped_files"]),
+                    )
+            elif not upload_result.get("configured"):
+                LOGGER.warning("%s", upload_result.get("message", "Private GitHub uploader is not configured."))
+            else:
+                LOGGER.error(
+                    "Private GitHub daily research upload failed: %s",
+                    upload_result.get("message", "unknown upload error"),
+                )
+        except Exception:
+            LOGGER.exception("Unexpected private GitHub upload failure; paper service remains available.")
     return report_result
 
 

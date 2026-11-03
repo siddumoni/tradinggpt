@@ -23,15 +23,16 @@ from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("paper_github_uploader")
 API_ROOT = "https://api.github.com"
-MAX_FILE_BYTES = 90 * 1024 * 1024
+MAX_FILE_BYTES = 60 * 1024 * 1024
 ALLOWED_CATEGORIES = {"reports", "scans", "diagnostics", "logs", "candles"}
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 SECRET_TEXT_PATTERNS = (
     re.compile(
-        rb"(?im)(?:kite[_-]?api[_-]?key|api[_-]?secret|access[_-]?token)"
+        rb"(?im)(?:kite[_-]?api[_-]?key|api[_-]?key|api[_-]?secret|access[_-]?token)"
         rb"\s*[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9_./+-]{12,}"
     ),
+    re.compile(rb"(?im)authorization\s*[:=]\s*(?:bearer\s+)?[A-Za-z0-9._~+/-]{16,}"),
     re.compile(rb"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
 )
 DENIED_NAMES = {
@@ -354,7 +355,7 @@ def _prepare_files(root: Path, artifacts: list[dict]) -> tuple[list[dict], list[
         file_size = resolved.stat().st_size
         if file_size > MAX_FILE_BYTES:
             message = (
-                f"{relative.as_posix()}: {file_size} bytes exceeds the 90 MiB GitHub API upload limit"
+                f"{relative.as_posix()}: {file_size} bytes exceeds the 60 MiB GitHub API upload limit"
             )
             if item.get("required"):
                 raise GitHubUploadError(

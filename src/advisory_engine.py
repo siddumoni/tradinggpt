@@ -140,6 +140,7 @@ def run_scan(
     universe_min_current_day_turnover_inr: float = 5000000.0,
     universe_max_quote_age_minutes: float = 15.0,
     paper_entry_max_quote_age_minutes: float = 2.0,
+    archive_symbols: list[str] | None = None,
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
@@ -292,6 +293,8 @@ def run_scan(
 
     archive_results: list[dict[str, Any]] = []
     archive_errors: list[str] = []
+    if archive_symbols and provider_name != "kite":
+        raise ValueError("archive_symbols require the authenticated Kite provider")
     if candle_archive_dir is not None:
         for symbol, bundle in bundles.items():
             try:
@@ -303,7 +306,34 @@ def run_scan(
             except Exception as exc:
                 message = f"{symbol}: {type(exc).__name__}: {exc}"
                 archive_errors.append(message)
-                LOGGER.warning("Could not archive paper candles for %s: %s", symbol, exc)
+                LOGGER.warning("Could not archive paper candles for %s: %s", symbol, message)
+
+        # Retain candle history for active research signals even when the
+        # liquidity screener drops a symbol from the current technical universe.
+        extra_archive_symbols = sorted({
+            str(value).strip().upper() for value in (archive_symbols or [])
+            if str(value).strip()
+        } - set(bundles))
+        for symbol in extra_archive_symbols:
+            instrument = instruments_by_symbol.get(symbol)
+            if instrument is None:
+                message = f"{symbol}: open research symbol is not in the current NSE EQ instrument list"
+                archive_errors.append(message)
+                LOGGER.warning("Could not refresh candle archive for %s: %s", symbol, message)
+                continue
+            try:
+                archive_bundle = provider.fetch_symbol_bundle(
+                    instrument, now=current, include_daily_candles=False
+                )
+                archived = append_completed_candles(
+                    symbol, archive_bundle.get("candles_5m", []), candle_archive_dir,
+                    now=current, provider_mode="kite",
+                )
+                archive_results.append(asdict(archived))
+            except Exception as exc:
+                message = f"{symbol}: {type(exc).__name__}: {exc}"
+                archive_errors.append(message)
+                LOGGER.warning("Could not refresh candle archive for open research symbol %s: %s", symbol, message)
 
     general_news = list(news_result.get("items", []))
     candidates = [
@@ -533,6 +563,7 @@ def run_scan(
             "results": archive_results,
             "errors": archive_errors,
             "provider_pure": True,
+            "additional_symbols_requested": sorted({str(x).strip().upper() for x in (archive_symbols or []) if str(x).strip()}),
         } if candle_archive_dir is not None else {"enabled": False}),
         "advisory_only": True,
         "orders_placed_or_modified": False,
@@ -598,6 +629,7 @@ def main() -> int:
     parser.add_argument("--paper-journal", type=Path, default=None, help="Optional CSV path to append directional scan observations for prospective paper review (never places orders)")
     parser.add_argument("--scan-ledger", type=Path, default=None, help="Optional append-only CSV of scan health and candidate counts; defaults to logs/paper_scan_runs.csv when --paper-journal is enabled")
     parser.add_argument("--candle-archive-dir", type=Path, default=None, help="Optional directory for a provider-pure archive of completed 5-minute candles; enabled automatically at data/paper_candles when --paper-journal is set")
+    parser.add_argument("--archive-symbols", default="", help="Additional Kite NSE EQ symbols with open/pending research outcomes; archived but not added to the scan universe")
     parser.add_argument("--account-capital", type=float, default=None, help="Optional virtual account capital override for risk gating")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Optional virtual account planned risk per trade")
     parser.add_argument("--minimum-net-rr", type=float, default=None, help="Optional minimum after-cost reward/risk gate")
@@ -630,6 +662,7 @@ def main() -> int:
         universe_min_current_day_turnover_inr=args.universe_min_turnover,
         universe_max_quote_age_minutes=args.universe_max_quote_age_minutes,
         paper_entry_max_quote_age_minutes=args.paper_entry_max_quote_age_minutes,
+        archive_symbols=[x.strip().upper() for x in args.archive_symbols.split(",") if x.strip()],
     )
     journal_result = None
     if args.paper_journal is not None and report.get("report_path"):

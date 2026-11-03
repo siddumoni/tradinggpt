@@ -102,7 +102,7 @@ python -m src.paper_outcomes --journal logs/paper_signals.csv --candles-dir data
 python -m src.portfolio_replay --trades reports/paper_outcomes_portfolio_candidates.csv --initial-capital 20000 --risk-per-trade 200 --slippage-bps 5 --max-concurrent-positions 3
 ```
 
-The outcome report preserves pending/invalid/gap statuses and does not treat individual overlapping signals as portfolio results. Read [the paper outcome evaluator guide](docs/PAPER_OUTCOME_EVALUATOR.md) before interpreting the output.
+The outcome report preserves pending/invalid/gap statuses and does not treat individual overlapping signals as portfolio results. Read [the paper outcome evaluator guide](docs/PAPER_OUTCOME_EVALUATOR.md) before interpreting the output. For the integrated live-Kite paper service's uncapped, independent WATCH_CANDIDATE near-miss tracker, read [the candidate outcome tracker guide](docs/CANDIDATE_OUTCOME_TRACKER.md).
 
 ## Prospective strategy forward test
 

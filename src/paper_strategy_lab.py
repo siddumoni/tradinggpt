@@ -66,6 +66,18 @@ def ensure_shadow_schema(db:sqlite3.Connection)->None:
  stt REAL,exchange_charges REAL,sebi_charges REAL,gst REAL,stamp_duty REAL,ipft REAL,transaction_charges REAL,
  slippage_cost REAL,total_estimated_costs REAL,net_pnl REAL,reason TEXT NOT NULL,created_at TEXT NOT NULL)""")
  db.execute("CREATE INDEX IF NOT EXISTS idx_shadow_version_status ON shadow_signals(strategy_version,status)")
+def open_shadow_symbols(db_path:Path)->list[str]:
+ """Return symbols with pending or open challenger observations for candle collection."""
+ path=Path(db_path)
+ if not path.is_file():return []
+ try:
+  with sqlite3.connect(path,timeout=5) as db:
+   rows=db.execute("SELECT DISTINCT symbol FROM shadow_signals WHERE status IN ('OPEN','PENDING_ENTRY')")
+   return sorted({str(row[0]).strip().upper() for row in rows if row[0]})
+ except sqlite3.OperationalError:
+  return []
+
+
 def _available_capital(db:sqlite3.Connection,version:str)->float:
  closed=db.execute("SELECT COALESCE(SUM(net_pnl),0) pnl FROM shadow_signals WHERE strategy_version=? AND status='CLOSED'",(version,)).fetchone()
  opened=list(db.execute("SELECT entry_fill_price,quantity FROM shadow_signals WHERE strategy_version=? AND status='OPEN'",(version,)))
@@ -177,7 +189,7 @@ def process_archive(
  """
  from src.paper_broker import PaperBroker
  PaperBroker(db_path);archive=Path(archive_dir)
- inserted=closed=0;symbols=0
+ inserted=closed=0;symbols=0;last_archived_by_symbol={}
  with sqlite3.connect(db_path,timeout=15) as db:
   db.row_factory=sqlite3.Row;ensure_shadow_schema(db)
   if archive.is_dir():
@@ -185,9 +197,10 @@ def process_archive(
     try:candles=load_candles(path)
     except (ValueError,OSError):continue
     modes={str(v).strip().lower() for v in candles["provider_mode"].dropna().unique()} if "provider_mode" in candles.columns else set()
-    if modes and modes!={"kite"}:continue
+    if modes!={"kite"}:continue
     if len(candles)<35:continue
     symbols+=1;symbol=path.stem.upper();frame=add_scanner_indicators(candles)
+    if not frame.empty:last_archived_by_symbol[symbol]=frame.index[-1].isoformat()
     inserted+=_insert_new_signals(db,symbol,frame)
     before=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
     pending=list(db.execute("SELECT * FROM shadow_signals WHERE symbol=? AND status IN ('PENDING_ENTRY','OPEN')",(symbol,)))
@@ -198,12 +211,23 @@ def process_archive(
     after=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
     closed+=int(after-before)
   pending_result=_reconcile_pending_entries(db,now=now,finalize_session=finalize_session)
+  incomplete_open=0
+  if finalize_session:
+   # Never carry an unresolved Challenger position into tomorrow. If the
+   # final bar or any intervening bar is missing, retain an unscored data-gap row.
+   opened=list(db.execute("SELECT signal_id,symbol FROM shadow_signals WHERE status='OPEN'"))
+   for row in opened:
+    last=last_archived_by_symbol.get(str(row["symbol"]).upper(),"unavailable")
+    db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+     (f"Session finalized without a valid stop/target/final-bar exit; last archived candle={last}; "
+      "continuous coverage through 15:10 IST is required. No P&L assigned.",row["signal_id"]))
+    incomplete_open+=1
   for version in DEFINITIONS:_update_review_status(db,version)
   opens=db.execute("SELECT COUNT(*) FROM shadow_signals WHERE status IN ('OPEN','PENDING_ENTRY')").fetchone()[0]
  return {
   "symbols":symbols,"new_signals":inserted,"newly_closed":closed,
-  "open_or_pending":int(opens),**pending_result
-}
+  "open_or_pending":int(opens),"incomplete_open":incomplete_open,**pending_result
+ }
 if __name__=="__main__":
  import argparse,json
  p=argparse.ArgumentParser(description="Update prospective shadow-strategy outcomes from Kite candles.")

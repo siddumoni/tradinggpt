@@ -14,7 +14,8 @@ from src.paper_dashboard import make_server
 from src.paper_daily_report import generate_daily_report
 from src.paper_upload_checklist import write_upload_checklist
 from src.paper_github_uploader import upload_daily_artifacts
-from src.paper_strategy_lab import process_archive
+from src.paper_strategy_lab import process_archive, open_shadow_symbols
+from src.candidate_outcome_tracker import CandidateOutcomeTracker
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.paper_scan_scheduler import latest_completed_boundary,process_due_boundary,run_scanner_process,_resolve_path
 
@@ -181,7 +182,7 @@ def _finalize_reports(
     now = datetime.now(IST)
     shadow_update: dict = {}
     try:
-        finalize_session = now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 20)
+        finalize_session = now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 15)
         shadow_update = process_archive(
             archive, db_path, now=now, finalize_session=finalize_session
         )
@@ -189,6 +190,16 @@ def _finalize_reports(
     except Exception as exc:
         LOGGER.exception("Challenger lab final update failed; reporting will continue.")
         shadow_update = {"error": f"{type(exc).__name__}: {exc}"}
+
+    candidate_outcome_update: dict = {}
+    try:
+        candidate_outcome_update = CandidateOutcomeTracker(db_path).process_archive(
+            archive, now=now, finalize_session=finalize_session
+        )
+        LOGGER.info("Independent candidate outcome update: %s", candidate_outcome_update)
+    except Exception as exc:
+        LOGGER.exception("Independent candidate outcome finalization failed; reporting will continue.")
+        candidate_outcome_update = {"error": f"{type(exc).__name__}: {exc}"}
 
     report_result = None
     try:
@@ -218,6 +229,7 @@ def _finalize_reports(
         "orders_sent_to_broker": False,
         "summary": report_result or {"error": "Daily report generation failed"},
         "shadow_update": shadow_update,
+        "candidate_outcome_update": candidate_outcome_update,
         "watch_shadow": watch_state,
     }
     try:
@@ -332,6 +344,7 @@ def main(argv=None)->int:
  symbols=list(dict.fromkeys(s.strip().upper() for s in a.symbols.split(",") if s.strip()))
  broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions,max_portfolio_risk_inr=a.max_portfolio_risk)
  watch_shadow=WatchShadowPortfolio(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
+ candidate_outcomes=CandidateOutcomeTracker(db_path)
  stop=threading.Event();server=None;server_thread=None;reported_dates=set()
  try:
   server=make_server(broker,a.dashboard_host,a.dashboard_port,watch_shadow=watch_shadow)
@@ -352,12 +365,27 @@ def main(argv=None)->int:
       LOGGER.info("Watch-candidate shadow book after %s: %s",path.name,watch_result)
      except Exception:
       LOGGER.exception("Watch-candidate shadow processing failed; champion account remains unchanged.")
+     try:
+      candidate_result=candidate_outcomes.process_scan_report(path)
+      LOGGER.info("Independent candidate outcomes after %s: %s",path.name,candidate_result)
+     except Exception:
+      LOGGER.exception("Independent candidate outcome ingestion failed; other paper books continue.")
      result=process_archive(archive,db_path)
      LOGGER.info("Challenger lab updated from archive after %s: %s",path.name,result)
+     try:
+      outcome_result=candidate_outcomes.process_archive(archive)
+      LOGGER.info("Independent candidate outcomes updated after %s: %s",path.name,outcome_result)
+     except Exception:
+      LOGGER.exception("Independent candidate outcomes could not be advanced from candle archive.")
     def scan(at):
+     archive_symbols=sorted(
+      set(open_shadow_symbols(db_path))
+      | set(watch_shadow.open_symbols())
+      | set(candidate_outcomes.open_symbols())
+     )
      return run_scanner_process(at,repo_root=root,symbols=a.symbols,paper_journal=journal,scan_ledger=ledger,
       candle_archive_dir=archive,timeout_seconds=a.scan_timeout_seconds,paper_broker=broker,after_report=after_report,
-      account_capital=a.account_capital,risk_per_trade=a.risk_per_trade,
+      archive_symbols=archive_symbols,account_capital=a.account_capital,risk_per_trade=a.risk_per_trade,
       universe_mode=a.universe,universe_max_symbols=a.universe_max_symbols,
       universe_min_price=a.universe_min_price,universe_max_price=a.universe_max_price,
       universe_min_volume=a.universe_min_volume,universe_min_turnover=a.universe_min_turnover,

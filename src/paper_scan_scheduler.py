@@ -149,6 +149,7 @@ def run_scanner_process(
     universe_min_turnover: float = 5000000.0,
     universe_max_quote_age_minutes: float = 15.0,
     paper_entry_max_quote_age_minutes: float = 2.0,
+    archive_symbols: list[str] | None = None,
 ) -> int:
     """Run the selected Kite market scan and process its snapshot through the virtual account."""
     if universe_mode not in {"watchlist", "nse_equity"}:
@@ -178,6 +179,9 @@ def run_scanner_process(
         ]
     else:
         command += ["--symbols", symbols]
+    if archive_symbols:
+        extra = sorted({str(value).strip().upper() for value in archive_symbols if str(value).strip()})
+        if extra: command += ["--archive-symbols", ",".join(extra)]
     command.append("--verbose")
     LOGGER.info("Command for %s: %s", _to_ist(boundary).isoformat(), subprocess.list2cmdline(command))
     try:

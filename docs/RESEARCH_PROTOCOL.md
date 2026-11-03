@@ -82,3 +82,14 @@ Failure or insufficient sample is a valid result. Do not weaken risk rules or lo
 ## 7. Live-trading boundary
 
 This repository remains advisory-only. Passing the research protocol does not prove profitability and is not authorization to enable automated orders. Confirm results in prospective paper trading, reconcile intended signals against realistic fills and charges, and review broker/exchange rules before any separate decision about live use.
+
+
+## Independent candidate outcome observations
+
+The integrated paper service also keeps a separate candle-based outcome ledger for scanner `WATCH_CANDIDATE` observations rejected only by the minimum after-cost Target 1 R:R gate. This ledger is deliberately **not** the three-position Watch-Shadow portfolio. Each eligible candidate is sized independently against a fixed research capital/risk assumption and evaluated from its exact signal candle and next five-minute candle open. It has no shared cash reservation, maximum-open-position, or same-symbol overlap constraint.
+
+The independent ledger is useful for answering a different question: how did the scanner's eligible near-miss candidates behave, independent of which ones fit into a limited portfolio? The same symbol or overlapping time window can therefore appear several times. Do not sum these outcomes, calculate portfolio expectancy from them, or compare their aggregate P&L with the Champion book. Use a shared-capital allocation replay on a defined subset before making an allocation-level statement.
+
+The ledger preserves pending entries, exclusions, and incomplete candle gaps. It requires the archived signal close to reconcile with the saved reference close, requires the exact next-bar open, applies conservative stop-first handling and estimated costs/slippage, and only records P&L when a target, stop, or final-session candle exit is defensible. Missing candles, including a missing final 15:10 bar, produce an unscored `INCOMPLETE_DATA_GAP` outcome. Active candidate, Challenger, and Watch-Shadow symbols are included in the service's additional Kite candle refresh even when they are outside the latest liquid top-N technical universe.
+
+See [Candidate Outcome Tracker](CANDIDATE_OUTCOME_TRACKER.md) for its exact assumptions and status definitions.

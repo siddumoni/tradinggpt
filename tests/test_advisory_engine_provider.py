@@ -523,3 +523,59 @@ def test_invalid_kite_margin_estimate_fails_closed_in_full_candidate_pipeline(
     assert any("Margin estimate unavailable" in reason for reason in candidate["reasons"])
     assert report["advisory_only"] is True
     assert report["orders_placed_or_modified"] is False
+
+
+
+def test_open_research_symbols_are_archived_outside_selected_universe(monkeypatch, tmp_path):
+    now = datetime(2026, 11, 3, 10, 0, tzinfo=IST)
+    fetched = []
+
+    class FakeKite:
+        def instruments(self, now=None):
+            return [
+                {"tradingsymbol": "INFY", "instrument_token": 408065,
+                 "segment": "NSE", "instrument_type": "EQ"},
+                {"tradingsymbol": "SYRMA", "instrument_token": 999001,
+                 "segment": "NSE", "instrument_type": "EQ"},
+                {"tradingsymbol": "NIFTY 50", "instrument_token": 256265,
+                 "segment": "INDICES", "instrument_type": "EQ"},
+            ]
+
+        def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
+            return []
+
+        def fetch_symbol_bundle(self, instrument, now=None, *, include_daily_candles=True):
+            symbol = instrument["tradingsymbol"]
+            fetched.append((symbol, include_daily_candles))
+            candles = []
+            if symbol == "SYRMA":
+                for minute, price in ((15, 100.0), (20, 100.2), (25, 100.1)):
+                    candles.append({
+                        "date": datetime(2026, 11, 3, 9, minute, tzinfo=IST),
+                        "open": price, "high": price + 0.2, "low": price - 0.2,
+                        "close": price, "volume": 1000,
+                    })
+            return {
+                "quote": {"last_price": 100.0, "timestamp": now},
+                "candles_5m": candles,
+                "candles_15m": [],
+                "provider": "fake Kite",
+            }
+
+    monkeypatch.setattr("src.data_fetcher.KiteMarketData.from_cached_session", lambda: FakeKite())
+    monkeypatch.setattr(advisory_engine, "fetch_news", lambda *a, **k: {"items": [], "errors": []})
+
+    archive = tmp_path / "candles"
+    report = advisory_engine.run_scan(
+        symbols=["INFY"], now=now, max_symbols=1, output_dir=tmp_path,
+        data_provider="kite", candle_archive_dir=archive, archive_symbols=["SYRMA"],
+    )
+
+    assert report["symbols_evaluated"] == 1
+    assert [item["symbol"] for item in report["candidates"]] == ["INFY"]
+    assert ("SYRMA", False) in fetched
+    assert (archive / "SYRMA.csv").is_file()
+    saved = pd.read_csv(archive / "SYRMA.csv")
+    assert len(saved) == 3
+    assert set(saved["provider_mode"]) == {"kite"}
+    assert report["candle_archive"]["additional_symbols_requested"] == ["SYRMA"]

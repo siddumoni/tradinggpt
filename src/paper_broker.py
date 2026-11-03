@@ -7,7 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 from src.cost_calculator import estimate_intraday_round_trip_cost
 from src.paper_allocator import rank_paper_candidates
-from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
+from src.risk_engine import RiskSettings, assess_trade, calculate_net_reward_risk, load_phase2_settings
 
 IST=ZoneInfo("Asia/Kolkata")
 DEFAULT_DB=Path("data/paper_trading.sqlite3")
@@ -414,7 +414,14 @@ class PaperBroker:
                 fees=estimate_intraday_round_trip_cost(side=row["side"],entry_price=float(row["entry_fill_price"]),exit_price=exit_fill,quantity=qty,rates=rates)
                 slip=abs(float(row["entry_fill_price"])-entry_ref)*qty+abs(exit_fill-exit_ref)*qty; net_mark=gross-fees.total-slip
                 unreal+=net_mark; exposure+=float(row["position_value_inr"])
-                trade.update({"last_price":last,"unrealized_gross_pnl":gross,"unrealized_net_pnl":net_mark,"market_time":mark.get("market_time") if mark else None})
+                rr_metrics = calculate_net_reward_risk(
+                    side=row["side"], entry_price=float(row["entry_fill_price"]),
+                    stop_loss=float(row["stop_loss"]), target_1=float(row["target_1"]),
+                    target_2=float(row["target_2"]), quantity=qty,
+                    slippage_bps_per_side=self.slippage_bps, charge_rates=rates,
+                )
+                trade.update({"last_price":last,"unrealized_gross_pnl":gross,"unrealized_net_pnl":net_mark,
+                    "market_time":mark.get("market_time") if mark else None,**rr_metrics})
                 positions.append(trade)
             closed=list(db.execute("SELECT * FROM trades WHERE status='CLOSED' ORDER BY exit_time DESC")); count=len(closed)
             wins=sum(1 for r in closed if float(r["net_pnl"] or 0)>0); losses=sum(1 for r in closed if float(r["net_pnl"] or 0)<0)
@@ -440,8 +447,15 @@ class PaperBroker:
                 exit_fill=exit_ref*(1-self.slippage_bps/10000) if item["side"]=="LONG" else exit_ref*(1+self.slippage_bps/10000)
                 fees=estimate_intraday_round_trip_cost(side=item["side"],entry_price=entry_fill,exit_price=exit_fill,quantity=qty,rates=rates)
                 slip=abs(entry_fill-entry_ref)*qty+abs(exit_fill-exit_ref)*qty
+                rr_metrics = calculate_net_reward_risk(
+                    side=item["side"], entry_price=entry_fill,
+                    stop_loss=float(item["stop_loss"]), target_1=float(item["target_1"]),
+                    target_2=float(item["target_2"]), quantity=qty,
+                    slippage_bps_per_side=self.slippage_bps, charge_rates=rates,
+                )
                 item.update({"last_price":last,"unrealized_gross_pnl":gross,"unrealized_net_pnl":gross-fees.total-slip,
-                    "track":"SHADOW","position_value_inr":entry_fill*qty,"market_time":mark.get("market_time") if mark else None})
+                    "track":"SHADOW","position_value_inr":entry_fill*qty,"market_time":mark.get("market_time") if mark else None,
+                    **rr_metrics})
                 shadow_open.append(item)
             for row in db.execute("SELECT * FROM shadow_signals WHERE status='CLOSED' ORDER BY exit_time DESC LIMIT 100"):
                 item=dict(row); item["strategy"]=item["strategy_name"]; item["track"]="SHADOW"; shadow_closed.append(item)

@@ -81,6 +81,10 @@ def test_rr_only_watch_candidate_opens_in_separate_shadow_book(tmp_path):
     assert trade["quantity"] > 0
     assert trade["source_rejection_reason"].startswith("Rejected:")
     assert trade["entry_fill_price"] > trade["entry_reference_price"]
+    assert trade["target_1"] == pytest.approx(101.1)
+    assert trade["target_2"] == pytest.approx(102.0)
+    assert trade["net_rr_t1"] > 0
+    assert trade["net_rr_t2"] > trade["net_rr_t1"]
     assert state["orders_sent_to_broker"] is False
 
 

@@ -58,6 +58,71 @@ class TradeAssessment:
     slippage_at_t2_inr: float = 0.0
 
 
+def calculate_net_reward_risk(
+    *,
+    side: TradeSide,
+    entry_price: float,
+    stop_loss: float,
+    target_1: float,
+    target_2: float,
+    quantity: int,
+    slippage_bps_per_side: float = 5.0,
+    charge_rates: ChargeRates = ChargeRates(),
+) -> dict[str, float]:
+    """Return Target 1/2 reward-to-risk using the same cost model as assess_trade.
+
+    entry_price is the price basis used by the risk assessment. This is the
+    executable simulated fill for Champion/Challenger and the scanner reference
+    price for Watch, matching the respective entry validators.
+    """
+    prices = (entry_price, stop_loss, target_1, target_2)
+    if side not in ("LONG", "SHORT"):
+        raise ValueError("side must be 'LONG' or 'SHORT'")
+    if not all(isfinite(float(price)) and float(price) > 0 for price in prices):
+        raise ValueError("all prices must be finite and greater than zero")
+    if isinstance(quantity, bool) or int(quantity) != quantity or int(quantity) < 1:
+        raise ValueError("quantity must be a positive integer")
+    if not isfinite(float(slippage_bps_per_side)) or not 0 <= float(slippage_bps_per_side) <= 100:
+        raise ValueError("slippage_bps_per_side must be between 0 and 100")
+    if side == "LONG":
+        valid_levels = stop_loss < entry_price < target_1 <= target_2
+    else:
+        valid_levels = target_2 <= target_1 < entry_price < stop_loss
+    if not valid_levels:
+        raise ValueError("invalid price levels for side; check stop-loss and target ordering")
+
+    qty = int(quantity)
+    stop_costs = estimate_intraday_round_trip_cost(
+        side=side, entry_price=entry_price, exit_price=stop_loss,
+        quantity=qty, rates=charge_rates,
+    )
+    t1_costs = estimate_intraday_round_trip_cost(
+        side=side, entry_price=entry_price, exit_price=target_1,
+        quantity=qty, rates=charge_rates,
+    )
+    t2_costs = estimate_intraday_round_trip_cost(
+        side=side, entry_price=entry_price, exit_price=target_2,
+        quantity=qty, rates=charge_rates,
+    )
+    slippage_scale = qty * float(slippage_bps_per_side) / 10_000.0
+    gross_risk = abs(entry_price - stop_loss) * qty
+    net_risk = gross_risk + stop_costs.total + (entry_price + stop_loss) * slippage_scale
+    gross_reward_t1 = abs(target_1 - entry_price) * qty
+    gross_reward_t2 = abs(target_2 - entry_price) * qty
+    net_reward_t1 = gross_reward_t1 - t1_costs.total - (entry_price + target_1) * slippage_scale
+    net_reward_t2 = gross_reward_t2 - t2_costs.total - (entry_price + target_2) * slippage_scale
+    return {
+        "gross_risk_inr": gross_risk,
+        "net_risk_inr": net_risk,
+        "gross_reward_t1_inr": gross_reward_t1,
+        "gross_reward_t2_inr": gross_reward_t2,
+        "net_reward_t1_inr": net_reward_t1,
+        "net_reward_t2_inr": net_reward_t2,
+        "net_rr_t1": net_reward_t1 / net_risk if net_risk > 0 else 0.0,
+        "net_rr_t2": net_reward_t2 / net_risk if net_risk > 0 else 0.0,
+    }
+
+
 def assess_trade(
     *,
     side: TradeSide,

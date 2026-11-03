@@ -16,7 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.cost_calculator import estimate_intraday_round_trip_cost
-from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
+from src.risk_engine import RiskSettings, assess_trade, calculate_net_reward_risk, load_phase2_settings
 
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_DB = Path("data/paper_trading.sqlite3")
@@ -467,9 +467,16 @@ class WatchShadowPortfolio:
                 fees = estimate_intraday_round_trip_cost(side=row["side"], entry_price=float(row["entry_fill_price"]),
                                                           exit_price=exit_fill, quantity=qty, rates=rates)
                 slippage = abs(float(row["entry_fill_price"]) - float(row["entry_reference_price"])) * qty + abs(exit_fill - exit_ref) * qty
+                rr_metrics = calculate_net_reward_risk(
+                    side=row["side"], entry_price=float(row["entry_reference_price"]),
+                    stop_loss=float(row["stop_loss"]), target_1=float(row["target_1"]),
+                    target_2=float(row["target_2"]), quantity=qty,
+                    slippage_bps_per_side=self.slippage_bps, charge_rates=rates,
+                )
                 item.update({"last_price": last, "unrealized_gross_pnl": gross,
                              "unrealized_net_pnl": gross - fees.total - slippage,
-                             "market_time": mark.get("market_time") if mark else None})
+                             "market_time": mark.get("market_time") if mark else None,
+                             **rr_metrics})
                 unrealised += float(item["unrealized_net_pnl"])
                 exposure += float(row["position_value_inr"] or 0)
                 positions.append(item)

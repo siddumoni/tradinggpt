@@ -63,3 +63,46 @@ def test_eligible_pending_entry_remains_pending_before_session_finalization(tmp_
  status,_reason=_shadow_status(db_path)
  assert status=="PENDING_ENTRY"
  assert result["open_or_pending"]==1
+
+
+def test_open_challenger_position_is_marked_unscored_at_session_finalization(tmp_path):
+ from src.paper_strategy_lab import open_shadow_symbols
+ db_path=tmp_path/"paper.sqlite3"
+ archive=tmp_path/"candles"
+ with sqlite3.connect(db_path) as db:
+  db.row_factory=sqlite3.Row
+  ensure_shadow_schema(db)
+  db.execute(
+   """INSERT INTO shadow_signals(
+      signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+      stop_loss,target_1,target_2,status,entry_time,entry_reference_price,
+      entry_fill_price,quantity,reason,created_at
+   ) VALUES(?,?,?,?,?,?,?,?,?,?,'OPEN',?,?,?,?,?,?)""",
+   ("open-gap","challenger_vwap_momentum_v1","VWAP momentum","SYRMA","SHORT",
+    "2026-11-03T09:30:00+05:30",100.0,101.0,98.0,97.0,
+    "2026-11-03T09:35:00+05:30",100.0,99.95,10,"test open","2026-11-03T09:30:00+05:30"),
+  )
+ index=pd.date_range("2026-11-03 09:15",periods=36,freq="5min",tz=ZoneInfo("Asia/Kolkata"))
+ frame=pd.DataFrame({
+  "open":[100.0]*len(index),"high":[100.2]*len(index),
+  "low":[99.8]*len(index),"close":[100.0]*len(index),
+  "volume":[1000]*len(index),"provider_mode":["kite"]*len(index),
+ },index=index)
+ frame.index.name="date"
+ archive.mkdir()
+ frame.reset_index().to_csv(archive/"SYRMA.csv",index=False)
+
+ assert open_shadow_symbols(db_path)==["SYRMA"]
+ result=process_archive(
+  archive,db_path,
+  now=pd.Timestamp("2026-11-03 15:20",tz=ZoneInfo("Asia/Kolkata")),
+  finalize_session=True,
+ )
+ with sqlite3.connect(db_path) as db:
+  row=db.execute("SELECT status,net_pnl,reason FROM shadow_signals WHERE signal_id='open-gap'").fetchone()
+ assert row[0]=="INCOMPLETE_DATA_GAP"
+ assert row[1] is None
+ assert "15:10 IST" in row[2]
+ assert result["incomplete_open"]==1
+ assert result["open_or_pending"]==0
+ assert open_shadow_symbols(db_path)==[]

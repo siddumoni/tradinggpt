@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from src.paper_broker import DEFAULT_DB, PaperBroker
 from src.watch_shadow_portfolio import WatchShadowPortfolio
+from src.candidate_outcome_tracker import CandidateOutcomeTracker
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -38,6 +39,7 @@ def generate_daily_report(
         max_daily_loss=float(champion_account.get("max_daily_loss", 2000.0)),
         max_open_positions=int(champion_account.get("max_open_positions", 3)),
     ).snapshot()
+    candidate_outcomes = CandidateOutcomeTracker(db_path).snapshot(day)
 
     with sqlite3.connect(db_path) as db:
         db.row_factory = sqlite3.Row
@@ -166,16 +168,26 @@ def generate_daily_report(
                 "excluded_candidates": watch_shadow["excluded_candidates_today"],
                 "candidate_observations": watch_shadow["candidate_observations_today"],
             },
+            "candidate_outcomes": {
+                "eligible_observations": candidate_outcomes["eligible_observations"],
+                "closed_outcomes": candidate_outcomes["closed_outcomes"],
+                "wins": candidate_outcomes["wins"],
+                "losses": candidate_outcomes["losses"],
+                "incomplete_data_gaps": candidate_outcomes["incomplete_data_gaps"],
+                "pending_entries": candidate_outcomes["pending_entries"],
+                "excluded": candidate_outcomes["excluded"],
+            },
             "risk_overrun_count": len(risk_overruns),
         },
         "champion": champion,
         "challengers": challengers,
         "watch_shadow": watch_shadow,
+        "candidate_outcomes": candidate_outcomes,
         "risk_overruns": risk_overruns,
         "events": events,
         "warning": (
             "Fills, transaction costs and P&L are hypothetical estimates. Champion, challenger, "
-            "and watch-shadow results are separate; shadow books do not change champion P&L."
+            "watch-shadow and candidate-outcome results are separate; candidate outcomes overlap and are not portfolio P&L."
         ),
     }
     json_path.write_text(
@@ -235,6 +247,24 @@ def generate_daily_report(
             "estimated_net_risk_inr": row.get("estimated_net_risk_inr"),
             "estimated_net_reward_t1_inr": row.get("estimated_net_reward_t1_inr"),
         })
+    for row in candidate_outcomes["observations"]:
+        rows.append({
+            "track": "CANDIDATE_OUTCOME", "strategy": row.get("strategy"),
+            "strategy_version": "", "symbol": row.get("symbol"), "side": row.get("side"),
+            "status": row.get("status"), "signal_time": row.get("signal_time"),
+            "entry_time": row.get("entry_time"), "entry_fill_price": row.get("entry_fill_price"),
+            "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
+            "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
+            "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),
+            "slippage_cost": row.get("slippage_cost"), "total_estimated_costs": row.get("total_estimated_costs"),
+            "net_pnl": row.get("net_pnl"), "risk_budget_inr": row.get("risk_budget_inr"),
+            "reason": row.get("source_rejection_reason"),
+            "source_rejection_reason": row.get("source_rejection_reason"),
+            "exclusion_reason": row.get("exclusion_reason"),
+            "assessed_net_rr_t1": row.get("assessed_net_rr_t1"),
+            "estimated_net_risk_inr": row.get("estimated_net_risk_inr"),
+            "estimated_net_reward_t1_inr": row.get("estimated_net_reward_t1_inr"),
+        })
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
@@ -251,6 +281,12 @@ def generate_daily_report(
         f"{row.get('exclusion_reason') or row.get('exit_reason') or row.get('source_rejection_reason') or '—'} |"
         for row in watch_trades
     ) or "| No watch-candidate observations | — | — | — | — |"
+    outcome_rows = [row for row in candidate_outcomes["observations"] if row.get("status") != "EXCLUDED"]
+    outcome_lines = "\n".join(
+        f"| {row.get('symbol')} | {row.get('strategy')} | {row.get('side')} | {row.get('status')} | "
+        f"{row.get('net_pnl') if row.get('net_pnl') is not None else '—'} |"
+        for row in outcome_rows[-40:]
+    ) or "| No eligible candidate outcomes yet | — | — | — | — |"
     risk_lines = "\n".join(
         f"- **{item['track']} {item['symbol']}**: net loss INR {abs(item['net_pnl']):,.2f} "
         f"exceeded planned risk INR {item['planned_risk_inr']:,.2f} by INR {item['excess_loss_inr']:,.2f} "
@@ -262,7 +298,7 @@ def generate_daily_report(
 
 Generated: {current.isoformat()}
 
-> **RESEARCH ONLY.** No real Kite orders were submitted. Fills, charges and slippage are hypothetical estimates. All three books below are separate.
+> **RESEARCH ONLY.** No real Kite orders were submitted. Fills, charges and slippage are hypothetical estimates. Each research book is separate; candidate outcomes are overlapping single-candidate experiments, not a portfolio.
 
 ## Champion account
 - Virtual starting capital: INR {champion['starting_capital']:,.2f}
@@ -292,6 +328,20 @@ Generated: {current.isoformat()}
 |---|---|---|---:|---|
 {watch_lines}
 
+## Independent candidate outcome tracker
+- Eligible near-miss observations: {candidate_outcomes['eligible_observations']}
+- Closed hypothetical outcomes: {candidate_outcomes['closed_outcomes']}
+- Wins / losses: {candidate_outcomes['wins']} / {candidate_outcomes['losses']}
+- Incomplete candle outcomes: {candidate_outcomes['incomplete_data_gaps']}
+- Pending entries / open outcomes: {candidate_outcomes['pending_entries']} / {candidate_outcomes['open_outcomes']}
+- Excluded observations: {candidate_outcomes['excluded']}
+
+These candidates are evaluated independently using the next five-minute candle open and estimated costs/slippage. There is no three-position or shared-cash limit in this ledger. Signals can overlap in time and symbol; **do not sum their P&L as a portfolio result**.
+
+| Symbol | Strategy | Side | Outcome | Net P&L |
+|---|---|---|---|---:|
+{outcome_lines}
+
 ## Planned-risk overruns
 {risk_lines}
 
@@ -318,6 +368,9 @@ Positive paper results are not a guarantee of future profitability. Watch-shadow
         "watch_shadow_open_positions": len(watch_book.get("open_positions", [])),
         "watch_shadow_excluded_candidates": len(watch_excluded),
         "watch_shadow_candidate_count": len(watch_trades),
+        "candidate_outcomes_eligible_today": candidate_outcomes["eligible_observations"],
+        "candidate_outcomes_closed_today": candidate_outcomes["closed_outcomes"],
+        "candidate_outcomes_incomplete_today": candidate_outcomes["incomplete_data_gaps"],
         "risk_overrun_count": len(risk_overruns),
     }
 

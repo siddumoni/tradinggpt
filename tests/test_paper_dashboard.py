@@ -14,3 +14,16 @@ def test_dashboard_home_health_and_state_api(tmp_path):
   with urlopen(base+"/api/state",timeout=3) as r:
    state=json.loads(r.read()); assert state["research_only"] is True and state["account"]["starting_capital"]==100000 and state["account"]["open_positions"]==0
  finally: s.shutdown(); s.server_close(); t.join(timeout=2)
+
+
+def test_dashboard_has_clear_separate_navigation_and_explanations():
+    from src.paper_dashboard import DASHBOARD_HTML
+
+    assert 'data-view-target="overview"' in DASHBOARD_HTML
+    assert 'data-view-target="champion"' in DASHBOARD_HTML
+    assert 'data-view-target="challenger"' in DASHBOARD_HTML
+    assert 'data-view-target="watch"' in DASHBOARD_HTML
+    assert 'data-view-target="activity"' in DASHBOARD_HTML
+    assert "Challenger = alternative strategies. Shadow = how they are tested." in DASHBOARD_HTML
+    assert "Watch = opportunities Champion did not take." in DASHBOARD_HTML
+    assert "No real orders are sent." in DASHBOARD_HTML

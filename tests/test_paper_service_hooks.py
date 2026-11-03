@@ -58,3 +58,105 @@ def test_dynamic_websocket_subscriptions_follow_screened_set_and_open_positions(
  assert active=={1,5}
  assert ws.added[-1]==[5]
  assert ws.removed[-1]==[2,3]
+
+
+
+def test_finalization_uploads_only_after_report_and_checklist_generation(tmp_path, monkeypatch):
+ from src import paper_trading_service as service
+
+ sequence=[]
+ report={
+  "markdown_path":str(tmp_path/"reports"/"paper_daily_2026-11-03.md"),
+  "json_path":str(tmp_path/"reports"/"paper_daily_2026-11-03.json"),
+  "csv_path":str(tmp_path/"reports"/"paper_daily_2026-11-03_trades.csv"),
+ }
+
+ class FakeBroker:
+  def __init__(self,*args,**kwargs): pass
+  def snapshot(self):
+   return {"account":{
+    "starting_capital":100000.0,"risk_per_trade":500.0,
+    "max_daily_loss":2000.0,"max_open_positions":3,
+   }}
+
+ class FakeWatch:
+  def __init__(self,*args,**kwargs): pass
+  def snapshot(self):
+   return {"account":{"starting_capital":100000.0},"research_only":True,
+           "orders_sent_to_broker":False}
+
+ def make_report(*args,**kwargs):
+  sequence.append("report")
+  return report
+
+ def make_checklist(**kwargs):
+  sequence.append("checklist")
+  return {
+   "text":"ready",
+   "checklist_path":str(tmp_path/"reports"/"paper_upload_checklist_2026-11-03.txt"),
+   "ready_files":12,"total_files":12,"missing_required_files":0,
+   "artifacts":[{"path":str(tmp_path/"reports"/"paper_daily_2026-11-03.md")}],
+  }
+
+ def upload(**kwargs):
+  sequence.append("upload")
+  assert kwargs["report_date"].isoformat()=="2026-11-03"
+  assert kwargs["artifacts"][0]["path"].endswith("paper_daily_2026-11-03.md")
+  return {"ok":True,"repository":"siddumoni/tradinggpt-research-data",
+          "remote_folder":"daily/2026-11-03","uploaded_files":12,
+          "unchanged_files":0,"commit_sha":"daily-upload-sha"}
+
+ monkeypatch.setattr(service,"process_archive",lambda *a,**k:{"symbols":3})
+ monkeypatch.setattr(service,"generate_daily_report",make_report)
+ monkeypatch.setattr(service,"PaperBroker",FakeBroker)
+ monkeypatch.setattr(service,"WatchShadowPortfolio",FakeWatch)
+ monkeypatch.setattr(service,"write_upload_checklist",make_checklist)
+ monkeypatch.setattr(service,"upload_daily_artifacts",upload)
+ now=datetime(2026,11,3,15,20,tzinfo=ZoneInfo("Asia/Kolkata"))
+
+ result=service._finalize_reports(
+  root=tmp_path,db_path=tmp_path/"data"/"paper.sqlite3",
+  archive=tmp_path/"data"/"paper_candles_kite",reports=tmp_path/"reports",
+  daily_state_file=tmp_path/"logs"/"paper_daily_report_state.json",
+  paper_journal=tmp_path/"logs"/"paper_signals.csv",
+  scan_ledger=tmp_path/"logs"/"paper_scan_runs.csv",
+  scheduler_state_file=tmp_path/"logs"/"paper_scan_scheduler_state.json",
+  service_log=tmp_path/"logs"/"paper_trading_service.log",
+  symbols=["RELIANCE"],reason="market close daily summary",
+ )
+ assert result==report
+ assert sequence==["report","checklist","upload"]
+
+
+def test_finalization_skips_upload_when_required_artifacts_are_missing(tmp_path, monkeypatch):
+ from src import paper_trading_service as service
+
+ class FakeBroker:
+  def __init__(self,*args,**kwargs): pass
+  def snapshot(self):
+   return {"account":{"starting_capital":100000.0,"risk_per_trade":500.0,
+                      "max_daily_loss":2000.0,"max_open_positions":3}}
+
+ class FakeWatch:
+  def __init__(self,*args,**kwargs): pass
+  def snapshot(self):
+   return {"account":{"starting_capital":100000.0}}
+
+ called=[]
+ monkeypatch.setattr(service,"process_archive",lambda *a,**k:{})
+ monkeypatch.setattr(service,"generate_daily_report",lambda *a,**k:{"markdown_path":"report.md"})
+ monkeypatch.setattr(service,"PaperBroker",FakeBroker)
+ monkeypatch.setattr(service,"WatchShadowPortfolio",FakeWatch)
+ monkeypatch.setattr(service,"write_upload_checklist",lambda **k:{
+  "text":"missing","checklist_path":"checklist.txt","ready_files":4,
+  "total_files":12,"missing_required_files":2,"artifacts":[],
+ })
+ monkeypatch.setattr(service,"upload_daily_artifacts",lambda **k:called.append(k))
+ service._finalize_reports(
+  root=tmp_path,db_path=tmp_path/"paper.sqlite3",archive=tmp_path/"candles",
+  reports=tmp_path/"reports",daily_state_file=tmp_path/"daily.json",
+  paper_journal=tmp_path/"signals.csv",scan_ledger=tmp_path/"runs.csv",
+  scheduler_state_file=tmp_path/"scheduler.json",service_log=tmp_path/"service.log",
+  symbols=["RELIANCE"],reason="market close daily summary",
+ )
+ assert called==[]

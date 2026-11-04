@@ -20,6 +20,7 @@ import pandas as pd
 from src.cost_calculator import estimate_intraday_round_trip_cost
 from src.paper_outcomes import load_candles
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
+from src.research_timing import next_five_minute_bar_after
 
 IST = ZoneInfo("Asia/Kolkata")
 OUTCOME_CAPITAL_INR = 100_000.0
@@ -29,6 +30,11 @@ MIN_ENTRY_RR = 0.01
 ENTRY_CUTOFF = dtime(14, 45)
 LAST_BAR = dtime(15, 10)
 RR_REASON = "target 1 net r:r is below 1.50"
+METHOD_VERSION = "availability_aware_v2"
+LEGACY_INVALIDATION_REASON = (
+    "Superseded: the legacy evaluator entered from the signal candle without waiting for "
+    "scanner publication and also double-counted entry slippage in risk sizing."
+)
 
 
 def _to_ist(value: Any) -> pd.Timestamp:
@@ -47,11 +53,16 @@ def _positive(value: Any) -> float | None:
 
 
 def _candidate_id(candidate: dict[str, Any]) -> str:
+    raw_signal_time = str(candidate.get("signal_time") or "").strip()
+    try:
+        canonical_signal_time = _to_ist(raw_signal_time).isoformat() if raw_signal_time else ""
+    except (TypeError, ValueError, OverflowError):
+        canonical_signal_time = raw_signal_time
     parts = (
         str(candidate.get("symbol") or "").strip().upper(),
         str(candidate.get("side") or "").strip().upper(),
         str(candidate.get("strategy") or "").strip().lower(),
-        str(candidate.get("signal_time") or "").strip(),
+        canonical_signal_time,
     )
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
 
@@ -94,7 +105,8 @@ class CandidateOutcomeTracker:
                 CREATE TABLE IF NOT EXISTS candidate_outcomes (
                     candidate_id TEXT PRIMARY KEY, symbol TEXT NOT NULL,
                     side TEXT NOT NULL CHECK(side IN ('LONG','SHORT')), strategy TEXT NOT NULL,
-                    signal_time TEXT NOT NULL, scan_as_of TEXT NOT NULL, signal_close REAL,
+                    signal_time TEXT NOT NULL, scan_as_of TEXT NOT NULL, signal_available_at TEXT,
+                    signal_close REAL,
                     stop_loss REAL, target_1 REAL, target_2 REAL, market_regime TEXT,
                     news_status TEXT, news_risk TEXT, status TEXT NOT NULL,
                     entry_time TEXT, entry_reference_price REAL, entry_fill_price REAL,
@@ -106,6 +118,7 @@ class CandidateOutcomeTracker:
                     gst REAL, stamp_duty REAL, ipft REAL, transaction_charges REAL,
                     slippage_cost REAL, total_estimated_costs REAL, net_pnl REAL,
                     source_rejection_reason TEXT NOT NULL, exclusion_reason TEXT,
+                    method_version TEXT NOT NULL DEFAULT 'availability_aware_v2',
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_candidate_outcome_status
@@ -113,11 +126,61 @@ class CandidateOutcomeTracker:
                 CREATE INDEX IF NOT EXISTS idx_candidate_outcome_signal
                     ON candidate_outcomes(signal_time, strategy);
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(candidate_outcomes)")}
+            if "signal_available_at" not in columns:
+                db.execute("ALTER TABLE candidate_outcomes ADD COLUMN signal_available_at TEXT")
+            if "method_version" not in columns:
+                db.execute("ALTER TABLE candidate_outcomes ADD COLUMN method_version TEXT NOT NULL DEFAULT 'legacy_v1'")
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS candidate_outcome_invalidations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_id TEXT NOT NULL,
+                    method_version TEXT NOT NULL,
+                    previous_status TEXT NOT NULL,
+                    invalidated_at TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    previous_record_json TEXT NOT NULL
+                )
+            """)
+            legacy = list(db.execute(
+                "SELECT * FROM candidate_outcomes WHERE method_version<>? "
+                "AND status IN ('PENDING_ENTRY','OPEN','CLOSED','INCOMPLETE_DATA_GAP','EXPIRED_NO_ENTRY')",
+                (METHOD_VERSION,),
+            ))
+            invalidated_at = datetime.now(IST).isoformat()
+            for row in legacy:
+                record = dict(row)
+                db.execute("""
+                    INSERT INTO candidate_outcome_invalidations(
+                      candidate_id,method_version,previous_status,invalidated_at,reason,previous_record_json
+                    ) VALUES(?,?,?,?,?,?)
+                """, (row["candidate_id"], row["method_version"], row["status"],
+                      invalidated_at, LEGACY_INVALIDATION_REASON,
+                      json.dumps(record, ensure_ascii=False, default=str, allow_nan=False)))
+                db.execute("""
+                    UPDATE candidate_outcomes SET status='INVALIDATED_LEGACY_METHOD',
+                      gross_pnl=NULL,brokerage=NULL,stt=NULL,exchange_charges=NULL,sebi_charges=NULL,
+                      gst=NULL,stamp_duty=NULL,ipft=NULL,transaction_charges=NULL,slippage_cost=NULL,
+                      total_estimated_costs=NULL,net_pnl=NULL,updated_at=? WHERE candidate_id=?
+                """, (invalidated_at, row["candidate_id"]))
+            db.execute("CREATE INDEX IF NOT EXISTS idx_candidate_outcome_method ON candidate_outcomes(method_version,status)")
 
     @staticmethod
-    def _eligibility_failure(candidate: dict[str, Any], scan_time: pd.Timestamp) -> str | None:
+    def _eligibility_failure(candidate: dict[str, Any], scan_time: pd.Timestamp,
+                             available_at: pd.Timestamp | None) -> str | None:
         if not _reason(candidate):
             return "Not a minimum net-R:R-only rejection."
+        validation = candidate.get("entry_validation")
+        if not isinstance(validation, dict) or validation.get("valid") is not True:
+            return "Scanner live-entry validation did not pass."
+        if str(validation.get("status") or "").upper() != "REJECTED_NET_RR":
+            return "Scanner rejection was not exclusively the minimum net-R:R gate."
+        if RR_REASON not in str(validation.get("reason") or "").lower():
+            return "Scanner entry-validation reason does not confirm the minimum net-R:R gate."
+        if not validation.get("quote_timestamp"):
+            return "Scanner entry-validation quote timestamp is missing."
+        if available_at is None:
+            return "A valid scanner publication/quote timestamp is unavailable."
         if candidate.get("data_verified_live") is not True:
             return "Live data verification did not pass."
         if candidate.get("margin_verified") is not True:
@@ -138,8 +201,9 @@ class CandidateOutcomeTracker:
             return "Candidate signal timestamp is missing or invalid."
         if signal_time.date() != scan_time.date():
             return "Candidate signal does not belong to the scan session."
-        if (signal_time + pd.Timedelta(minutes=5)).time().replace(tzinfo=None) >= ENTRY_CUTOFF:
-            return "Next-bar entry is at or after the 14:45 IST cutoff."
+        entry_time = next_five_minute_bar_after(signal_time, available_at)
+        if entry_time.date() != signal_time.date() or entry_time.time().replace(tzinfo=None) >= ENTRY_CUTOFF:
+            return "First candle after scanner publication is at or after the 14:45 IST cutoff."
         entry, stop, target_1, target_2 = (
             _positive(candidate.get(key))
             for key in ("reference_entry", "stop_loss", "target_1", "target_2")
@@ -172,6 +236,11 @@ class CandidateOutcomeTracker:
         if not as_of:
             raise ValueError("Scan report is missing as_of timestamp")
         scan_time = _to_ist(as_of)
+        scan_completed_raw = report.get("scan_completed_at") or as_of
+        try:
+            scan_completed = _to_ist(scan_completed_raw)
+        except (TypeError, ValueError, OverflowError):
+            scan_completed = scan_time
         counts = {"seen": 0, "eligible": 0, "excluded": 0, "duplicates": 0}
         now = datetime.now(IST).isoformat()
         with self._connect() as db:
@@ -184,25 +253,37 @@ class CandidateOutcomeTracker:
                     counts["duplicates"] += 1
                     continue
                 rejection = _reason(item)
-                failure = self._eligibility_failure(item, scan_time)
+                validation = item.get("entry_validation") if isinstance(item.get("entry_validation"), dict) else {}
+                quote_time_raw = validation.get("quote_timestamp")
+                available_at = None
+                try:
+                    available_candidates = [scan_time, scan_completed]
+                    if quote_time_raw:
+                        available_candidates.append(_to_ist(quote_time_raw))
+                    available_at = max(available_candidates)
+                except (TypeError, ValueError, OverflowError):
+                    available_at = None
+                failure = self._eligibility_failure(item, scan_time, available_at)
                 side = str(item.get("side") or "LONG").strip().upper()
                 if side not in {"LONG", "SHORT"}:
                     side = "LONG"
                 values = (
                     candidate_id, str(item.get("symbol") or "UNKNOWN").strip().upper(), side,
                     str(item.get("strategy") or "unknown"), str(item.get("signal_time") or as_of),
-                    as_of, _positive(item.get("reference_entry")), _positive(item.get("stop_loss")),
+                    as_of, available_at.isoformat() if available_at is not None else None,
+                    _positive(item.get("reference_entry")), _positive(item.get("stop_loss")),
                     _positive(item.get("target_1")), _positive(item.get("target_2")),
                     str(item.get("market_regime") or ""), str(item.get("news_status") or ""),
                     str(item.get("news_risk") or ""), "EXCLUDED" if failure else "PENDING_ENTRY",
-                    self.risk_per_trade_inr, rejection or "WATCH_CANDIDATE", failure, now, now,
+                    self.risk_per_trade_inr, rejection or "WATCH_CANDIDATE", failure,
+                    METHOD_VERSION, now, now,
                 )
                 db.execute("""
                     INSERT INTO candidate_outcomes(
-                      candidate_id,symbol,side,strategy,signal_time,scan_as_of,signal_close,
+                      candidate_id,symbol,side,strategy,signal_time,scan_as_of,signal_available_at,signal_close,
                       stop_loss,target_1,target_2,market_regime,news_status,news_risk,status,
-                      risk_budget_inr,source_rejection_reason,exclusion_reason,created_at,updated_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                      risk_budget_inr,source_rejection_reason,exclusion_reason,method_version,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, values)
                 counts["excluded" if failure else "eligible"] += 1
         return counts
@@ -217,7 +298,8 @@ class CandidateOutcomeTracker:
     def _enter(self, db: sqlite3.Connection, row: sqlite3.Row, frame: pd.DataFrame,
                *, finalize_session: bool) -> None:
         signal_time = _to_ist(row["signal_time"])
-        entry_time = signal_time + pd.Timedelta(minutes=5)
+        available_at = _to_ist(row["signal_available_at"])
+        entry_time = next_five_minute_bar_after(signal_time, available_at)
         if entry_time.date() != signal_time.date() or entry_time.time().replace(tzinfo=None) >= ENTRY_CUTOFF:
             self._set_status(db, row["candidate_id"], "EXPIRED_NO_ENTRY",
                              "Next-bar entry is outside the same-session entry window.")
@@ -241,9 +323,15 @@ class CandidateOutcomeTracker:
         if index < 0:
             if (not frame.empty and frame.index[-1] >= entry_time) or finalize_session:
                 self._set_status(db, row["candidate_id"], "INCOMPLETE_DATA_GAP",
-                                 "Exact next five-minute candle is missing; no later open was substituted.")
+                                 "First five-minute candle after scanner publication is missing; no later open was substituted.")
             return
 
+        expected_path = pd.date_range(signal_time, entry_time, freq="5min")
+        observed_path = frame.index[(frame.index >= signal_time) & (frame.index <= entry_time)]
+        if not observed_path.equals(expected_path):
+            self._set_status(db, row["candidate_id"], "INCOMPLETE_DATA_GAP",
+                             "Candle continuity between signal and publication-aware entry is incomplete; no P&L assigned.")
+            return
         entry_reference = float(frame.iloc[index]["open"])
         side = str(row["side"])
         entry_fill = entry_reference * (1 + self.slippage_bps / 10_000) if side == "LONG" else entry_reference * (1 - self.slippage_bps / 10_000)
@@ -262,7 +350,7 @@ class CandidateOutcomeTracker:
             entry_cutoff_ist=base.entry_cutoff_ist, square_off_time_ist=base.square_off_time_ist,
         )
         assessment = assess_trade(
-            side=side, entry_price=entry_fill, stop_loss=stop, target_1=target_1,
+            side=side, entry_price=entry_reference, stop_loss=stop, target_1=target_1,
             target_2=target_2, settings=settings, estimated_margin_per_share=entry_fill,
             charge_rates=rates,
         )
@@ -381,10 +469,12 @@ class CandidateOutcomeTracker:
 
             if finalize_session:
                 pending = list(db.execute(
-                    "SELECT candidate_id,signal_time FROM candidate_outcomes WHERE status='PENDING_ENTRY'"
+                    "SELECT candidate_id,signal_time,signal_available_at FROM candidate_outcomes WHERE status='PENDING_ENTRY'"
                 ))
                 for row in pending:
-                    entry_time = _to_ist(row["signal_time"]) + pd.Timedelta(minutes=5)
+                    entry_time = next_five_minute_bar_after(
+                        _to_ist(row["signal_time"]), _to_ist(row["signal_available_at"])
+                    )
                     status = "EXPIRED_NO_ENTRY" if entry_time.time().replace(tzinfo=None) >= ENTRY_CUTOFF else "INCOMPLETE_DATA_GAP"
                     reason = ("Next-bar entry is outside the same-session cutoff; no entry simulated."
                               if status == "EXPIRED_NO_ENTRY" else
@@ -426,7 +516,7 @@ class CandidateOutcomeTracker:
                 rows = [dict(row) for row in db.execute(
                     "SELECT * FROM candidate_outcomes ORDER BY COALESCE(exit_time,signal_time)"
                 )]
-        eligible = [row for row in rows if row["status"] != "EXCLUDED"]
+        eligible = [row for row in rows if row["status"] not in {"EXCLUDED", "INVALIDATED_LEGACY_METHOD"}]
         closed = [row for row in eligible if row["status"] == "CLOSED"]
         wins = [row for row in closed if float(row.get("net_pnl") or 0) > 0]
         losses = [row for row in closed if float(row.get("net_pnl") or 0) < 0]
@@ -434,7 +524,7 @@ class CandidateOutcomeTracker:
         strategies: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
-            if row["status"] != "EXCLUDED":
+            if row["status"] not in {"EXCLUDED", "INVALIDATED_LEGACY_METHOD"}:
                 strategies.setdefault(str(row.get("strategy") or "unknown"), []).append(row)
         strategy_summary = []
         for strategy, items in sorted(strategies.items()):
@@ -454,6 +544,7 @@ class CandidateOutcomeTracker:
             "open_outcomes": status_counts.get("OPEN", 0),
             "expired_no_entry": status_counts.get("EXPIRED_NO_ENTRY", 0),
             "excluded": status_counts.get("EXCLUDED", 0),
+            "invalidated_legacy_method": status_counts.get("INVALIDATED_LEGACY_METHOD", 0),
             "status_counts": status_counts, "strategy_summary": strategy_summary,
             "observations": rows, "research_only": True,
             "independent_single_candidate_model": True,

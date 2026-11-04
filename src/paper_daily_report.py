@@ -125,6 +125,7 @@ def generate_daily_report(
         ("CHAMPION", champion_closed),
         ("CHALLENGER", challenger_closed),
         ("WATCH_SHADOW", watch_closed),
+        ("CANDIDATE_OUTCOME", [row for row in candidate_outcomes["observations"] if row.get("status") == "CLOSED"]),
     ):
         for row in rows:
             budget = row.get("risk_budget_inr")
@@ -176,6 +177,7 @@ def generate_daily_report(
                 "incomplete_data_gaps": candidate_outcomes["incomplete_data_gaps"],
                 "pending_entries": candidate_outcomes["pending_entries"],
                 "excluded": candidate_outcomes["excluded"],
+                "invalidated_legacy_method": candidate_outcomes["invalidated_legacy_method"],
             },
             "risk_overrun_count": len(risk_overruns),
         },
@@ -197,7 +199,8 @@ def generate_daily_report(
 
     columns = [
         "track", "strategy", "strategy_version", "symbol", "side", "status", "signal_time",
-        "entry_time", "entry_fill_price", "quantity", "exit_time", "exit_fill_price",
+        "scan_as_of", "signal_available_at", "method_version", "entry_time", "entry_reference_price",
+        "entry_fill_price", "quantity", "exit_time", "exit_fill_price",
         "exit_reason", "gross_pnl", "transaction_charges", "slippage_cost",
         "total_estimated_costs", "net_pnl", "risk_budget_inr", "reason",
         "source_rejection_reason", "exclusion_reason", "assessed_net_rr_t1",
@@ -234,7 +237,9 @@ def generate_daily_report(
             "track": "WATCH_SHADOW", "strategy": row.get("strategy"),
             "strategy_version": "", "symbol": row.get("symbol"), "side": row.get("side"),
             "status": row.get("status"), "signal_time": row.get("signal_time"),
-            "entry_time": row.get("entry_time"), "entry_fill_price": row.get("entry_fill_price"),
+            "scan_as_of": row.get("scan_as_of"), "signal_available_at": row.get("signal_available_at"),
+            "method_version": row.get("method_version"), "entry_time": row.get("entry_time"),
+            "entry_reference_price": row.get("entry_reference_price"), "entry_fill_price": row.get("entry_fill_price"),
             "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
             "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
             "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),
@@ -252,7 +257,9 @@ def generate_daily_report(
             "track": "CANDIDATE_OUTCOME", "strategy": row.get("strategy"),
             "strategy_version": "", "symbol": row.get("symbol"), "side": row.get("side"),
             "status": row.get("status"), "signal_time": row.get("signal_time"),
-            "entry_time": row.get("entry_time"), "entry_fill_price": row.get("entry_fill_price"),
+            "scan_as_of": row.get("scan_as_of"), "signal_available_at": row.get("signal_available_at"),
+            "method_version": row.get("method_version"), "entry_time": row.get("entry_time"),
+            "entry_reference_price": row.get("entry_reference_price"), "entry_fill_price": row.get("entry_fill_price"),
             "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
             "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
             "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),
@@ -281,7 +288,8 @@ def generate_daily_report(
         f"{row.get('exclusion_reason') or row.get('exit_reason') or row.get('source_rejection_reason') or '—'} |"
         for row in watch_trades
     ) or "| No watch-candidate observations | — | — | — | — |"
-    outcome_rows = [row for row in candidate_outcomes["observations"] if row.get("status") != "EXCLUDED"]
+    outcome_rows = [row for row in candidate_outcomes["observations"]
+                    if row.get("status") not in {"EXCLUDED", "INVALIDATED_LEGACY_METHOD"}]
     outcome_lines = "\n".join(
         f"| {row.get('symbol')} | {row.get('strategy')} | {row.get('side')} | {row.get('status')} | "
         f"{row.get('net_pnl') if row.get('net_pnl') is not None else '—'} |"
@@ -335,8 +343,9 @@ Generated: {current.isoformat()}
 - Incomplete candle outcomes: {candidate_outcomes['incomplete_data_gaps']}
 - Pending entries / open outcomes: {candidate_outcomes['pending_entries']} / {candidate_outcomes['open_outcomes']}
 - Excluded observations: {candidate_outcomes['excluded']}
+- Invalidated legacy observations: {candidate_outcomes['invalidated_legacy_method']}
 
-These candidates are evaluated independently using the next five-minute candle open and estimated costs/slippage. There is no three-position or shared-cash limit in this ledger. Signals can overlap in time and symbol; **do not sum their P&L as a portfolio result**.
+Each eligible candidate now enters at the first five-minute candle open strictly after both the signal candle has completed and the scanner publication/quote-validation timestamp. Older results from the prior signal-candle-only timing method are retained for audit but excluded from performance statistics. Estimated costs/slippage are applied once. There is no three-position or shared-cash limit in this ledger. Signals can overlap in time and symbol; **do not sum their P&L as a portfolio result**.
 
 | Symbol | Strategy | Side | Outcome | Net P&L |
 |---|---|---|---|---:|
@@ -348,7 +357,7 @@ These candidates are evaluated independently using the next five-minute candle o
 ## Output files
 - Markdown report: {markdown_path}
 - JSON report: {json_path}
-- Combined champion/challenger/watch-shadow trade extract: {csv_path}
+- Combined Champion/Challenger/Watch-Shadow/Candidate-Outcome research extract: {csv_path}
 
 Positive paper results are not a guarantee of future profitability. Watch-shadow and challenger results do not alter champion performance.
 """
@@ -371,6 +380,7 @@ Positive paper results are not a guarantee of future profitability. Watch-shadow
         "candidate_outcomes_eligible_today": candidate_outcomes["eligible_observations"],
         "candidate_outcomes_closed_today": candidate_outcomes["closed_outcomes"],
         "candidate_outcomes_incomplete_today": candidate_outcomes["incomplete_data_gaps"],
+        "candidate_outcomes_invalidated_legacy_today": candidate_outcomes["invalidated_legacy_method"],
         "risk_overrun_count": len(risk_overruns),
     }
 

@@ -27,7 +27,7 @@ If a provider has a timestamp convention different from the project's assumption
 
 ## 3. Keep execution assumptions conservative
 
-Signals must use only candles completed at the time of the signal. Entry is the next bar's open. Where OHLC cannot disambiguate whether the stop or target came first, assume the stop first. Model gap-through-stop behavior conservatively, include brokerage/statutory estimates, and show slippage separately.
+Signals must use only candles completed and published to the scanner. Entry is the first bar open strictly after both signal-bar completion and scan publication/quote validation; the offline evaluator also requires `recorded_at` and `scan_as_of`. Never enter from a bar that began before the signal was available. Where OHLC cannot disambiguate whether the stop or target came first, assume the stop first. Model gap-through-stop behavior conservatively, include brokerage/statutory estimates, and show slippage separately.
 
 The planned-risk budget is not a hard cap on realized loss. Gaps and real fills can exceed it. Compare results at multiple plausible slippage rates and examine whether the accepted-trade set changes as costs rise.
 
@@ -86,7 +86,7 @@ This repository remains advisory-only. Passing the research protocol does not pr
 
 ## Independent candidate outcome observations
 
-The integrated paper service also keeps a separate candle-based outcome ledger for scanner `WATCH_CANDIDATE` observations rejected only by the minimum after-cost Target 1 R:R gate. This ledger is deliberately **not** the three-position Watch-Shadow portfolio. Each eligible candidate is sized independently against a fixed research capital/risk assumption and evaluated from its exact signal candle and next five-minute candle open. It has no shared cash reservation, maximum-open-position, or same-symbol overlap constraint.
+The integrated paper service also keeps a separate candle-based outcome ledger for scanner `WATCH_CANDIDATE` observations rejected only by the minimum after-cost Target 1 R:R gate. This ledger is deliberately **not** the three-position Watch-Shadow portfolio. Each eligible candidate is sized independently against a fixed research capital/risk assumption and evaluated from the first five-minute candle open strictly after signal-candle completion and scanner publication/quote validation. Previous results from the signal-candle-only method are invalidated and excluded from new performance statistics. It has no shared cash reservation, maximum-open-position, or same-symbol overlap constraint.
 
 The independent ledger is useful for answering a different question: how did the scanner's eligible near-miss candidates behave, independent of which ones fit into a limited portfolio? The same symbol or overlapping time window can therefore appear several times. Do not sum these outcomes, calculate portfolio expectancy from them, or compare their aggregate P&L with the Champion book. Use a shared-capital allocation replay on a defined subset before making an allocation-level statement.
 

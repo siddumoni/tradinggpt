@@ -21,6 +21,7 @@ import pandas as pd
 
 from src.cost_calculator import ChargeRates, estimate_intraday_round_trip_cost
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
+from src.research_timing import next_five_minute_bar_after
 
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
@@ -28,7 +29,7 @@ SESSION_START = dtime(9, 15)
 LAST_BAR_START = dtime(15, 10)
 OHLCV = ("open", "high", "low", "close", "volume")
 REQUIRED_JOURNAL_COLUMNS = (
-    "signal_id", "symbol", "side", "strategy", "signal_time", "reference_entry",
+    "signal_id", "symbol", "side", "strategy", "signal_time", "recorded_at", "scan_as_of", "reference_entry",
     "stop_loss", "target_1", "target_2", "data_verified_live", "paper_status",
 )
 
@@ -165,6 +166,7 @@ def _base_result(row: pd.Series, *, candle_path: Path | None) -> dict[str, Any]:
         "outcome_status": "NOT_EVALUATED",
         "outcome_note": "",
         "entry_time": "",
+        "signal_available_at": "",
         "exit_time": "",
         "fill_entry": None,
         "fill_exit": None,
@@ -268,7 +270,21 @@ def evaluate_signal(
         )
         return result
 
-    entry_ts = signal_ts + pd.Timedelta(minutes=BAR_MINUTES)
+    try:
+        if not str(row.get("recorded_at") or "").strip() or not str(row.get("scan_as_of") or "").strip():
+            raise ValueError("recorded_at and scan_as_of are required to establish signal availability")
+        availability = max(
+            to_ist_timestamp(row.get("recorded_at"), label=f"signal {signal_id} recorded_at"),
+            to_ist_timestamp(row.get("scan_as_of"), label=f"signal {signal_id} scan_as_of"),
+        )
+        entry_ts = next_five_minute_bar_after(signal_ts, availability)
+    except ValueError as exc:
+        result.update(
+            outcome_status="MISSING_SIGNAL_AVAILABILITY_TIME",
+            outcome_note=f"Signal cannot be scored without valid publication timestamps: {exc}",
+        )
+        return result
+    result["signal_available_at"] = availability.isoformat()
     result["entry_time"] = entry_ts.isoformat()
     if entry_ts.date() != signal_ts.date():
         result.update(outcome_status="NO_SAME_SESSION_NEXT_BAR", outcome_note="No next-bar entry across a session boundary.")
@@ -287,6 +303,15 @@ def evaluate_signal(
         )
         result.update(outcome_status=status, outcome_note=note)
         result["entry_time"] = ""
+        return result
+
+    expected_path = pd.date_range(signal_ts, entry_ts, freq=f"{BAR_MINUTES}min")
+    observed_path = candles.index[(candles.index >= signal_ts) & (candles.index <= entry_ts)]
+    if not observed_path.equals(expected_path):
+        result.update(
+            outcome_status="INCOMPLETE_DATA_GAP",
+            outcome_note="Candle continuity from the signal bar through the publication-aware entry bar is incomplete.",
+        )
         return result
 
     entry_price = float(candles.iloc[entry_idx]["open"])

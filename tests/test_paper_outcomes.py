@@ -27,6 +27,8 @@ def signal_row(**overrides):
         "strategy": "vwap_trend",
         "action": "WATCH_CANDIDATE",
         "signal_time": SIGNAL_TIME.isoformat(),
+        "recorded_at": "2026-10-12T10:01:00+05:30",
+        "scan_as_of": "2026-10-12T10:01:00+05:30",
         "reference_entry": 100.0,
         "stop_loss": 99.0,
         "target_1": 103.0,
@@ -272,3 +274,33 @@ def test_research_shadow_scores_signal_rejected_only_by_net_rr_gate(tmp_path):
     assert result["outcome_status"] == "COMPLETED_RESEARCH_ONLY_GATE_BYPASSED"
     assert result["net_pnl"] is not None
     assert result["research_only"] is True
+
+
+def test_offline_evaluator_waits_for_scanner_publication_before_entry(tmp_path):
+    frame = make_session()
+    row = signal_row(recorded_at="2026-10-12T10:06:00+05:30",
+                     scan_as_of="2026-10-12T10:06:00+05:30")
+    target_time = pd.Timestamp("2026-10-12 10:15:00", tz=IST)
+    frame.loc[target_time, ["high", "low", "close"]] = [105.0, 100.0, 104.5]
+
+    result = evaluate(row, frame, tmp_path)
+
+    assert result["signal_available_at"] == "2026-10-12T10:06:00+05:30"
+    assert result["entry_time"] == "2026-10-12T10:10:00+05:30"
+    assert result["exit_reason"] == "TARGET_2"
+
+
+def test_publication_exactly_on_bar_boundary_skips_that_in_progress_bar(tmp_path):
+    frame = make_session()
+    row = signal_row(recorded_at="2026-10-12T10:10:00+05:30",
+                     scan_as_of="2026-10-12T10:10:00+05:30")
+    result = evaluate(row, frame, tmp_path)
+    assert result["entry_time"] == "2026-10-12T10:15:00+05:30"
+
+
+def test_offline_evaluator_fails_closed_without_publication_timestamps(tmp_path):
+    frame = make_session()
+    row = signal_row().drop(labels=["recorded_at", "scan_as_of"])
+    result = evaluate(row, frame, tmp_path)
+    assert result["outcome_status"] == "MISSING_SIGNAL_AVAILABILITY_TIME"
+    assert result["net_pnl"] is None

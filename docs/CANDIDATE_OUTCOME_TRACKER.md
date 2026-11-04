@@ -22,11 +22,13 @@ Other watch candidates are retained as `EXCLUDED` with a reason, but are not cou
 
 ## Fixed hypothetical execution convention
 
+The signal is not available merely because its source candle has closed. The tracker computes availability from the scanner report's `as_of`/`scan_completed_at` and the entry-validation quote timestamp. It enters only at the first five-minute candle open strictly after the later of signal-candle completion and scanner availability. Publication time is never backdated to the signal candle.
+
 | Item | Assumption |
 |---|---|
 | Research capital per candidate | ₹1,00,000 |
 | Planned risk per candidate | ₹500 |
-| Entry | Exact next five-minute candle open |
+| Entry | First five-minute candle open strictly after scanner publication/quote validation |
 | Entry price | Adverse 5 bps slippage |
 | Cash sizing | Independent cash-only sizing; no MIS leverage |
 | Minimum after-cost Target 1 R:R | 0.01 for this diagnostic only |
@@ -40,7 +42,7 @@ The 0.01 entry gate is not a strategy-rule change. It permits the ledger to meas
 
 ## Data integrity
 
-The signal candle must exist in the provider-pure Kite archive, and its close must match the signal's saved reference close within the greater of ₹0.02 or 5 bps. The exact next five-minute candle must exist; the evaluator never substitutes a later open.
+The signal candle must exist in the provider-pure Kite archive, and its close must match the signal's saved reference close within the greater of ₹0.02 or 5 bps. The exact first eligible candle after scanner publication must exist; the evaluator never substitutes an earlier or later open. Candle continuity from the signal bar through the delayed entry bar is required.
 
 After entry, every expected five-minute candle through the exit must be present. If a gap occurs, the outcome is marked `INCOMPLETE_DATA_GAP` with no P&L. Session finalization also requires the final regular-session 15:10 candle when no stop or Target 2 was reached earlier. A missing final bar leaves the candidate unscored; it is not force-closed at a stale quote.
 
@@ -54,9 +56,10 @@ The scanner receives an additional list of symbols with open/pending Challenger,
 - `INCOMPLETE_DATA_GAP`: the signal, entry or exit path is missing; no P&L is assigned.
 - `EXPIRED_NO_ENTRY`: the next-bar entry time is outside the same-session cutoff.
 - `EXCLUDED`: the candidate failed the eligibility or independent cash-sizing checks.
+- `INVALIDATED_LEGACY_METHOD`: a result created by the older signal-candle-only entry timing or double-counted entry-slippage method; retained in an audit table but removed from performance statistics.
 
 ## Daily reports
 
-Daily JSON, Markdown and combined trade CSV include the independent candidate-outcome counts and observations under the `CANDIDATE_OUTCOME` track. Read the status counts and data-gap count before interpreting any result. The daily output explicitly flags that overlapping candidate P&L is not portfolio P&L.
+Daily JSON, Markdown and combined trade CSV include independent candidate-outcome counts, availability timestamps and method versions under the `CANDIDATE_OUTCOME` track. On upgrade, prior method rows are preserved in `candidate_outcome_invalidations` and marked `INVALIDATED_LEGACY_METHOD`; they are not mixed with new outcomes. Read the status counts and data-gap count before interpreting any result. The daily output explicitly flags that overlapping candidate P&L is not portfolio P&L.
 
 The tracker is research-only. It never places, modifies or cancels Kite orders and does not authorize live trading.

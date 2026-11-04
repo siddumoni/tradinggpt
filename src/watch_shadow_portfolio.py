@@ -211,6 +211,13 @@ class WatchShadowPortfolio:
                           if "target 1 net r:r is below" in str(reason).lower()), None)
         if not rr_reason:
             return "Not a minimum net-R:R-only rejection; kept out of this shadow track."
+        validation = candidate.get("entry_validation")
+        if not isinstance(validation, dict) or validation.get("valid") is not True:
+            return "Scanner live-entry validation did not pass."
+        if str(validation.get("status") or "").upper() != "REJECTED_NET_RR":
+            return "Scanner rejection was not exclusively the minimum net-R:R gate."
+        if "target 1 net r:r is below" not in str(validation.get("reason") or "").lower():
+            return "Scanner entry-validation reason does not confirm the minimum net-R:R gate."
         if candidate.get("data_verified_live") is not True:
             return "Live data verification did not pass."
         if candidate.get("margin_verified") is not True:
@@ -318,7 +325,7 @@ class WatchShadowPortfolio:
         )
         assessment = assess_trade(
             side=side, entry_price=entry_reference, stop_loss=stop, target_1=t1, target_2=t2,
-            settings=settings, estimated_margin_per_share=entry_reference, charge_rates=rates,
+            settings=settings, estimated_margin_per_share=entry_fill, charge_rates=rates,
         )
         qty = int(assessment.quantity)
         if qty < 1:
@@ -328,6 +335,7 @@ class WatchShadowPortfolio:
         # The candidate already failed only the minimum R:R gate. Keep it in the
         # shadow book even when assessment.accepted is False solely for that same gate.
         now = datetime.now(IST).isoformat()
+        entry_available_at = max(_to_ist(quote_time), _to_ist(as_of))
         position_value = entry_fill * qty
         source = next((str(r) for r in candidate.get("reasons", [])
                        if "target 1 net r:r is below" in str(r).lower()), "Target 1 net R:R gate")
@@ -339,7 +347,7 @@ class WatchShadowPortfolio:
               estimated_net_reward_t1_inr,source_rejection_reason,exclusion_reason,created_at,updated_at)
             VALUES(?,?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)
         """, (signal_id, symbol, side, str(candidate.get("strategy") or "unknown"),
-              str(candidate.get("signal_time") or as_of), as_of, quote_time.isoformat(),
+              str(candidate.get("signal_time") or as_of), as_of, entry_available_at.isoformat(),
               entry_reference, entry_fill, stop, t1, t2, qty, position_value, self.risk_per_trade,
               assessment.net_rr_t1, assessment.net_risk_inr, assessment.net_reward_t1_inr,
               source, now, now))
@@ -356,6 +364,9 @@ class WatchShadowPortfolio:
         bid_value, ask_value = _positive(bid) or last, _positive(ask) or last
         qt = _to_ist(market_time or datetime.now(IST))
         rec = _to_ist(received_at or datetime.now(IST))
+        local_now = datetime.now(IST)
+        if (rec - local_now).total_seconds() > 2 or (qt - rec).total_seconds() > 2:
+            raise ValueError("Market tick contains a future-dated receive or exchange timestamp.")
         closed = 0
         with self._connect() as db:
             db.execute("""INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at)

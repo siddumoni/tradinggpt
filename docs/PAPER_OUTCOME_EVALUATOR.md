@@ -7,9 +7,9 @@ This evaluator takes the observations recorded by `src.paper_journal` and evalua
 It uses the following fixed execution convention:
 
 1. The signal candle must exist in the selected symbol's candle file, and its close must match the journal reference close within the configured 5-bps/₹0.02 tolerance.
-2. The hypothetical entry is the **next 5-minute candle's open**. If that bar is absent, the outcome stays pending or is marked missing; it is never backfilled from a later open.
+2. The journal must include `recorded_at` and `scan_as_of`. Signal availability is the later of those timestamps. Entry is the first 5-minute candle open strictly after both signal-candle completion and signal availability. If publication timestamps are absent/invalid, the row is marked `MISSING_SIGNAL_AVAILABILITY_TIME`; it never silently falls back to the old signal-candle-only timing rule.
 3. The next open must still sit between the signal's stop and targets. If price has gapped through a level, the entry is rejected.
-4. Quantity is recalculated with the configured cash-only capital, risk budget, estimated charges, slippage and minimum net R:R gate. The tool does not use the journal's original quantity because the scanner may not have verified margin.
+4. Quantity is recalculated with the configured cash-only capital, risk budget, estimated charges, slippage exactly once per side, and the minimum net R:R gate. The risk engine receives the unslipped reference entry while the cash-notional cap uses the slipped executable fill. The tool does not use the journal's original quantity because the scanner may not have verified margin.
 5. At exit, stop-loss takes priority if stop and target 2 are both touched in the same candle. A stop gap fills at the worse candle open; target gaps do not receive favorable price improvement.
 6. The full quantity exits at target 2 or at the 15:10 candle close (the regular session's final 5-minute bar). For intrabar stop/target exits, the reported exit timestamp is the bar-end boundary, so the shared-capital replay does not release the cash earlier than the model can know the outcome.
 7. A missing 5-minute candle before an exit makes the signal unscored. The evaluator does not guess what happened during the gap.
@@ -18,7 +18,7 @@ Target 1 is an entry viability gate; the simulated full exit is at target 2. Thi
 
 ## Prepare one candle file per symbol
 
-The evaluator expects one 5-minute OHLCV CSV per symbol. Its timestamp column can be named `date`, `timestamp`, `datetime`, or `time`; required price columns are `open, high, low, close, volume`. Timestamps are interpreted in Asia/Kolkata if timezone-naive and converted to IST if timezone-aware.
+The evaluator expects a journal with `recorded_at` and `scan_as_of` publication timestamps, plus one 5-minute OHLCV CSV per symbol. Its timestamp column can be named `date`, `timestamp`, `datetime`, or `time`; required price columns are `open, high, low, close, volume`. Timestamps are interpreted in Asia/Kolkata if timezone-naive and converted to IST if timezone-aware.
 
 The scanner can build this archive automatically during paper-journal runs: use `--paper-journal logs/paper_signals.csv` and optionally `--candle-archive-dir data/paper_candles`. The archive contains only completed 5-minute candles, is deduplicated by timestamp, and records `provider_mode`. The evaluator rejects mixed-provider or mismatched-provider archives for a journal row. A file named `INFY.csv` is preferred. A unique file such as `INFY_60d_5minute.csv` can be used if it is the only `INFY_*.csv` file in the directory. If there are multiple matching caches, the tool fails rather than guessing which version to use. Copy the explicitly chosen cache into a clean paper-candles directory with the simple symbol filename, for example:
 
@@ -56,4 +56,5 @@ That replay enforces one cash pool, quantity caps and same-symbol overlap contro
 - A target/stop outcome is hypothetical. It does not model queue priority, spread, partial fills, price impact or exact intrabar sequencing.
 - The report should be generated after the relevant session has closed and the candle cache has refreshed. Pending latest-day sessions can be evaluated again later.
 - Repeated observations may overlap. Do not use individual-signal aggregate P&L, win rate or profit factor as an independent sample. Use the shared-capital replay for allocation constraints and later validate a frozen rule set on untouched dates.
+- Historical journal exports without `recorded_at` or `scan_as_of` cannot be scored safely by this version and must be re-exported; do not infer publication time from signal candle time.
 - Neither a completed paper outcome nor a passing test suite establishes a repeatable profitable edge.

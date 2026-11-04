@@ -139,12 +139,19 @@ class PaperBroker:
         day=now.astimezone(IST).date().isoformat()
         closed=db.execute("SELECT COALESCE(SUM(net_pnl),0) pnl FROM trades WHERE status='CLOSED' AND substr(exit_time,1,10)=?",(day,)).fetchone()
         total=float(closed["pnl"]); marks={r["symbol"]:r for r in db.execute("SELECT * FROM market_marks")}
+        _,rates=load_phase2_settings()
         for trade in self._open_rows(db):
             if not str(trade["entry_time"]).startswith(day): continue
             mark=marks.get(trade["symbol"])
-            if mark:
-                price=float(mark["last_price"]); entry=float(trade["entry_reference_price"])
-                total+=((price-entry) if trade["side"]=="LONG" else (entry-price))*int(trade["quantity"])
+            if not mark: continue
+            side=trade["side"];qty=int(trade["quantity"])
+            entry_ref=float(trade["entry_reference_price"]);entry_fill=float(trade["entry_fill_price"])
+            exit_ref=float(mark["bid"] or mark["last_price"]) if side=="LONG" else float(mark["ask"] or mark["last_price"])
+            exit_fill=exit_ref*(1-self.slippage_bps/10000) if side=="LONG" else exit_ref*(1+self.slippage_bps/10000)
+            gross=((exit_ref-entry_ref) if side=="LONG" else (entry_ref-exit_ref))*qty
+            fees=estimate_intraday_round_trip_cost(side=side,entry_price=entry_fill,exit_price=exit_fill,quantity=qty,rates=rates)
+            slip=abs(entry_fill-entry_ref)*qty+abs(exit_fill-exit_ref)*qty
+            total+=gross-fees.total-slip
         return total
     def _record_rejection(self,db,candidate,report_as_of,reason):
         symbol=str(candidate.get("symbol") or "").strip().upper() or None
@@ -277,7 +284,7 @@ class PaperBroker:
             minimum_net_risk_reward=self.minimum_net_rr,require_margin_verification=False,
             skip_if_margin_unavailable=False,slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist="14:45",square_off_time_ist="15:15")
-        try: assessment=assess_trade(side=side,entry_price=entry_fill,stop_loss=stop,target_1=t1,target_2=t2,
+        try: assessment=assess_trade(side=side,entry_price=entry_reference,stop_loss=stop,target_1=t1,target_2=t2,
             settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
         except ValueError as exc: raise _RejectedSignal(f"Current quote failed the risk validator: {exc}") from exc
         if not assessment.accepted or assessment.quantity<1: raise _RejectedSignal("Virtual risk/after-cost R:R gate: "+assessment.reason)
@@ -319,6 +326,9 @@ class PaperBroker:
         bid_value,ask_value=opt(bid),opt(ask)
         qt=market_time or datetime.now(IST); qt=qt.replace(tzinfo=IST) if qt.tzinfo is None else qt.astimezone(IST)
         rec=received_at or datetime.now(IST); rec=rec.replace(tzinfo=IST) if rec.tzinfo is None else rec.astimezone(IST)
+        local_now=datetime.now(IST)
+        if (rec-local_now).total_seconds()>2 or (qt-rec).total_seconds()>2:
+            raise ValueError("Market tick contains a future-dated receive or exchange timestamp.")
         closed=0
         with self._connect() as db:
             db.execute("""INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at) VALUES(?,?,?,?,?,?)
@@ -350,8 +360,9 @@ class PaperBroker:
                 mark=marks.get(trade["symbol"])
                 if mark is None:
                     self._event(db,"SQUARE_OFF_BLOCKED","No market mark; position left open instead of inventing an exit price.",symbol=trade["symbol"],severity="ERROR",event_key=f"squareoff-missing:{trade['id']}:{current.date()}",at=current); continue
-                if (current-to_ist(mark["received_at"])).total_seconds()>max_quote_age_seconds:
-                    self._event(db,"SQUARE_OFF_BLOCKED","Latest market mark is stale; position left open instead of inventing an exit price.",symbol=trade["symbol"],severity="ERROR",event_key=f"squareoff-stale:{trade['id']}:{current.date()}",at=current); continue
+                mark_age=(current-to_ist(mark["received_at"])).total_seconds()
+                if mark_age < -2 or mark_age > max_quote_age_seconds:
+                    self._event(db,"SQUARE_OFF_BLOCKED","Latest market mark is stale or future-dated; position left open instead of inventing an exit price.",symbol=trade["symbol"],severity="ERROR",event_key=f"squareoff-stale:{trade['id']}:{current.date()}",at=current); continue
                 exit_ref=float(mark["bid"] or mark["last_price"]) if trade["side"]=="LONG" else float(mark["ask"] or mark["last_price"])
                 self._close_trade(db,trade,exit_ref,"TIME_SQUARE_OFF","Time-based square-off using a recent cached quote.",current); closed+=1
         return closed
@@ -415,7 +426,7 @@ class PaperBroker:
                 slip=abs(float(row["entry_fill_price"])-entry_ref)*qty+abs(exit_fill-exit_ref)*qty; net_mark=gross-fees.total-slip
                 unreal+=net_mark; exposure+=float(row["position_value_inr"])
                 rr_metrics = calculate_net_reward_risk(
-                    side=row["side"], entry_price=float(row["entry_fill_price"]),
+                    side=row["side"], entry_price=float(row["entry_reference_price"]),
                     stop_loss=float(row["stop_loss"]), target_1=float(row["target_1"]),
                     target_2=float(row["target_2"]), quantity=qty,
                     slippage_bps_per_side=self.slippage_bps, charge_rates=rates,
@@ -448,7 +459,7 @@ class PaperBroker:
                 fees=estimate_intraday_round_trip_cost(side=item["side"],entry_price=entry_fill,exit_price=exit_fill,quantity=qty,rates=rates)
                 slip=abs(entry_fill-entry_ref)*qty+abs(exit_fill-exit_ref)*qty
                 rr_metrics = calculate_net_reward_risk(
-                    side=item["side"], entry_price=entry_fill,
+                    side=item["side"], entry_price=float(item["entry_reference_price"]),
                     stop_loss=float(item["stop_loss"]), target_1=float(item["target_1"]),
                     target_2=float(item["target_2"]), quantity=qty,
                     slippage_bps_per_side=self.slippage_bps, charge_rates=rates,

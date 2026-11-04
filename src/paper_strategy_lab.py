@@ -10,6 +10,7 @@ from src.cost_calculator import estimate_intraday_round_trip_cost
 from src.market_scanner import add_scanner_indicators
 from src.paper_outcomes import load_candles
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
+from src.research_timing import next_five_minute_bar_after, to_ist
 from src.strategies.signal_planner import plan_atr_levels
 IST=ZoneInfo("Asia/Kolkata")
 SHADOW_CAPITAL=100_000.0
@@ -91,20 +92,37 @@ def _insert_new_signals(db:sqlite3.Connection,symbol:str,frame:pd.DataFrame)->in
   count+=cur.rowcount
  return count
 def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->None:
- sig=pd.Timestamp(row["signal_time"])
- entry_ts=sig+pd.Timedelta(minutes=5)
+ sig=to_ist(row["signal_time"])
+ available=to_ist(row["created_at"])
+ entry_ts=next_five_minute_bar_after(sig,available)
  # Decide eligibility before looking for the next candle. Signals whose next-bar
  # entry is at/after the cutoff can never become valid, even when that candle
  # is absent from the archive (the 15:10 signal was previously left pending).
  if entry_ts.date()!=sig.date() or entry_ts.time().replace(tzinfo=None)>=ENTRY_CUTOFF:
   db.execute("UPDATE shadow_signals SET status='EXPIRED_NO_ENTRY',reason=? WHERE signal_id=?",
    (f"Next-bar entry at {entry_ts.strftime('%H:%M')} IST is outside the same-session entry window (must be before {ENTRY_CUTOFF.strftime('%H:%M')}); no entry was simulated.",row["signal_id"]));return
- if sig not in frame.index:return
+ if sig not in frame.index:
+  if not frame.empty and frame.index[-1]>=entry_ts:
+   db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+    ("Exact signal candle is missing from the Kite archive; no entry was fabricated.",row["signal_id"]))
+  return
+ observed_close=float(frame.loc[sig]["close"]);expected_close=float(row["signal_close"])
+ tolerance=max(0.02,expected_close*5.0/10000.0)
+ if abs(observed_close-expected_close)>tolerance:
+  db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+   (f"Signal close {expected_close:.4f} differs from archived close {observed_close:.4f}; outcome unscored.",row["signal_id"]))
+  return
  idx=frame.index.get_indexer([entry_ts])[0]
  if idx<0:
-  if not frame.empty and frame.index[-1]>sig:
+  if not frame.empty and frame.index[-1]>=entry_ts:
    db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
-    ("Exact next five-minute candle missing; no entry fabricated.",row["signal_id"]))
+    ("First five-minute candle after signal publication is missing; no later entry fabricated.",row["signal_id"]))
+  return
+ expected=pd.date_range(sig,entry_ts,freq="5min")
+ observed=frame.index[(frame.index>=sig)&(frame.index<=entry_ts)]
+ if not observed.equals(expected):
+  db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+   ("Candle continuity from signal through publication-aware entry is incomplete.",row["signal_id"]))
   return
  if db.execute("SELECT 1 FROM shadow_signals WHERE strategy_version=? AND symbol=? AND status='OPEN'",(row["strategy_version"],row["symbol"])).fetchone():
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Same-symbol shadow position already open for this strategy.",row["signal_id"]));return
@@ -117,7 +135,7 @@ def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->Non
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Next-bar open invalidated price levels.",row["signal_id"]));return
  _,rates=load_phase2_settings()
  settings=RiskSettings(capital_inr=_available_capital(db,row["strategy_version"]),risk_per_trade_inr=SHADOW_RISK,minimum_net_risk_reward=MIN_NET_RR,require_margin_verification=False,skip_if_margin_unavailable=False,slippage_bps_per_side=SLIPPAGE_BPS,entry_cutoff_ist="14:45",square_off_time_ist="15:15")
- assess=assess_trade(side=side,entry_price=entry_fill,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
+ assess=assess_trade(side=side,entry_price=entry_ref,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
  if not assess.accepted or assess.quantity<1:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Cash-only risk/after-cost R:R gate: "+assess.reason,row["signal_id"]));return
  db.execute("UPDATE shadow_signals SET status='OPEN',entry_time=?,entry_reference_price=?,entry_fill_price=?,quantity=?,reason=? WHERE signal_id=?",(entry_ts.isoformat(),entry_ref,entry_fill,int(assess.quantity),str(row["reason"])+" Entry uses next-bar open with adverse slippage.",row["signal_id"]))
@@ -130,10 +148,10 @@ def _reconcile_pending_entries(
  current=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=IST)
  current=current.tz_localize(IST) if current.tzinfo is None else current.tz_convert(IST)
  expired=incomplete=0
- pending=list(db.execute("SELECT signal_id,signal_time FROM shadow_signals WHERE status='PENDING_ENTRY'"))
+ pending=list(db.execute("SELECT signal_id,signal_time,created_at FROM shadow_signals WHERE status='PENDING_ENTRY'"))
  for row in pending:
   sig=pd.Timestamp(row["signal_time"])
-  entry_ts=sig+pd.Timedelta(minutes=5)
+  entry_ts=next_five_minute_bar_after(sig,pd.Timestamp(row["created_at"]))
   if entry_ts.date()!=sig.date() or entry_ts.time().replace(tzinfo=None)>=ENTRY_CUTOFF:
    db.execute("UPDATE shadow_signals SET status='EXPIRED_NO_ENTRY',reason=? WHERE signal_id=?",
     (f"Next-bar entry at {entry_ts.strftime('%H:%M')} IST is outside the same-session entry window (must be before {ENTRY_CUTOFF.strftime('%H:%M')}); no entry was simulated.",row["signal_id"]))
@@ -154,6 +172,11 @@ def _close_shadow(db:sqlite3.Connection,row:sqlite3.Row,exit_ref:float,reason:st
 def _monitor_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->None:
  entry_ts=pd.Timestamp(row["entry_time"]);session=frame.loc[frame.index.date==entry_ts.date()];bars=session.loc[entry_ts:]
  if bars.empty:return
+ if bars.index[0]!=entry_ts:
+  if not session.empty and session.index[-1]>=entry_ts:
+   db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",
+    ("Exact simulated entry candle is missing from the current Kite archive; later candles are not substituted.",row["signal_id"]))
+  return
  previous=None
  for stamp,bar in bars.iterrows():
   if previous is not None and stamp!=previous+pd.Timedelta(minutes=5):

@@ -103,6 +103,8 @@ def test_daily_report_includes_independent_candidate_outcomes_without_portfolio_
     assert out["candidate_outcomes_closed_today"] == 0
     assert out["candidate_outcomes_incomplete_today"] == 1
     assert payload["summary"]["candidate_outcomes"]["incomplete_data_gaps"] == 1
+    assert payload["summary"]["candidate_outcomes"]["invalidated_legacy_method"] == 0
+    assert out["candidate_outcomes_invalidated_legacy_today"] == 0
     assert payload["candidate_outcomes"]["aggregate_pnl_is_not_portfolio_pnl"] is True
     with (tmp_path / "reports" / f"paper_daily_{now.date().isoformat()}_trades.csv").open(
         encoding="utf-8", newline=""

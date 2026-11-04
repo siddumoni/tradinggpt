@@ -34,6 +34,11 @@ def candidate(symbol="HDFCBANK", **changes):
         "news_status": "CHECKED_NO_MATCH",
         "company_specific_risk": "LOW",
         "reasons": ["Rejected: Target 1 net R:R is below 1.50."],
+        "entry_validation": {
+            "valid": True, "status": "REJECTED_NET_RR",
+            "reason": "Rejected: Target 1 net R:R is below 1.50.",
+            "quote_timestamp": "2026-10-27T10:05:00+05:30",
+        },
     }
     item.update(changes)
     return item
@@ -154,3 +159,24 @@ def test_high_company_risk_is_not_shadowed(tmp_path):
     result = shadow.process_scan_report(report_file(tmp_path, [item], {"HDFCBANK": quote()}))
     assert result["opened"] == 0
     assert "High company-specific news risk" in shadow.snapshot()["recent_signals"][0]["exclusion_reason"]
+
+
+def test_watch_shadow_rejects_candidates_with_other_live_entry_failure(tmp_path):
+    shadow = WatchShadowPortfolio(tmp_path / "paper.sqlite3")
+    item = candidate(entry_validation={
+        "valid": True, "status": "REJECTED_STALE_QUOTE",
+        "reason": "Quote is stale.", "quote_timestamp": "2026-10-27T10:05:00+05:30",
+    })
+    result = shadow.process_scan_report(report_file(tmp_path, [item], {"HDFCBANK": quote()}))
+    assert result["opened"] == 0
+    assert result["excluded"] == 1
+    assert "not exclusively" in shadow.snapshot()["recent_signals"][0]["exclusion_reason"]
+
+
+def test_future_dated_market_tick_is_rejected(tmp_path):
+    shadow=WatchShadowPortfolio(tmp_path/"paper.sqlite3")
+    shadow.process_scan_report(report_file(tmp_path,[candidate()],{"HDFCBANK":quote()}))
+    with pytest.raises(ValueError,match="future-dated"):
+        shadow.update_market_price("HDFCBANK",100.2,
+            market_time=datetime.now(IST)+timedelta(minutes=5),received_at=datetime.now(IST))
+    assert shadow.snapshot()["account"]["open_positions"]==1

@@ -4,6 +4,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import pytest
 from src.paper_broker import PaperBroker
+from src import paper_broker as paper_broker_module
 IST=ZoneInfo("Asia/Kolkata")
 def stamp(): return datetime.now(IST).isoformat()
 def report_file(tmp_path,candidates,snapshots=None,*,provider="kite",orders=False):
@@ -60,3 +61,51 @@ def test_scan_action_counts_separate_watch_candidates_from_no_trade(tmp_path):
  assert r["conditional_candidates"]==0
  assert r["other_actions"]==0
  assert r["neutral"]==2
+
+
+def test_risk_assessment_uses_reference_price_and_slipped_fill_for_cash_cap(tmp_path,monkeypatch):
+ captured={}
+ real_assess=paper_broker_module.assess_trade
+ def spy_assess(**kwargs):
+  captured.update(kwargs)
+  return real_assess(**kwargs)
+ monkeypatch.setattr(paper_broker_module,"assess_trade",spy_assess)
+ broker=PaperBroker(tmp_path/"paper.sqlite3")
+ q=quote(ask=100.01,bid=100.00)
+ result=broker.process_scan_report(report_file(tmp_path,[candidate()],{"INFY":q}))
+ assert result["opened"]==1
+ assert captured["entry_price"]==pytest.approx(100.01)
+ assert captured["estimated_margin_per_share"]==pytest.approx(100.01*(1+5/10000))
+
+
+def test_future_dated_tick_is_rejected(tmp_path):
+ broker=PaperBroker(tmp_path/"paper.sqlite3")
+ with pytest.raises(ValueError,match="future-dated"):
+  broker.update_market_price("INFY",100.0,
+   market_time=datetime.now(IST)+timedelta(minutes=5),received_at=datetime.now(IST))
+
+
+def test_open_position_daily_pnl_uses_conservative_net_liquidation_mark(tmp_path):
+ broker=PaperBroker(tmp_path/"paper.sqlite3")
+ broker.process_scan_report(report_file(tmp_path,[candidate()],{"INFY":quote()}))
+ now=datetime.now(IST)
+ with broker._connect() as db:
+  # Write a non-triggering liquidation mark directly: the public tick handler
+  # would correctly square off immediately after 15:15.
+  db.execute(
+   "INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at) VALUES(?,?,?,?,?,?)",
+   ("INFY",101.0,100.95,101.05,now.isoformat(),now.isoformat()),
+  )
+  trade=db.execute("SELECT * FROM trades WHERE status='OPEN'").fetchone()
+  assert trade is not None
+  result=broker._today_net_pnl(db,now)
+  expected_exit_fill=100.95*(1-5/10000)
+  from src.cost_calculator import estimate_intraday_round_trip_cost
+  from src.risk_engine import load_phase2_settings
+  _,rates=load_phase2_settings()
+  fees=estimate_intraday_round_trip_cost(side="LONG",entry_price=trade["entry_fill_price"],
+   exit_price=expected_exit_fill,quantity=trade["quantity"],rates=rates)
+  gross=(100.95-trade["entry_reference_price"])*trade["quantity"]
+  slippage=abs(trade["entry_fill_price"]-trade["entry_reference_price"])*trade["quantity"] + abs(expected_exit_fill-100.95)*trade["quantity"]
+  expected=gross-fees.total-slippage
+ assert result==pytest.approx(expected)

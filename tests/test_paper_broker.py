@@ -89,9 +89,15 @@ def test_open_position_daily_pnl_uses_conservative_net_liquidation_mark(tmp_path
  broker=PaperBroker(tmp_path/"paper.sqlite3")
  broker.process_scan_report(report_file(tmp_path,[candidate()],{"INFY":quote()}))
  now=datetime.now(IST)
- broker.update_market_price("INFY",101.0,bid=100.95,ask=101.05,market_time=now,received_at=now)
  with broker._connect() as db:
+  # Write a non-triggering liquidation mark directly: the public tick handler
+  # would correctly square off immediately after 15:15.
+  db.execute(
+   "INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at) VALUES(?,?,?,?,?,?)",
+   ("INFY",101.0,100.95,101.05,now.isoformat(),now.isoformat()),
+  )
   trade=db.execute("SELECT * FROM trades WHERE status='OPEN'").fetchone()
+  assert trade is not None
   result=broker._today_net_pnl(db,now)
   expected_exit_fill=100.95*(1-5/10000)
   from src.cost_calculator import estimate_intraday_round_trip_cost

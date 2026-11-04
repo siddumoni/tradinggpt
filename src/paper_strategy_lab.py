@@ -10,7 +10,7 @@ from src.cost_calculator import estimate_intraday_round_trip_cost
 from src.market_scanner import add_scanner_indicators
 from src.paper_outcomes import load_candles
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
-from src.research_timing import next_five_minute_bar_after
+from src.research_timing import next_five_minute_bar_after, to_ist
 from src.strategies.signal_planner import plan_atr_levels
 IST=ZoneInfo("Asia/Kolkata")
 SHADOW_CAPITAL=100_000.0
@@ -92,8 +92,8 @@ def _insert_new_signals(db:sqlite3.Connection,symbol:str,frame:pd.DataFrame)->in
   count+=cur.rowcount
  return count
 def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->None:
- sig=pd.Timestamp(row["signal_time"])
- available=pd.Timestamp(row["created_at"])
+ sig=to_ist(row["signal_time"])
+ available=to_ist(row["created_at"])
  entry_ts=next_five_minute_bar_after(sig,available)
  # Decide eligibility before looking for the next candle. Signals whose next-bar
  # entry is at/after the cutoff can never become valid, even when that candle

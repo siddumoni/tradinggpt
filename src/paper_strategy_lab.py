@@ -11,7 +11,7 @@ from src.market_scanner import add_scanner_indicators
 from src.paper_outcomes import load_candles
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
 from src.research_timing import next_five_minute_bar_after, to_ist
-from src.strategies.signal_planner import plan_atr_levels
+from src.exit_policy import evaluate_ohlc_exit, load_exit_policy, plan_policy_levels
 IST=ZoneInfo("Asia/Kolkata")
 SHADOW_CAPITAL=100_000.0
 SHADOW_RISK=500.0
@@ -19,6 +19,7 @@ MAX_OPEN_PER_STRATEGY=3
 MIN_NET_RR=1.5
 SLIPPAGE_BPS=5.0
 ENTRY_CUTOFF=dtime(14,45)
+EXIT_POLICY=load_exit_policy()
 LAST_BAR=dtime(15,10)
 DEFINITIONS={"challenger_ema_9_21_v1":"EMA 9/21 crossover with VWAP and MACD confirmation","challenger_vwap_momentum_v1":"VWAP crossover with EMA and MACD confirmation","challenger_ema_pullback_v1":"Trend-aligned EMA21 pullback with ATR-scaled levels"}
 def _signal_id(version:str,symbol:str,side:str,stamp:str)->str:
@@ -53,7 +54,7 @@ def generate_challenger_signals(symbol:str,candles:pd.DataFrame)->list[dict[str,
  elif snow and not sprev:setups.append(("challenger_ema_pullback_v1","Bearish EMA trend with fresh EMA21 pullback and negative MACD","SHORT"))
  stamp=frame.index[-1].isoformat();out=[]
  for version,reason,side in setups:
-  try:levels=plan_atr_levels(side,entry=close,atr=atr,stop_atr_multiple=1.0,target_1_atr_multiple=2.5,target_2_atr_multiple=4.0)
+  try:levels=plan_policy_levels(side,entry=close,atr=atr,policy=EXIT_POLICY)
   except (ValueError,TypeError):continue
   out.append({"signal_id":_signal_id(version,symbol,side,stamp),"strategy_version":version,"strategy_name":DEFINITIONS[version],"symbol":symbol.upper(),"side":side,"signal_time":stamp,"signal_close":close,"stop_loss":float(levels.stop_loss),"target_1":float(levels.target_1),"target_2":float(levels.target_2),"reason":reason})
  return out
@@ -145,7 +146,7 @@ def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->Non
  if not fill_valid:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Slippage-adjusted executable fill invalidated price levels.",row["signal_id"]));return
  _,rates=load_phase2_settings()
- settings=RiskSettings(capital_inr=_available_capital(db,row["strategy_version"]),risk_per_trade_inr=SHADOW_RISK,minimum_net_risk_reward=MIN_NET_RR,require_margin_verification=False,skip_if_margin_unavailable=False,slippage_bps_per_side=SLIPPAGE_BPS,entry_cutoff_ist="14:45",square_off_time_ist="15:15")
+ settings=RiskSettings(capital_inr=_available_capital(db,row["strategy_version"]),risk_per_trade_inr=SHADOW_RISK,minimum_net_risk_reward=MIN_NET_RR,minimum_net_rr_target=EXIT_POLICY.gate_target,require_margin_verification=False,skip_if_margin_unavailable=False,slippage_bps_per_side=SLIPPAGE_BPS,entry_cutoff_ist="14:45",square_off_time_ist=EXIT_POLICY.time_exit_ist)
  try:
   assess=assess_trade(side=side,entry_price=entry_ref,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
  except ValueError as exc:
@@ -196,16 +197,13 @@ def _monitor_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->N
  for stamp,bar in bars.iterrows():
   if previous is not None and stamp!=previous+pd.Timedelta(minutes=5):
    db.execute("UPDATE shadow_signals SET status='INCOMPLETE_DATA_GAP',reason=? WHERE signal_id=?",(f"Missing five-minute candle after {previous.isoformat()}; outcome unscored.",row["signal_id"]));return
-  op=float(bar["open"]);hi=float(bar["high"]);lo=float(bar["low"]);side=row["side"]
-  stop_hit=(lo<=float(row["stop_loss"])) if side=="LONG" else (hi>=float(row["stop_loss"]))
-  target_hit=(hi>=float(row["target_2"])) if side=="LONG" else (lo<=float(row["target_2"]))
-  if stop_hit:
-   ref=min(float(row["stop_loss"]),op) if side=="LONG" else max(float(row["stop_loss"]),op)
-   _close_shadow(db,row,ref,"STOP_LOSS","Stop-first OHLC handling; adverse stop gaps use worse bar open.",stamp+pd.Timedelta(minutes=5));return
-  if target_hit:
-   _close_shadow(db,row,float(row["target_2"]),"TARGET_2","Target 2 touched; no favorable gap improvement.",stamp+pd.Timedelta(minutes=5));return
-  if stamp.time().replace(tzinfo=None)==LAST_BAR:
-   _close_shadow(db,row,float(bar["close"]),"TIME_SQUARE_OFF","Closed at final regular-session candle close.",stamp+pd.Timedelta(minutes=5));return
+  bar_end=stamp+pd.Timedelta(minutes=5)
+  decision=evaluate_ohlc_exit(
+   side=row["side"],stop_loss=float(row["stop_loss"]),target_2=float(row["target_2"]),
+   open_price=float(bar["open"]),high=float(bar["high"]),low=float(bar["low"]),close=float(bar["close"]),
+   bar_end_time=bar_end.time(),policy=EXIT_POLICY)
+  if decision is not None:
+   _close_shadow(db,row,decision.reference_price,decision.reason,decision.detail,bar_end);return
   previous=stamp
 def _update_review_status(db:sqlite3.Connection,version:str)->None:
  rows=list(db.execute("SELECT net_pnl,exit_time FROM shadow_signals WHERE strategy_version=? AND status='CLOSED' ORDER BY exit_time",(version,)))

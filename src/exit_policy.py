@@ -7,6 +7,7 @@ and targets receive no favorable gap improvement.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from datetime import time
 from pathlib import Path
 from typing import Literal
@@ -101,7 +102,7 @@ def evaluate_ohlc_exit(
     if side not in ("LONG", "SHORT"):
         raise ValueError("side must be LONG or SHORT")
     values = (stop_loss, target_2, open_price, high, low, close)
-    if any(value <= 0 for value in values):
+    if any(not isfinite(value) or value <= 0 for value in values):
         raise ValueError("OHLC and exit levels must be positive")
     if high < max(open_price, close, low) or low > min(open_price, close, high):
         raise ValueError("Invalid OHLC candle")

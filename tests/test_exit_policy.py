@@ -80,3 +80,8 @@ def test_risk_engine_uses_the_policy_gate_target_and_time_exit():
     policy = load_exit_policy()
     assert settings.minimum_net_rr_target == policy.gate_target
     assert settings.square_off_time_ist == policy.time_exit_ist
+
+
+def test_exit_policy_rejects_non_finite_atr_multiples():
+    with pytest.raises(ValueError, match="must be positive"):
+        replace(load_exit_policy(), target_2_atr_multiple=float("nan"))

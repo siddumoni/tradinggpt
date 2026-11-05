@@ -23,7 +23,8 @@ from src.indicators import add_indicators
 from src.strategies.levels import previous_session_levels  # noqa: F401
 from src.strategies.market_regime import classify_market_regime
 from src.strategies.opening_range import opening_range_signal
-from src.exit_policy import ExitPolicy, load_exit_policy, plan_policy_levels
+from src.exit_policy import ExitPolicy, load_exit_policy
+from src.strategies.signal_planner import plan_atr_levels
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
 from src.yahoo_data_fetcher import YahooFinanceMarketData
@@ -246,7 +247,12 @@ def make_signal_callback(
         close = float(row["close"])
         if pd.isna(atr) or atr <= 0:
             return None
-        levels = plan_policy_levels(signal.side, entry=close, atr=atr, policy=policy)
+        levels = plan_atr_levels(
+            signal.side, entry=close, atr=atr,
+            stop_atr_multiple=policy.stop_atr_multiple,
+            target_1_atr_multiple=policy.target_1_atr_multiple,
+            target_2_atr_multiple=policy.target_2_atr_multiple,
+        )
         return {
             "side": signal.side,
             "stop_loss": levels.stop_loss,

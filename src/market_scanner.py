@@ -6,7 +6,7 @@ or modifies orders. Yahoo data is explicitly treated as unverified for live use.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, time as dtime, timedelta
 from html import unescape
 import re
@@ -23,6 +23,7 @@ from src.cost_calculator import ChargeRates
 from src.strategies.market_regime import classify_market_regime
 from src.strategies.opening_range import opening_range_signal
 from src.exit_policy import plan_policy_levels
+from src.execution_model import build_structural_stop, session_aware_atr, spread_slippage_bps_per_side
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
 
@@ -429,6 +430,8 @@ def evaluate_symbol_bundle(
 
     ind5 = add_scanner_indicators(c5)
     ind15 = add_scanner_indicators(c15)
+    ind5['atr_session_14'] = session_aware_atr(ind5, 14)
+    ind15['atr_session_14'] = session_aware_atr(ind15, 14)
     index_indicators = add_scanner_indicators(idx) if not idx.empty else pd.DataFrame()
     regime = classify_market_regime(index_indicators) if not index_indicators.empty else "UNKNOWN"
     stock_regime = _stock_15m_regime(ind15)
@@ -436,7 +439,7 @@ def evaluate_symbol_bundle(
     if regime == "UNKNOWN":
         reasons.append("NIFTY 50 regime is unavailable; market-direction confirmation is missing.")
     latest = ind5.iloc[-1]
-    atr = float(latest.get("atr_14", float("nan")))
+    atr = float(latest.get("atr_session_14", float("nan")))
     close = float(latest["close"])
     if not isfinite(atr) or atr <= 0:
         reasons.append("ATR warm-up is incomplete or invalid; no levels generated.")
@@ -497,6 +500,19 @@ def evaluate_symbol_bundle(
 
     # Levels and the net-R:R gate are driven by the shared, versioned exit policy.
     levels = plan_policy_levels(signal.side, entry=close, atr=atr)
+    try:
+        stop_plan = build_structural_stop(side=signal.side, entry=levels.entry, candles_5m=ind5,
+            candles_15m=ind15, atr=atr, minimum_distance_pct=settings.minimum_stop_distance_pct)
+        levels = replace(levels, stop_loss=stop_plan.stop_loss)
+        reasons.append(f"Structural stop: {stop_plan.reference} at ₹{stop_plan.stop_loss:.2f} ({stop_plan.distance_pct:.2f}% from entry).")
+    except (ValueError, TypeError) as exc:
+        reasons.append(f"Structural stop validation failed; no trade: {exc}")
+        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+            market_context_status=market_context_status, market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status, company_specific_risk=company_specific_risk)
+    spread_slippage, spread_status = spread_slippage_bps_per_side(bundle.get("quote"), floor_bps_per_side=settings.slippage_bps_per_side)
+    settings = replace(settings, slippage_bps_per_side=spread_slippage)
+    reasons.append(f"Execution-cost model: {spread_status}; estimated slippage {spread_slippage:.2f} bps per side (5 bps configured floor).")
     assessment: TradeAssessment = assess_trade(
         side=signal.side,
         entry_price=levels.entry,

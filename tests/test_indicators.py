@@ -66,3 +66,15 @@ def test_missing_volume_raises():
     df.iloc[5, df.columns.get_loc("volume")] = np.nan
     with pytest.raises(ValueError, match="Volume must be present"):
         add_indicators(df)
+
+
+def test_atr_resets_at_session_boundary_without_overnight_gap():
+    first_index = pd.date_range("2026-11-02 09:15", periods=15, freq="5min")
+    second_index = pd.date_range("2026-11-03 09:15", periods=14, freq="5min")
+    def make(index, offset):
+        close = [100 + offset + i * 0.1 for i in range(len(index))]
+        return pd.DataFrame({"open": close, "high": [v + 0.4 for v in close], "low": [v - 0.4 for v in close], "close": close, "volume": [1000] * len(index)}, index=index)
+    candles = pd.concat([make(first_index, 0), make(second_index, 50)])
+    result = add_indicators(candles)
+    assert result.loc[second_index, "atr_14"].iloc[-1] == pytest.approx(0.8)
+    assert pd.isna(result.loc[second_index, "atr_14"].iloc[0])

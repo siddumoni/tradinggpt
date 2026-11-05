@@ -16,7 +16,6 @@ schedule:
   market_close: "15:30"
 
 risk:
-  minimum_net_rr_target: target_2
   require_margin_verification: true
   skip_if_margin_unavailable: true
   slippage_bps_per_side: 5       # assumed slippage per side, in basis points

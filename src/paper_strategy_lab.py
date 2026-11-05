@@ -20,7 +20,6 @@ MIN_NET_RR=1.5
 SLIPPAGE_BPS=5.0
 ENTRY_CUTOFF=dtime(14,45)
 EXIT_POLICY=load_exit_policy()
-LAST_BAR=dtime(15,10)
 DEFINITIONS={"challenger_ema_9_21_v1":"EMA 9/21 crossover with VWAP and MACD confirmation","challenger_vwap_momentum_v1":"VWAP crossover with EMA and MACD confirmation","challenger_ema_pullback_v1":"Trend-aligned EMA21 pullback with ATR-scaled levels"}
 def _signal_id(version:str,symbol:str,side:str,stamp:str)->str:
  return hashlib.sha256("|".join((version,symbol.upper(),side.upper(),stamp)).encode()).hexdigest()[:32]

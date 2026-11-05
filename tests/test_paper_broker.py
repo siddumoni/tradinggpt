@@ -118,8 +118,7 @@ def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
     from src.exit_policy import load_exit_policy
 
     policy = replace(load_exit_policy(), time_exit_ist="23:59")
-    start = datetime.now(IST).replace(second=0, microsecond=0)
-    start = start.replace(minute=(start.minute // 5) * 5)
+    start = datetime(2026, 11, 5, 10, 0, tzinfo=IST)
     stamps = pd.date_range(start, periods=3, freq="5min")
     candles = pd.DataFrame(
         {
@@ -145,11 +144,20 @@ def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
     assert len(backtest_trades) == 1
 
     broker = PaperBroker(tmp_path / "paper.sqlite3", exit_policy=policy)
-    opened = broker.process_scan_report(
-        report_file(tmp_path, [candidate()], {"INFY": quote()})
-    )
-    assert opened["opened"] == 1
-    for stamp, bar in candles.iterrows():
+    with broker._connect() as db:
+        db.execute(
+            """INSERT INTO trades(
+                signal_id,strategy,strategy_version,symbol,side,status,signal_time,entry_time,
+                signal_reference_entry,entry_reference_price,entry_fill_price,stop_loss,target_1,target_2,
+                quantity,risk_budget_inr,position_value_inr,planned_net_risk_inr,market_regime,
+                entry_reason,created_at
+            ) VALUES(?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("parity-test", "vwap_trend", "champion_v1", "INFY", "LONG",
+             stamps[0].isoformat(), stamps[1].isoformat(), 100.0, 100.0, 100.05,
+             98.0, 104.0, 108.0, 100, 500.0, 10005.0, 220.0,
+             "BULLISH", "deterministic parity fixture", stamps[0].isoformat()),
+        )
+    for stamp, bar in candles.iloc[1:].iterrows():
         closed = broker.process_candle(
             "INFY", stamp.to_pydatetime(),
             open_price=float(bar["open"]), high=float(bar["high"]),

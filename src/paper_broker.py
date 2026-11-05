@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from src.cost_calculator import estimate_intraday_round_trip_cost
 from src.paper_allocator import rank_paper_candidates
 from src.risk_engine import RiskSettings, assess_trade, calculate_net_reward_risk, load_phase2_settings
+from src.exit_policy import ExitPolicy, evaluate_ohlc_exit, load_exit_policy
 
 IST=ZoneInfo("Asia/Kolkata")
 DEFAULT_DB=Path("data/paper_trading.sqlite3")
@@ -39,7 +40,7 @@ class PaperBroker:
         risk_per_trade:float=DEFAULT_RISK_PER_TRADE_INR,max_daily_loss:float=DEFAULT_DAILY_LOSS_LIMIT_INR,
         max_open_positions:int=DEFAULT_MAX_OPEN_POSITIONS,slippage_bps:float=DEFAULT_SLIPPAGE_BPS,
         minimum_net_rr:float=1.5,max_entry_quote_age_seconds:float=MAX_ENTRY_QUOTE_AGE_SECONDS,
-        max_portfolio_risk_inr:float|None=None):
+        max_portfolio_risk_inr:float|None=None,exit_policy:ExitPolicy|None=None):
         for label,value in (("initial_capital",initial_capital),("risk_per_trade",risk_per_trade),
           ("max_daily_loss",max_daily_loss),("minimum_net_rr",minimum_net_rr),
           ("max_entry_quote_age_seconds",max_entry_quote_age_seconds)):
@@ -49,6 +50,7 @@ class PaperBroker:
         self.db_path=Path(db_path); self.initial_capital=float(initial_capital); self.risk_per_trade=float(risk_per_trade)
         self.max_daily_loss=float(max_daily_loss); self.max_open_positions=int(max_open_positions)
         self.slippage_bps=float(slippage_bps); self.minimum_net_rr=float(minimum_net_rr)
+        self.exit_policy=exit_policy or load_exit_policy()
         self.max_entry_quote_age_seconds=float(max_entry_quote_age_seconds)
         configured_portfolio_risk = (float(max_portfolio_risk_inr) if max_portfolio_risk_inr is not None
                                      else self.risk_per_trade * self.max_open_positions)
@@ -283,7 +285,8 @@ class PaperBroker:
         settings=RiskSettings(capital_inr=available,risk_per_trade_inr=allocated_risk_budget,
             minimum_net_risk_reward=self.minimum_net_rr,require_margin_verification=False,
             skip_if_margin_unavailable=False,slippage_bps_per_side=self.slippage_bps,
-            entry_cutoff_ist="14:45",square_off_time_ist="15:15")
+            entry_cutoff_ist="14:45",square_off_time_ist=self.exit_policy.time_exit_ist,
+            minimum_net_rr_target=self.exit_policy.gate_target)
         try: assessment=assess_trade(side=side,entry_price=entry_reference,stop_loss=stop,target_1=t1,target_2=t2,
             settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
         except ValueError as exc: raise _RejectedSignal(f"Current quote failed the risk validator: {exc}") from exc
@@ -339,7 +342,7 @@ class PaperBroker:
                 if trade["symbol"]!=cleaned: continue
                 side=trade["side"]; stop_hit=last<=trade["stop_loss"] if side=="LONG" else last>=trade["stop_loss"]
                 target_hit=last>=trade["target_2"] if side=="LONG" else last<=trade["target_2"]
-                time_exit=qt.time().replace(tzinfo=None)>=SQUARE_OFF_TIME
+                time_exit=qt.time().replace(tzinfo=None)>=dtime.fromisoformat(self.exit_policy.time_exit_ist)
                 if stop_hit:
                     exit_ref=min(float(trade["stop_loss"]),bid_value) if side=="LONG" else max(float(trade["stop_loss"]),ask_value)
                     reason,detail="STOP_LOSS","Stop threshold crossed; adverse exit slippage applied."
@@ -352,7 +355,7 @@ class PaperBroker:
         return closed
     def square_off_due_positions(self,now:datetime|None=None,*,max_quote_age_seconds:float=60.0)->int:
         current=now or datetime.now(IST); current=current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
-        if current.time().replace(tzinfo=None)<SQUARE_OFF_TIME: return 0
+        if current.time().replace(tzinfo=None)<dtime.fromisoformat(self.exit_policy.time_exit_ist): return 0
         closed=0
         with self._connect() as db:
             marks={r["symbol"]:r for r in db.execute("SELECT * FROM market_marks")}

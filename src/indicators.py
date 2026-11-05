@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
-from ta.volatility import AverageTrueRange
+from src.execution_model import session_aware_atr
 
 
 REQUIRED_COLUMNS = {"open", "high", "low", "close", "volume"}
@@ -60,16 +60,8 @@ def add_indicators(candles: pd.DataFrame) -> pd.DataFrame:
     df["macd_signal"] = macd.macd_signal()
     df["macd_histogram"] = macd.macd_diff()
 
-    # ta's ATR requires enough bars. Use a temporary valid frame and preserve warm-up NaNs.
-    if len(df) >= 14:
-        atr = AverageTrueRange(
-            high=df["high"], low=df["low"], close=df["close"], window=14, fillna=False
-        )
-        df["atr_14"] = atr.average_true_range()
-    else:
-        # ta's ATR implementation requires at least `window` observations.
-        # Preserve a predictable NaN warm-up result for short test/history windows.
-        df["atr_14"] = float("nan")
+    # Reset Wilder ATR at each session boundary to avoid overnight-gap inflation.
+    df["atr_14"] = session_aware_atr(df, 14)
 
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     session_key = pd.Index(df.index.date, name="session")

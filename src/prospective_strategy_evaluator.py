@@ -34,7 +34,7 @@ from src.strategy_backtest import (
     make_signal_callback,
 )
 from src.strategies.market_regime import classify_market_regime
-from src.strategies.signal_planner import plan_atr_levels
+from src.exit_policy import load_exit_policy, plan_policy_levels
 
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -241,7 +241,6 @@ def _make_candidate(
     callback = make_signal_callback(
         symbol,
         strategy,
-        target_atr_multiple=2.5,
         reject_nontrending_regimes=False,
     )
     signal = callback(indicators, len(indicators) - 1)
@@ -251,14 +250,8 @@ def _make_candidate(
     last = indicators.iloc[-1]
     close = float(last["close"])
     atr = float(last["atr_14"])
-    levels = plan_atr_levels(
-        signal["side"],
-        entry=close,
-        atr=atr,
-        stop_atr_multiple=1.0,
-        target_1_atr_multiple=2.0,
-        target_2_atr_multiple=2.5,
-    )
+    policy = load_exit_policy()
+    levels = plan_policy_levels(signal["side"], entry=close, atr=atr, policy=policy)
     # The baseline callback also plans its single historical target at 2.5 ATR.
     if not math.isclose(float(signal["target"]), levels.target_2, rel_tol=1e-9, abs_tol=0.02):
         raise ValueError(f"{symbol}:{strategy}: target level differs from the baseline callback")

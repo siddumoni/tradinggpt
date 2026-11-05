@@ -29,7 +29,9 @@ from src.research_timing import next_five_minute_bar_after
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
 SESSION_START = dtime(9, 15)
-LAST_BAR_START = dtime(15, 10)
+EXIT_POLICY = load_exit_policy()
+LAST_BAR_END = dtime.fromisoformat(EXIT_POLICY.time_exit_ist)
+LAST_BAR_START = (datetime.combine(datetime.min.date(), LAST_BAR_END) - timedelta(minutes=BAR_MINUTES)).time()
 OHLCV = ("open", "high", "low", "close", "volume")
 REQUIRED_JOURNAL_COLUMNS = (
     "signal_id", "symbol", "side", "strategy", "signal_time", "recorded_at", "scan_as_of", "reference_entry",

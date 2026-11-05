@@ -295,7 +295,7 @@ def load_phase2_settings(
             require_margin_verification=bool(risk.get("require_margin_verification", True)),
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
-            square_off_time_ist=str(schedule.get("intended_square_off_by", "15:15")),
+            square_off_time_ist=exit_policy.time_exit_ist,
             slippage_bps_per_side=float(risk.get("slippage_bps_per_side", 5.0)),
         )
         rates = ChargeRates(

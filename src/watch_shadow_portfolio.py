@@ -339,10 +339,17 @@ class WatchShadowPortfolio:
             entry_cutoff_ist=base.entry_cutoff_ist,
             square_off_time_ist=base.square_off_time_ist,
         )
-        assessment = assess_trade(
-            side=side, entry_price=entry_reference, stop_loss=stop, target_1=t1, target_2=t2,
-            settings=settings, estimated_margin_per_share=entry_fill, charge_rates=rates,
-        )
+        try:
+            assessment = assess_trade(
+                side=side, entry_price=entry_reference, stop_loss=stop, target_1=t1, target_2=t2,
+                settings=settings, estimated_margin_per_share=entry_fill, charge_rates=rates,
+            )
+        except ValueError as exc:
+            self._insert_excluded(
+                db, candidate, signal_id, as_of,
+                f"Risk assessment rejected the watch-shadow entry: {exc}",
+            )
+            return False
         qty = int(assessment.quantity)
         if qty < 1:
             self._insert_excluded(db, candidate, signal_id, as_of,

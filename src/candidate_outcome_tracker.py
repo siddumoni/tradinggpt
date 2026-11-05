@@ -349,11 +349,18 @@ class CandidateOutcomeTracker:
             skip_if_margin_unavailable=False, slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist=base.entry_cutoff_ist, square_off_time_ist=base.square_off_time_ist,
         )
-        assessment = assess_trade(
-            side=side, entry_price=entry_reference, stop_loss=stop, target_1=target_1,
-            target_2=target_2, settings=settings, estimated_margin_per_share=entry_fill,
-            charge_rates=rates,
-        )
+        try:
+            assessment = assess_trade(
+                side=side, entry_price=entry_reference, stop_loss=stop, target_1=target_1,
+                target_2=target_2, settings=settings, estimated_margin_per_share=entry_fill,
+                charge_rates=rates,
+            )
+        except ValueError as exc:
+            self._set_status(
+                db, row["candidate_id"], "EXCLUDED",
+                f"Risk assessment rejected the publication-aware entry: {exc}",
+            )
+            return
         if not assessment.accepted or int(assessment.quantity) < 1:
             self._set_status(db, row["candidate_id"], "EXCLUDED",
                              "Independent cash-only sizing failed: " + str(assessment.reason))

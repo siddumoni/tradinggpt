@@ -52,14 +52,14 @@ def write_report(tmp_path: Path, candidates, *, as_of="2026-11-03T09:31:00+05:30
     return path
 
 
-def write_candles(path: Path, *, target=False, gap=False, last_time="10:00"):
+def write_candles(path: Path, *, target=False, gap=False, last_time="10:00", entry_open=100.0):
     start = pd.Timestamp("2026-11-03T09:15:00+05:30")
     end = pd.Timestamp(f"2026-11-03T{last_time}:00+05:30")
     index = pd.date_range(start, end, freq="5min")
     if gap and len(index) > 5:
         index = index.delete(5)
     frame = pd.DataFrame({
-        "open": [100.0] * len(index),
+        "open": [entry_open if stamp == pd.Timestamp("2026-11-03T09:35:00+05:30") else 100.0 for stamp in index],
         "high": [100.5] * len(index),
         "low": [99.9] * len(index),
         "close": [100.0] * len(index),
@@ -242,3 +242,22 @@ def test_candidate_without_entry_validation_quote_timestamp_is_excluded(tmp_path
     })
     counts = tracker.process_scan_report(write_report(tmp_path, [item]))
     assert counts == {"seen": 1, "eligible": 0, "excluded": 1, "duplicates": 0}
+
+
+def test_candidate_rejects_reference_price_outside_levels_before_risk_assessment(tmp_path):
+    db_path = tmp_path / "paper.sqlite3"
+    archive = tmp_path / "candles"
+    tracker = CandidateOutcomeTracker(db_path)
+    tracker.process_scan_report(write_report(tmp_path, [candidate("INFY", stop_loss=99.999)]))
+    # Slippage moves this LONG fill above the stop, but the reference open is below it.
+    write_candles(archive / "INFY.csv", entry_open=99.998)
+
+    result = tracker.process_archive(archive, now=datetime(2026, 11, 3, 10, 5, tzinfo=IST))
+    with sqlite3.connect(db_path) as db:
+        status, reason, pnl = db.execute(
+            "SELECT status,exclusion_reason,net_pnl FROM candidate_outcomes WHERE symbol='INFY'"
+        ).fetchone()
+    assert status == "EXCLUDED"
+    assert "Reference next-bar open" in reason
+    assert pnl is None
+    assert result["open_or_pending"] == 0

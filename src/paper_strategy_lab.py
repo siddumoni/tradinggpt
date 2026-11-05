@@ -135,7 +135,11 @@ def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->Non
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Next-bar open invalidated price levels.",row["signal_id"]));return
  _,rates=load_phase2_settings()
  settings=RiskSettings(capital_inr=_available_capital(db,row["strategy_version"]),risk_per_trade_inr=SHADOW_RISK,minimum_net_risk_reward=MIN_NET_RR,require_margin_verification=False,skip_if_margin_unavailable=False,slippage_bps_per_side=SLIPPAGE_BPS,entry_cutoff_ist="14:45",square_off_time_ist="15:15")
- assess=assess_trade(side=side,entry_price=entry_ref,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
+ try:
+  assess=assess_trade(side=side,entry_price=entry_ref,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
+ except ValueError as exc:
+  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",
+   (f"Risk assessment rejected the publication-aware entry: {exc}",row["signal_id"]));return
  if not assess.accepted or assess.quantity<1:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Cash-only risk/after-cost R:R gate: "+assess.reason,row["signal_id"]));return
  db.execute("UPDATE shadow_signals SET status='OPEN',entry_time=?,entry_reference_price=?,entry_fill_price=?,quantity=?,reason=? WHERE signal_id=?",(entry_ts.isoformat(),entry_ref,entry_fill,int(assess.quantity),str(row["reason"])+" Entry uses next-bar open with adverse slippage.",row["signal_id"]))

@@ -190,7 +190,9 @@ class WatchShadowPortfolio:
                 if not exclusion:
                     exclusion = self._account_gate(db, str(item.get("symbol", "")).upper(), scan_time)
                 if not exclusion:
-                    exclusion = self._levels_failure(item, str(item.get("side", "")).upper(), entry_fill)
+                    exclusion = self._levels_failure(
+                        item, str(item.get("side", "")).upper(), entry_reference, entry_fill
+                    )
                 if exclusion:
                     self._insert_excluded(db, item, signal_id, as_of, exclusion)
                     counts["excluded"] += 1
@@ -276,12 +278,26 @@ class WatchShadowPortfolio:
         return None
 
     @staticmethod
-    def _levels_failure(candidate: dict[str, Any], side: str, entry_fill: float | None) -> str | None:
+    def _levels_failure(
+        candidate: dict[str, Any], side: str,
+        entry_reference: float | None, entry_fill: float | None,
+    ) -> str | None:
         stop, t1, t2 = (_positive(candidate.get(key)) for key in ("stop_loss", "target_1", "target_2"))
-        if entry_fill is None or stop is None or t1 is None or t2 is None:
-            return "Candidate has missing/invalid stop or target levels."
-        valid = stop < entry_fill < t1 <= t2 if side == "LONG" else t2 <= t1 < entry_fill < stop
-        return None if valid else "Current quote invalidated the saved stop/target entry window."
+        if side not in {"LONG", "SHORT"}:
+            return "Candidate side is missing or invalid."
+        if entry_reference is None or entry_fill is None or stop is None or t1 is None or t2 is None:
+            return "Candidate has missing/invalid entry, stop, or target levels."
+        if side == "LONG":
+            reference_valid = stop < entry_reference < t1 <= t2
+            fill_valid = stop < entry_fill < t1 <= t2
+        else:
+            reference_valid = t2 <= t1 < entry_reference < stop
+            fill_valid = t2 <= t1 < entry_fill < stop
+        if not reference_valid:
+            return "Reference quote entry invalidated the saved stop/target entry window."
+        if not fill_valid:
+            return "Slippage-adjusted executable fill invalidated the saved stop/target entry window."
+        return None
 
     def _insert_excluded(self, db: sqlite3.Connection, candidate: dict[str, Any],
                          signal_id: str, as_of: str, reason: str) -> None:
@@ -323,10 +339,17 @@ class WatchShadowPortfolio:
             entry_cutoff_ist=base.entry_cutoff_ist,
             square_off_time_ist=base.square_off_time_ist,
         )
-        assessment = assess_trade(
-            side=side, entry_price=entry_reference, stop_loss=stop, target_1=t1, target_2=t2,
-            settings=settings, estimated_margin_per_share=entry_fill, charge_rates=rates,
-        )
+        try:
+            assessment = assess_trade(
+                side=side, entry_price=entry_reference, stop_loss=stop, target_1=t1, target_2=t2,
+                settings=settings, estimated_margin_per_share=entry_fill, charge_rates=rates,
+            )
+        except ValueError as exc:
+            self._insert_excluded(
+                db, candidate, signal_id, as_of,
+                f"Risk assessment rejected the watch-shadow entry: {exc}",
+            )
+            return False
         qty = int(assessment.quantity)
         if qty < 1:
             self._insert_excluded(db, candidate, signal_id, as_of,

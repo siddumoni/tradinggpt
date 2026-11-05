@@ -180,3 +180,39 @@ def test_future_dated_market_tick_is_rejected(tmp_path):
         shadow.update_market_price("HDFCBANK",100.2,
             market_time=datetime.now(IST)+timedelta(minutes=5),received_at=datetime.now(IST))
     assert shadow.snapshot()["account"]["open_positions"]==1
+
+
+
+def test_watch_shadow_rejects_reference_quote_outside_levels_before_risk_assessment(tmp_path):
+    shadow = WatchShadowPortfolio(tmp_path / "paper.sqlite3")
+    item = candidate(stop_loss=100.03)
+    result = shadow.process_scan_report(report_file(
+        tmp_path, [item], {"HDFCBANK": quote()}
+    ))
+
+    assert result == {"seen": 1, "opened": 0, "excluded": 1, "duplicates": 0}
+    state = shadow.snapshot()
+    assert state["account"]["open_positions"] == 0
+    assert state["account"]["excluded_candidates"] == 1
+    assert "Reference quote entry" in state["recent_signals"][0]["exclusion_reason"]
+    assert state["orders_sent_to_broker"] is False
+
+
+
+def test_watch_shadow_contains_risk_engine_value_error_to_one_candidate(tmp_path, monkeypatch):
+    from src import watch_shadow_portfolio
+
+    shadow = WatchShadowPortfolio(tmp_path / "paper.sqlite3")
+
+    def reject_risk_assessment(**_kwargs):
+        raise ValueError("simulated risk-engine price validation failure")
+
+    monkeypatch.setattr(watch_shadow_portfolio, "assess_trade", reject_risk_assessment)
+    result = shadow.process_scan_report(report_file(
+        tmp_path, [candidate()], {"HDFCBANK": quote()}
+    ))
+
+    assert result == {"seen": 1, "opened": 0, "excluded": 1, "duplicates": 0}
+    state = shadow.snapshot()
+    assert state["account"]["open_positions"] == 0
+    assert "simulated risk-engine price validation failure" in state["recent_signals"][0]["exclusion_reason"]

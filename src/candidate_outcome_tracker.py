@@ -334,12 +334,25 @@ class CandidateOutcomeTracker:
             return
         entry_reference = float(frame.iloc[index]["open"])
         side = str(row["side"])
+        if side not in {"LONG", "SHORT"}:
+            self._set_status(db, row["candidate_id"], "EXCLUDED",
+                             f"Unsupported candidate side: {side!r}.")
+            return
         entry_fill = entry_reference * (1 + self.slippage_bps / 10_000) if side == "LONG" else entry_reference * (1 - self.slippage_bps / 10_000)
         stop, target_1, target_2 = float(row["stop_loss"]), float(row["target_1"]), float(row["target_2"])
-        valid = stop < entry_fill < target_1 <= target_2 if side == "LONG" else target_2 <= target_1 < entry_fill < stop
-        if not valid:
+        if side == "LONG":
+            reference_valid = stop < entry_reference < target_1 <= target_2
+            fill_valid = stop < entry_fill < target_1 <= target_2
+        else:
+            reference_valid = target_2 <= target_1 < entry_reference < stop
+            fill_valid = target_2 <= target_1 < entry_fill < stop
+        if not reference_valid:
             self._set_status(db, row["candidate_id"], "EXCLUDED",
-                             "Next-bar open invalidated the saved stop/target price levels.")
+                             "Reference next-bar open invalidated the saved stop/target price levels.")
+            return
+        if not fill_valid:
+            self._set_status(db, row["candidate_id"], "EXCLUDED",
+                             "Slippage-adjusted executable fill invalidated the saved stop/target price levels.")
             return
 
         base, rates = load_phase2_settings()
@@ -349,11 +362,18 @@ class CandidateOutcomeTracker:
             skip_if_margin_unavailable=False, slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist=base.entry_cutoff_ist, square_off_time_ist=base.square_off_time_ist,
         )
-        assessment = assess_trade(
-            side=side, entry_price=entry_reference, stop_loss=stop, target_1=target_1,
-            target_2=target_2, settings=settings, estimated_margin_per_share=entry_fill,
-            charge_rates=rates,
-        )
+        try:
+            assessment = assess_trade(
+                side=side, entry_price=entry_reference, stop_loss=stop, target_1=target_1,
+                target_2=target_2, settings=settings, estimated_margin_per_share=entry_fill,
+                charge_rates=rates,
+            )
+        except ValueError as exc:
+            self._set_status(
+                db, row["candidate_id"], "EXCLUDED",
+                f"Risk assessment rejected the publication-aware entry: {exc}",
+            )
+            return
         if not assessment.accepted or int(assessment.quantity) < 1:
             self._set_status(db, row["candidate_id"], "EXCLUDED",
                              "Independent cash-only sizing failed: " + str(assessment.reason))

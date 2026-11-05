@@ -129,13 +129,28 @@ def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->Non
  n=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE strategy_version=? AND status='OPEN'",(row["strategy_version"],)).fetchone()["n"]
  if int(n)>=MAX_OPEN_PER_STRATEGY:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Shadow book position limit reached.",row["signal_id"]));return
- entry_ref=float(frame.iloc[idx]["open"]);side=row["side"];entry_fill=entry_ref*(1+SLIPPAGE_BPS/10000) if side=="LONG" else entry_ref*(1-SLIPPAGE_BPS/10000)
+ entry_ref=float(frame.iloc[idx]["open"]);side=str(row["side"])
+ if side not in {"LONG","SHORT"}:
+  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",(f"Unsupported candidate side: {side!r}.",row["signal_id"]));return
+ entry_fill=entry_ref*(1+SLIPPAGE_BPS/10000) if side=="LONG" else entry_ref*(1-SLIPPAGE_BPS/10000)
  stop,t1,t2=float(row["stop_loss"]),float(row["target_1"]),float(row["target_2"])
- if not (stop<entry_fill<t1<=t2 if side=="LONG" else t2<=t1<entry_fill<stop):
-  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Next-bar open invalidated price levels.",row["signal_id"]));return
+ if side=="LONG":
+  reference_valid=stop<entry_ref<t1<=t2
+  fill_valid=stop<entry_fill<t1<=t2
+ else:
+  reference_valid=t2<=t1<entry_ref<stop
+  fill_valid=t2<=t1<entry_fill<stop
+ if not reference_valid:
+  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Reference next-bar open invalidated price levels.",row["signal_id"]));return
+ if not fill_valid:
+  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Slippage-adjusted executable fill invalidated price levels.",row["signal_id"]));return
  _,rates=load_phase2_settings()
  settings=RiskSettings(capital_inr=_available_capital(db,row["strategy_version"]),risk_per_trade_inr=SHADOW_RISK,minimum_net_risk_reward=MIN_NET_RR,require_margin_verification=False,skip_if_margin_unavailable=False,slippage_bps_per_side=SLIPPAGE_BPS,entry_cutoff_ist="14:45",square_off_time_ist="15:15")
- assess=assess_trade(side=side,entry_price=entry_ref,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
+ try:
+  assess=assess_trade(side=side,entry_price=entry_ref,stop_loss=stop,target_1=t1,target_2=t2,settings=settings,estimated_margin_per_share=entry_fill,charge_rates=rates)
+ except ValueError as exc:
+  db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",
+   (f"Risk assessment rejected the publication-aware entry: {exc}",row["signal_id"]));return
  if not assess.accepted or assess.quantity<1:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Cash-only risk/after-cost R:R gate: "+assess.reason,row["signal_id"]));return
  db.execute("UPDATE shadow_signals SET status='OPEN',entry_time=?,entry_reference_price=?,entry_fill_price=?,quantity=?,reason=? WHERE signal_id=?",(entry_ts.isoformat(),entry_ref,entry_fill,int(assess.quantity),str(row["reason"])+" Entry uses next-bar open with adverse slippage.",row["signal_id"]))

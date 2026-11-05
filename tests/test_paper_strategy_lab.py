@@ -156,3 +156,20 @@ def test_challenger_signal_close_mismatch_is_not_entered(tmp_path):
   _entry_shadow(db,row,frame)
   status=db.execute("SELECT status FROM shadow_signals WHERE signal_id='pending-test'").fetchone()[0]
  assert status=="INCOMPLETE_DATA_GAP"
+
+
+def test_challenger_rejects_reference_price_outside_levels_without_raising(tmp_path):
+ db_path=tmp_path/"paper.sqlite3"
+ _insert_pending_shadow(db_path,"2026-10-30T09:30:00+05:30",created_at="2026-10-30T09:30:00+05:30")
+ index=pd.date_range("2026-10-30 09:15",periods=10,freq="5min",tz=ZoneInfo("Asia/Kolkata"))
+ frame=pd.DataFrame({"open":[100.0]*len(index),"high":[100.2]*len(index),"low":[99.8]*len(index),
+  "close":[100.0]*len(index),"volume":[1000]*len(index)},index=index)
+ frame.loc[pd.Timestamp("2026-10-30 09:35",tz=ZoneInfo("Asia/Kolkata")),"open"]=100.005
+ with sqlite3.connect(db_path) as db:
+  db.row_factory=sqlite3.Row
+  db.execute("UPDATE shadow_signals SET stop_loss=100.01 WHERE signal_id='pending-test'")
+  row=db.execute("SELECT * FROM shadow_signals WHERE signal_id='pending-test'").fetchone()
+  _entry_shadow(db,row,frame)
+  status,reason=db.execute("SELECT status,reason FROM shadow_signals WHERE signal_id='pending-test'").fetchone()
+ assert status=="ENTRY_REJECTED"
+ assert "Reference next-bar open" in reason

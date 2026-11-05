@@ -45,7 +45,7 @@ def build_structural_stop(*,side:str,entry:float,candles_5m:pd.DataFrame,candles
 
 def spread_slippage_bps_per_side(quote:dict|None,*,floor_bps_per_side:float=5.0)->tuple[float,str]:
     """Half quoted spread per side, never below configured 5 bps baseline."""
-    if not isfinite(float(floor_bps_per_side)) or floor_bps_per_side<0: raise ValueError("invalid slippage floor")
+    if not isfinite(float(floor_bps_per_side)) or floor_bps_per_side<5: raise ValueError("slippage floor cannot be below 5 bps per side")
     if not isinstance(quote,dict): return float(floor_bps_per_side),"QUOTE_UNAVAILABLE_FLOOR_APPLIED"
     try: bid=float(quote["depth"]["buy"][0]["price"]); ask=float(quote["depth"]["sell"][0]["price"])
     except (KeyError,IndexError,TypeError,ValueError): return float(floor_bps_per_side),"QUOTE_DEPTH_UNAVAILABLE_FLOOR_APPLIED"

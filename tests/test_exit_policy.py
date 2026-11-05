@@ -71,3 +71,12 @@ def test_invalid_ohlc_is_rejected():
             open_price=100.0, high=99.0, low=101.0, close=100.0,
             bar_end_time=time(10, 5),
         )
+
+
+def test_risk_engine_uses_the_policy_gate_target_and_time_exit():
+    from src.risk_engine import load_phase2_settings
+
+    settings, _rates = load_phase2_settings()
+    policy = load_exit_policy()
+    assert settings.minimum_net_rr_target == policy.gate_target
+    assert settings.square_off_time_ist == policy.time_exit_ist

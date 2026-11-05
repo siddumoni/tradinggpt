@@ -334,12 +334,25 @@ class CandidateOutcomeTracker:
             return
         entry_reference = float(frame.iloc[index]["open"])
         side = str(row["side"])
+        if side not in {"LONG", "SHORT"}:
+            self._set_status(db, row["candidate_id"], "EXCLUDED",
+                             f"Unsupported candidate side: {side!r}.")
+            return
         entry_fill = entry_reference * (1 + self.slippage_bps / 10_000) if side == "LONG" else entry_reference * (1 - self.slippage_bps / 10_000)
         stop, target_1, target_2 = float(row["stop_loss"]), float(row["target_1"]), float(row["target_2"])
-        valid = stop < entry_fill < target_1 <= target_2 if side == "LONG" else target_2 <= target_1 < entry_fill < stop
-        if not valid:
+        if side == "LONG":
+            reference_valid = stop < entry_reference < target_1 <= target_2
+            fill_valid = stop < entry_fill < target_1 <= target_2
+        else:
+            reference_valid = target_2 <= target_1 < entry_reference < stop
+            fill_valid = target_2 <= target_1 < entry_fill < stop
+        if not reference_valid:
             self._set_status(db, row["candidate_id"], "EXCLUDED",
-                             "Next-bar open invalidated the saved stop/target price levels.")
+                             "Reference next-bar open invalidated the saved stop/target price levels.")
+            return
+        if not fill_valid:
+            self._set_status(db, row["candidate_id"], "EXCLUDED",
+                             "Slippage-adjusted executable fill invalidated the saved stop/target price levels.")
             return
 
         base, rates = load_phase2_settings()

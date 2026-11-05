@@ -30,6 +30,7 @@ class RiskSettings:
     square_off_time_ist: str = "15:15"
     # Appended to preserve the positional order of existing constructor arguments.
     minimum_net_rr_target: Literal["target_1", "target_2"] = "target_1"
+    minimum_stop_distance_pct: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,7 @@ def assess_trade(
         settings.risk_per_trade_inr,
         settings.minimum_net_risk_reward,
         settings.slippage_bps_per_side,
+        settings.minimum_stop_distance_pct,
     )
     if not all(isfinite(value) for value in settings_values):
         raise ValueError("capital, risk, net R:R, and slippage settings must be finite")
@@ -159,6 +161,8 @@ def assess_trade(
         raise ValueError("capital and risk_per_trade_inr must be positive")
     if settings.minimum_net_risk_reward <= 0:
         raise ValueError("minimum_net_risk_reward must be positive")
+    if settings.minimum_stop_distance_pct <= 0:
+        raise ValueError("minimum_stop_distance_pct must be positive")
     if settings.minimum_net_rr_target not in ("target_1", "target_2"):
         raise ValueError("minimum_net_rr_target must be target_1 or target_2")
     if not 0 <= settings.slippage_bps_per_side <= 100:
@@ -297,6 +301,7 @@ def load_phase2_settings(
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
             square_off_time_ist=exit_policy.time_exit_ist,
             slippage_bps_per_side=float(risk.get("slippage_bps_per_side", 5.0)),
+            minimum_stop_distance_pct=float(risk.get("minimum_stop_distance_pct", 0.25)),
         )
         rates = ChargeRates(
             brokerage_rate=Decimal(str(cost.get("brokerage_rate", "0.0003"))),

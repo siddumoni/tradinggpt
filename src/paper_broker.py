@@ -353,6 +353,29 @@ class PaperBroker:
                 else: continue
                 self._close_trade(db,trade,exit_ref,reason,detail,qt); closed+=1
         return closed
+    def process_candle(self,symbol:str,candle_start:datetime|str,*,open_price:float,high:float,low:float,close:float,bar_minutes:int=5)->int:
+        """Apply the shared completed-OHLC exit policy to one archived/streamed candle."""
+        if isinstance(bar_minutes,bool) or int(bar_minutes)<=0:
+            raise ValueError("bar_minutes must be a positive integer")
+        cleaned=str(symbol).strip().upper()
+        if not cleaned:
+            raise ValueError("symbol is required")
+        start=to_ist(candle_start)
+        end=start.replace() + __import__("datetime").timedelta(minutes=int(bar_minutes))
+        closed=0
+        with self._connect() as db:
+            for trade in self._open_rows(db):
+                if trade["symbol"]!=cleaned:
+                    continue
+                decision=evaluate_ohlc_exit(
+                    side=trade["side"],stop_loss=float(trade["stop_loss"]),target_2=float(trade["target_2"]),
+                    open_price=float(open_price),high=float(high),low=float(low),close=float(close),
+                    bar_end_time=end.time().replace(tzinfo=None),policy=self.exit_policy)
+                if decision is None:
+                    continue
+                self._close_trade(db,trade,decision.reference_price,decision.reason,decision.detail,end)
+                closed+=1
+        return closed
     def square_off_due_positions(self,now:datetime|None=None,*,max_quote_age_seconds:float=60.0)->int:
         current=now or datetime.now(IST); current=current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
         if current.time().replace(tzinfo=None)<dtime.fromisoformat(self.exit_policy.time_exit_ist): return 0

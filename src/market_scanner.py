@@ -58,6 +58,8 @@ class ScanCandidate:
     company_headline_match_status: str = "UNKNOWN"
     company_specific_risk: str = "UNKNOWN"
     entry_validation: dict[str, Any] = field(default_factory=dict)
+    estimated_net_reward_t2_inr: float | None = None
+    net_rr_t2: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -550,6 +552,8 @@ def evaluate_symbol_bundle(
         estimated_net_risk_inr=round(assessment.net_risk_inr, 2) if assessment.accepted else None,
         estimated_net_reward_t1_inr=round(assessment.net_reward_t1_inr, 2) if assessment.accepted else None,
         net_rr_t1=round(assessment.net_rr_t1, 2) if assessment.accepted else None,
+        estimated_net_reward_t2_inr=round(assessment.net_reward_t2_inr, 2) if assessment.accepted else None,
+        net_rr_t2=round(assessment.net_rr_t2, 2) if assessment.accepted else None,
         margin_verified=margin_verified,
         data_verified_live=data_verified_live,
         news_status=news_status,

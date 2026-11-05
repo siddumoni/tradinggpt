@@ -1,0 +1,8 @@
+# Shared exit policy. Version changes require a fresh, separately labelled research run.
+version: nse_intraday_exit_v1
+stop_atr_multiple: 1.0
+target_1_atr_multiple: 2.0
+t1_action: none                 # T1 is informational; no partial exit is simulated.
+target_2_atr_multiple: 2.5
+time_exit_ist: "15:15"
+gate_target: target_2           # Existing 1.5 minimum net R:R gate is evaluated at T2.

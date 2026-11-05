@@ -36,10 +36,16 @@ class BacktestConfig:
     max_trades_per_day: int = 3
     minimum_net_risk_reward: float = 1.5
     entry_cutoff: str = "14:45"
-    square_off_time: str = "15:15"
+    square_off_time: str | None = None
     bar_duration_minutes: int = 5
     charge_rates: ChargeRates = ChargeRates()
     exit_policy: ExitPolicy = field(default_factory=load_exit_policy)
+
+    def __post_init__(self) -> None:
+        if self.square_off_time is None:
+            object.__setattr__(self, "square_off_time", self.exit_policy.time_exit_ist)
+        elif self.square_off_time != self.exit_policy.time_exit_ist:
+            raise ValueError("square_off_time is controlled by ExitPolicy; configure exit_policy.time_exit_ist")
 
 
 @dataclass(frozen=True)

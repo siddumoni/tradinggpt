@@ -109,3 +109,52 @@ def test_open_position_daily_pnl_uses_conservative_net_liquidation_mark(tmp_path
   slippage=abs(trade["entry_fill_price"]-trade["entry_reference_price"])*trade["quantity"] + abs(expected_exit_fill-100.95)*trade["quantity"]
   expected=gross-fees.total-slippage
  assert result==pytest.approx(expected)
+
+
+def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
+    import pandas as pd
+    from src.backtest import BacktestConfig, backtest_fixed_levels
+
+    start = datetime.now(IST).replace(second=0, microsecond=0)
+    start = start.replace(minute=(start.minute // 5) * 5)
+    stamps = pd.date_range(start, periods=3, freq="5min")
+    candles = pd.DataFrame(
+        {
+            "open": [100.0, 100.0, 100.0],
+            "high": [100.5, 100.5, 109.0],
+            "low": [99.5, 99.5, 99.5],
+            "close": [100.0, 100.0, 108.0],
+            "volume": [1000, 1000, 1000],
+        },
+        index=stamps,
+    )
+
+    def signal(history, _index):
+        if len(history) != 1:
+            return None
+        return {"side": "LONG", "stop_loss": 98.0, "target": 108.0}
+
+    backtest_trades, _summary = backtest_fixed_levels(
+        "INFY", candles, signal,
+        BacktestConfig(initial_capital=100_000, risk_per_trade=500),
+    )
+    assert len(backtest_trades) == 1
+
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    opened = broker.process_scan_report(
+        report_file(tmp_path, [candidate()], {"INFY": quote()})
+    )
+    assert opened["opened"] == 1
+    for stamp, bar in candles.iterrows():
+        closed = broker.process_candle(
+            "INFY", stamp.to_pydatetime(),
+            open_price=float(bar["open"]), high=float(bar["high"]),
+            low=float(bar["low"]), close=float(bar["close"]),
+        )
+    assert closed == 1
+
+    paper_trade = broker.snapshot()["closed_trades"][0]
+    assert paper_trade["exit_reason"] == "TARGET_2"
+    assert backtest_trades.iloc[0]["exit_reason"] == "TARGET_2"
+    assert paper_trade["exit_reference_price"] == pytest.approx(backtest_trades.iloc[0]["exit"])
+    assert paper_trade["exit_time"] == backtest_trades.iloc[0]["exit_time"]

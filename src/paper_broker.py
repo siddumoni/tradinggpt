@@ -18,7 +18,7 @@ DEFAULT_DAILY_LOSS_LIMIT_INR=2_000.0
 DEFAULT_MAX_OPEN_POSITIONS=3
 DEFAULT_SLIPPAGE_BPS=5.0
 MAX_ENTRY_QUOTE_AGE_SECONDS=120.0
-SQUARE_OFF_TIME=dtime(15,15)
+# The configured time exit is sourced from config/exit_policy.yaml.
 
 def to_ist(value: Any)->datetime:
     stamp=datetime.fromisoformat(str(value).replace("Z","+00:00"))

@@ -161,4 +161,4 @@ def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
     assert paper_trade["exit_reason"] == "TARGET_2"
     assert backtest_trades.iloc[0]["exit_reason"] == "TARGET_2"
     assert paper_trade["exit_reference_price"] == pytest.approx(backtest_trades.iloc[0]["exit"])
-    assert paper_trade["exit_time"] == backtest_trades.iloc[0]["exit_time"]
+    assert pd.Timestamp(paper_trade["exit_time"]) == pd.Timestamp(backtest_trades.iloc[0]["exit_time"])

@@ -35,7 +35,7 @@ class ExitPolicy:
             raise ValueError("Exit policy version is required")
         for name in ("stop_atr_multiple", "target_1_atr_multiple", "target_2_atr_multiple"):
             value = getattr(self, name)
-            if value <= 0:
+            if not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive")
         if self.target_1_atr_multiple > self.target_2_atr_multiple:
             raise ValueError("Target 1 ATR multiple cannot exceed Target 2")
@@ -44,7 +44,9 @@ class ExitPolicy:
         if self.gate_target not in ("target_1", "target_2"):
             raise ValueError("gate_target must be target_1 or target_2")
         try:
-            time.fromisoformat(self.time_exit_ist)
+            parsed_time = time.fromisoformat(self.time_exit_ist)
+            if parsed_time.tzinfo is not None:
+                raise ValueError("time_exit_ist must be a local IST wall-clock time without an offset")
         except ValueError as exc:
             raise ValueError("time_exit_ist must be HH:MM[:SS]") from exc
 
@@ -114,6 +116,6 @@ def evaluate_ohlc_exit(
         return CandleExit(price, "STOP_LOSS", "Stop-first OHLC handling; adverse stop gaps use the worse bar open.")
     if target_hit:
         return CandleExit(target_2, "TARGET_2", "Target 2 touched; no favorable gap improvement.")
-    if bar_end_time >= time.fromisoformat(selected.time_exit_ist):
+    if bar_end_time.replace(tzinfo=None) >= time.fromisoformat(selected.time_exit_ist):
         return CandleExit(close, "TIME_SQUARE_OFF", "Closed at the configured time-exit candle close.")
     return None

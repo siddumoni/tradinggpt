@@ -39,9 +39,10 @@ from src.exit_policy import load_exit_policy, plan_policy_levels
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
+EXIT_POLICY = load_exit_policy()
 SESSION_START = dtime(9, 15)
-LAST_BAR_START = dtime(15, 10)
-LAST_BAR_END = dtime(15, 15)
+LAST_BAR_END = dtime.fromisoformat(EXIT_POLICY.time_exit_ist)
+LAST_BAR_START = (datetime.combine(datetime.min.date(), LAST_BAR_END) - pd.Timedelta(minutes=BAR_MINUTES)).time()
 DEFAULT_CANDIDATES = "HDFCBANK:vwap_trend,INFY:vwap_pullback"
 DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
 FORWARD_CAPITAL_INR = 20_000.0

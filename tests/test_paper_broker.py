@@ -109,3 +109,64 @@ def test_open_position_daily_pnl_uses_conservative_net_liquidation_mark(tmp_path
   slippage=abs(trade["entry_fill_price"]-trade["entry_reference_price"])*trade["quantity"] + abs(expected_exit_fill-100.95)*trade["quantity"]
   expected=gross-fees.total-slippage
  assert result==pytest.approx(expected)
+
+
+def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
+    import pandas as pd
+    from dataclasses import replace
+    from src.backtest import BacktestConfig, backtest_fixed_levels
+    from src.exit_policy import load_exit_policy
+
+    policy = replace(load_exit_policy(), time_exit_ist="23:59")
+    start = datetime(2026, 11, 5, 10, 0, tzinfo=IST)
+    stamps = pd.date_range(start, periods=3, freq="5min")
+    candles = pd.DataFrame(
+        {
+            "open": [100.0, 100.0, 100.0],
+            "high": [100.5, 100.5, 109.0],
+            "low": [99.5, 99.5, 99.5],
+            "close": [100.0, 100.0, 108.0],
+            "volume": [1000, 1000, 1000],
+        },
+        index=stamps,
+    )
+
+    def signal(history, _index):
+        if len(history) != 1:
+            return None
+        return {"side": "LONG", "stop_loss": 98.0, "target": 108.0}
+
+    backtest_trades, _summary = backtest_fixed_levels(
+        "INFY", candles, signal,
+        BacktestConfig(initial_capital=100_000, risk_per_trade=500,
+                       entry_cutoff="23:55", exit_policy=policy),
+    )
+    assert len(backtest_trades) == 1
+
+    broker = PaperBroker(tmp_path / "paper.sqlite3", exit_policy=policy)
+    with broker._connect() as db:
+        db.execute(
+            """INSERT INTO trades(
+                signal_id,strategy,strategy_version,symbol,side,status,signal_time,entry_time,
+                signal_reference_entry,entry_reference_price,entry_fill_price,stop_loss,target_1,target_2,
+                quantity,risk_budget_inr,position_value_inr,planned_net_risk_inr,market_regime,
+                entry_reason,created_at
+            ) VALUES(?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("parity-test", "vwap_trend", "champion_v1", "INFY", "LONG",
+             stamps[0].isoformat(), stamps[1].isoformat(), 100.0, 100.0, 100.05,
+             98.0, 104.0, 108.0, 100, 500.0, 10005.0, 220.0,
+             "BULLISH", "deterministic parity fixture", stamps[0].isoformat()),
+        )
+    for stamp, bar in candles.iloc[1:].iterrows():
+        closed = broker.process_candle(
+            "INFY", stamp.to_pydatetime(),
+            open_price=float(bar["open"]), high=float(bar["high"]),
+            low=float(bar["low"]), close=float(bar["close"]),
+        )
+    assert closed == 1
+
+    paper_trade = broker.snapshot()["closed_trades"][0]
+    assert paper_trade["exit_reason"] == "TARGET_2"
+    assert backtest_trades.iloc[0]["exit_reason"] == "TARGET_2"
+    assert paper_trade["exit_reference_price"] == pytest.approx(backtest_trades.iloc[0]["exit"])
+    assert pd.Timestamp(paper_trade["exit_time"]) == pd.Timestamp(backtest_trades.iloc[0]["exit_time"])

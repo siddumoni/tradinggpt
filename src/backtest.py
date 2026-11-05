@@ -11,7 +11,7 @@ separate assumption. Neither is a substitute for actual contract notes.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import time, timedelta
 from math import floor, isfinite
 import statistics
@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from src.cost_calculator import ChargeRates, estimate_intraday_round_trip_cost
+from src.exit_policy import ExitPolicy, evaluate_ohlc_exit, load_exit_policy
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -35,9 +36,16 @@ class BacktestConfig:
     max_trades_per_day: int = 3
     minimum_net_risk_reward: float = 1.5
     entry_cutoff: str = "14:45"
-    square_off_time: str = "15:15"
+    square_off_time: str | None = None
     bar_duration_minutes: int = 5
     charge_rates: ChargeRates = ChargeRates()
+    exit_policy: ExitPolicy = field(default_factory=load_exit_policy)
+
+    def __post_init__(self) -> None:
+        if self.square_off_time is None:
+            object.__setattr__(self, "square_off_time", self.exit_policy.time_exit_ist)
+        elif self.square_off_time != self.exit_policy.time_exit_ist:
+            raise ValueError("square_off_time is controlled by ExitPolicy; configure exit_policy.time_exit_ist")
 
 
 @dataclass(frozen=True)
@@ -181,7 +189,7 @@ def backtest_fixed_levels(
         raise ValueError("max_trades_per_day must be at least 1")
 
     entry_cutoff = _clock(config.entry_cutoff)
-    square_off = _clock(config.square_off_time)
+    square_off = _clock(config.exit_policy.time_exit_ist)
     if entry_cutoff >= square_off:
         raise ValueError("entry_cutoff must be earlier than square_off_time")
 
@@ -264,23 +272,15 @@ def backtest_fixed_levels(
                 else:
                     close_position(float(bar["open"]), str(bar_start), "SESSION_SQUARE_OFF_DATA_GAP")
             elif bar_is_inside_session:
-                side = position["side"]
-                stop = position["stop_loss"]
-                target = position["target"]
-                stop_hit = float(bar["low"]) <= stop if side == "LONG" else float(bar["high"]) >= stop
-                target_hit = float(bar["high"]) >= target if side == "LONG" else float(bar["low"]) <= target
-                if stop_hit:
-                    # A stop-market order can fill beyond its trigger after a gap.
-                    if side == "LONG":
-                        stop_fill = min(stop, float(bar["open"]))
-                    else:
-                        stop_fill = max(stop, float(bar["open"]))
-                    close_position(stop_fill, str(bar_start), "STOP_LOSS")
-                elif target_hit:
-                    # Use the target price conservatively; do not assume price improvement on gaps.
-                    close_position(target, str(bar_start), "TARGET")
-                elif bar_end.time() >= square_off:
-                    close_position(float(bar["close"]), str(bar_end), "SESSION_SQUARE_OFF")
+                decision = evaluate_ohlc_exit(
+                    side=position["side"], stop_loss=float(position["stop_loss"]),
+                    target_2=float(position["target"]), open_price=float(bar["open"]),
+                    high=float(bar["high"]), low=float(bar["low"]), close=float(bar["close"]),
+                    bar_end_time=bar_end.time(), policy=config.exit_policy,
+                )
+                if decision is not None:
+                    reason = "SESSION_SQUARE_OFF" if decision.reason == "TIME_SQUARE_OFF" else decision.reason
+                    close_position(decision.reference_price, str(bar_end), reason)
                 else:
                     position["last_close"] = float(bar["close"])
                     position["last_close_time"] = str(bar_end)
@@ -502,7 +502,15 @@ def backtest_fixed_levels(
             "diagnostic_note": "Candidate costs are itemized separately at stop and target exit prices. Best quantity is the tested quantity with the highest computed net R:R; it is diagnostic, not a trade recommendation.",
         },
         "entry_cutoff": config.entry_cutoff,
-        "square_off_time": config.square_off_time,
+        "square_off_time": config.exit_policy.time_exit_ist,
+        "exit_policy_version": config.exit_policy.version,
+        "exit_policy": {
+            "stop_atr_multiple": config.exit_policy.stop_atr_multiple,
+            "target_1_atr_multiple": config.exit_policy.target_1_atr_multiple,
+            "t1_action": config.exit_policy.t1_action,
+            "target_2_atr_multiple": config.exit_policy.target_2_atr_multiple,
+            "gate_target": config.exit_policy.gate_target,
+        },
         "bar_duration_minutes": config.bar_duration_minutes,
         "minimum_net_risk_reward": config.minimum_net_risk_reward,
         "capital_model": "cash-only notional cap; MIS margin not assumed",

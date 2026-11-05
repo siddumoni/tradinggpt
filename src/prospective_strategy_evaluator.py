@@ -13,7 +13,7 @@ import json
 import logging
 import math
 import time
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -34,14 +34,15 @@ from src.strategy_backtest import (
     make_signal_callback,
 )
 from src.strategies.market_regime import classify_market_regime
-from src.strategies.signal_planner import plan_atr_levels
+from src.exit_policy import load_exit_policy, plan_policy_levels
 
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
+EXIT_POLICY = load_exit_policy()
 SESSION_START = dtime(9, 15)
-LAST_BAR_START = dtime(15, 10)
-LAST_BAR_END = dtime(15, 15)
+LAST_BAR_END = dtime.fromisoformat(EXIT_POLICY.time_exit_ist)
+LAST_BAR_START = (datetime.combine(datetime.min.date(), LAST_BAR_END) - timedelta(minutes=BAR_MINUTES)).time()
 DEFAULT_CANDIDATES = "HDFCBANK:vwap_trend,INFY:vwap_pullback"
 DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
 FORWARD_CAPITAL_INR = 20_000.0
@@ -241,7 +242,6 @@ def _make_candidate(
     callback = make_signal_callback(
         symbol,
         strategy,
-        target_atr_multiple=2.5,
         reject_nontrending_regimes=False,
     )
     signal = callback(indicators, len(indicators) - 1)
@@ -251,14 +251,8 @@ def _make_candidate(
     last = indicators.iloc[-1]
     close = float(last["close"])
     atr = float(last["atr_14"])
-    levels = plan_atr_levels(
-        signal["side"],
-        entry=close,
-        atr=atr,
-        stop_atr_multiple=1.0,
-        target_1_atr_multiple=2.0,
-        target_2_atr_multiple=2.5,
-    )
+    policy = load_exit_policy()
+    levels = plan_policy_levels(signal["side"], entry=close, atr=atr, policy=policy)
     # The baseline callback also plans its single historical target at 2.5 ATR.
     if not math.isclose(float(signal["target"]), levels.target_2, rel_tol=1e-9, abs_tol=0.02):
         raise ValueError(f"{symbol}:{strategy}: target level differs from the baseline callback")
@@ -464,7 +458,7 @@ def refresh_outcomes(
                 capital_inr=FORWARD_CAPITAL_INR,
                 risk_per_trade_inr=FORWARD_RISK_PER_TRADE_INR,
                 minimum_net_risk_reward=MINIMUM_NET_RR,
-                minimum_net_rr_target="target_2",
+                minimum_net_rr_target=load_exit_policy().gate_target,
                 require_margin_verification=False,
                 skip_if_margin_unavailable=False,
                 slippage_bps_per_side=float(slippage),

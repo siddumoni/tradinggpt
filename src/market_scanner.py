@@ -22,7 +22,7 @@ from src.risk_engine import RiskSettings, TradeAssessment, assess_trade
 from src.cost_calculator import ChargeRates
 from src.strategies.market_regime import classify_market_regime
 from src.strategies.opening_range import opening_range_signal
-from src.strategies.signal_planner import plan_atr_levels
+from src.exit_policy import plan_policy_levels
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
 
@@ -58,6 +58,8 @@ class ScanCandidate:
     company_headline_match_status: str = "UNKNOWN"
     company_specific_risk: str = "UNKNOWN"
     entry_validation: dict[str, Any] = field(default_factory=dict)
+    estimated_net_reward_t2_inr: float | None = None
+    net_rr_t2: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -493,9 +495,8 @@ def evaluate_symbol_bundle(
     if len(signals) > 1:
         reasons.append(f"{len(signals)} strategies agreed on {signal.side}; strongest-confidence strategy selected.")
 
-    # Wider target spacing is a research starting point because transaction costs
-    # are material at this capital size. It must still pass the net-R:R filter.
-    levels = plan_atr_levels(signal.side, entry=close, atr=atr, stop_atr_multiple=1.0, target_1_atr_multiple=2.5, target_2_atr_multiple=4.0)
+    # Levels and the net-R:R gate are driven by the shared, versioned exit policy.
+    levels = plan_policy_levels(signal.side, entry=close, atr=atr)
     assessment: TradeAssessment = assess_trade(
         side=signal.side,
         entry_price=levels.entry,
@@ -551,6 +552,8 @@ def evaluate_symbol_bundle(
         estimated_net_risk_inr=round(assessment.net_risk_inr, 2) if assessment.accepted else None,
         estimated_net_reward_t1_inr=round(assessment.net_reward_t1_inr, 2) if assessment.accepted else None,
         net_rr_t1=round(assessment.net_rr_t1, 2) if assessment.accepted else None,
+        estimated_net_reward_t2_inr=round(assessment.net_reward_t2_inr, 2) if assessment.accepted else None,
+        net_rr_t2=round(assessment.net_rr_t2, 2) if assessment.accepted else None,
         margin_verified=margin_verified,
         data_verified_live=data_verified_live,
         news_status=news_status,

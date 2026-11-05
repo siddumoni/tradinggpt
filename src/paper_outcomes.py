@@ -12,7 +12,7 @@ import argparse
 import json
 import math
 from dataclasses import replace
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,12 +21,15 @@ import pandas as pd
 
 from src.cost_calculator import ChargeRates, estimate_intraday_round_trip_cost
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
+from src.exit_policy import evaluate_ohlc_exit, load_exit_policy
 from src.research_timing import next_five_minute_bar_after
 
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
 SESSION_START = dtime(9, 15)
-LAST_BAR_START = dtime(15, 10)
+EXIT_POLICY = load_exit_policy()
+LAST_BAR_END = dtime.fromisoformat(EXIT_POLICY.time_exit_ist)
+LAST_BAR_START = (datetime.combine(datetime.min.date(), LAST_BAR_END) - timedelta(minutes=BAR_MINUTES)).time()
 OHLCV = ("open", "high", "low", "close", "volume")
 REQUIRED_JOURNAL_COLUMNS = (
     "signal_id", "symbol", "side", "strategy", "signal_time", "recorded_at", "scan_as_of", "reference_entry",
@@ -378,40 +381,26 @@ def evaluate_signal(
     status = ""
     note = ""
     quantity = int(assessment.quantity)
+    exit_policy = replace(load_exit_policy(), time_exit_ist=settings.square_off_time_ist)
 
     for stamp, bar in session_rows.loc[entry_ts:].iterrows():
         if last_seen is not None and stamp != last_seen + pd.Timedelta(minutes=BAR_MINUTES):
             status = "INCOMPLETE_DATA_GAP"
             note = f"Missing expected 5-minute candle after {last_seen.isoformat()}; outcome is not scored across the gap."
             break
-        open_price = float(bar["open"])
-        high = float(bar["high"])
-        low = float(bar["low"])
-        # Conservative OHLC assumption: when both stop and target occur in one bar,
-        # assume the stop happened first. Stop gaps fill at the worse bar open.
-        stop_hit = low <= stop if side == "LONG" else high >= stop
-        target_hit = high >= target_2 if side == "LONG" else low <= target_2
-        if stop_hit:
-            exit_price = min(stop, open_price) if side == "LONG" else max(stop, open_price)
-            exit_reason = "STOP_LOSS"
-            exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
+        bar_end = stamp + pd.Timedelta(minutes=BAR_MINUTES)
+        decision = evaluate_ohlc_exit(
+            side=side, stop_loss=stop, target_2=target_2,
+            open_price=float(bar["open"]), high=float(bar["high"]),
+            low=float(bar["low"]), close=float(bar["close"]),
+            bar_end_time=bar_end.time().replace(tzinfo=None), policy=exit_policy,
+        )
+        if decision is not None:
+            exit_price = decision.reference_price
+            exit_reason = "SESSION_SQUARE_OFF" if decision.reason == "TIME_SQUARE_OFF" else decision.reason
+            exit_ts = bar_end
             status = completion_status
-            note = "Stop-first intrabar policy applied; exit timestamp is the bar-end boundary for conservative capital release."
-            break
-        if target_hit:
-            # No favorable price improvement is credited on a gap through target.
-            exit_price = target_2
-            exit_reason = "TARGET_2"
-            exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
-            status = completion_status
-            note = "Full quantity exits at target 2; entry acceptance used the configured target for the minimum net R:R gate."
-            break
-        if stamp.time().replace(tzinfo=None) == LAST_BAR_START:
-            exit_price = float(bar["close"])
-            exit_reason = "SESSION_SQUARE_OFF"
-            exit_ts = stamp + pd.Timedelta(minutes=BAR_MINUTES)
-            status = completion_status
-            note = "Position closed at the final regular-session candle close."
+            note = decision.detail
             break
         last_seen = stamp
 

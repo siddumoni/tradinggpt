@@ -11,6 +11,7 @@ import numpy as np
 import logging
 import math
 from datetime import datetime, timedelta
+from dataclasses import replace
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,7 @@ from src.indicators import add_indicators
 from src.strategies.levels import previous_session_levels  # noqa: F401
 from src.strategies.market_regime import classify_market_regime
 from src.strategies.opening_range import opening_range_signal
+from src.exit_policy import ExitPolicy, load_exit_policy
 from src.strategies.signal_planner import plan_atr_levels
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
@@ -195,8 +197,9 @@ def make_signal_callback(
     strategy_name: str,
     *,
     index_indicators: pd.DataFrame | None = None,
-    target_atr_multiple: float = 2.5,
+    target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
+    exit_policy: ExitPolicy | None = None,
 ) -> Callable[[pd.DataFrame, int], dict | None]:
     """Create the callback expected by backtest_fixed_levels.
 
@@ -206,6 +209,13 @@ def make_signal_callback(
     ATR levels are anchored to the signal candle close. The backtester enters at
     the next candle open and skips gaps that put entry on the wrong side of a level.
     """
+    policy = exit_policy or load_exit_policy()
+    if target_atr_multiple is not None:
+        if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+            raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
+        policy = replace(policy, version=f"{policy.version}+target-{target_atr_multiple:g}",
+                         target_1_atr_multiple=min(policy.target_1_atr_multiple, target_atr_multiple),
+                         target_2_atr_multiple=target_atr_multiple)
     if strategy_name not in SUPPORTED_STRATEGIES:
         raise ValueError(f"Unsupported strategy {strategy_name!r}; choose {SUPPORTED_STRATEGIES}")
 
@@ -239,13 +249,9 @@ def make_signal_callback(
             return None
         levels = plan_atr_levels(
             signal.side, entry=close, atr=atr,
-            stop_atr_multiple=1.0,
-            # Define two research targets: 2 ATR and 2.5 ATR. Use the farther
-            # target for this backtest because the engine evaluates minimum net
-            # R:R after estimated costs. This is a hypothesis to test, not a
-            # guarantee that a trade will pass the filter or be profitable.
-            target_1_atr_multiple=min(2.0, target_atr_multiple),
-            target_2_atr_multiple=target_atr_multiple,
+            stop_atr_multiple=policy.stop_atr_multiple,
+            target_1_atr_multiple=policy.target_1_atr_multiple,
+            target_2_atr_multiple=policy.target_2_atr_multiple,
         )
         return {
             "side": signal.side,
@@ -265,7 +271,7 @@ def backtest_strategy(
     strategy_name: str,
     config: BacktestConfig | None = None,
     index_candles: pd.DataFrame | None = None,
-    target_atr_multiple: float = 2.5,
+    target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     """Run one named strategy on an OHLCV DataFrame and return trades + metrics."""
@@ -280,18 +286,27 @@ def backtest_strategy(
         )
     indicators = add_indicators(candles)
     index_indicators = add_indicators(index_candles) if index_candles is not None and not index_candles.empty else None
+    policy = config.exit_policy if config is not None else load_exit_policy()
+    if target_atr_multiple is not None:
+        if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+            raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
+        policy = replace(policy, version=f"{policy.version}+target-{target_atr_multiple:g}",
+                         target_1_atr_multiple=min(policy.target_1_atr_multiple, target_atr_multiple),
+                         target_2_atr_multiple=target_atr_multiple)
+    effective_config = config or BacktestConfig(exit_policy=policy)
+    if effective_config.exit_policy != policy:
+        effective_config = replace(effective_config, exit_policy=policy)
     callback = make_signal_callback(
-        symbol, strategy_name,
-        index_indicators=index_indicators,
-        target_atr_multiple=target_atr_multiple,
-        reject_nontrending_regimes=reject_nontrending_regimes,
+        symbol, strategy_name, index_indicators=index_indicators,
+        reject_nontrending_regimes=reject_nontrending_regimes, exit_policy=policy,
     )
-    trades, summary = backtest_fixed_levels(symbol, indicators, callback, config)
+    trades, summary = backtest_fixed_levels(symbol, indicators, callback, effective_config)
     summary = dict(summary)
     summary.update({
         "symbol": symbol.upper(),
         "strategy": strategy_name,
-        "target_atr_multiple": target_atr_multiple,
+        "target_atr_multiple": policy.target_2_atr_multiple,
+        "exit_policy_version": policy.version,
         "reject_nontrending_regimes": reject_nontrending_regimes,
         "slippage_bps_per_side": (
             float(config.slippage_bps_per_side) if config is not None else 5.0
@@ -321,7 +336,7 @@ def run_yahoo_backtest(
     output_dir: str | Path = "reports/backtests",
     risk_per_trade: float | None = None,
     minimum_net_risk_reward: float | None = None,
-    target_atr_multiple: float = 2.5,
+    target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
     slippage_bps_per_side: float | None = None,
 ) -> dict:
@@ -329,6 +344,13 @@ def run_yahoo_backtest(
     if days < 5 or days > 59:
         raise ValueError("days must be between 5 and 59 for this intraday research workflow")
     configured_risk, charge_rates = load_phase2_settings()
+    policy = load_exit_policy()
+    if target_atr_multiple is not None:
+        if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+            raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
+        policy = replace(policy, version=f"{policy.version}+target-{target_atr_multiple:g}",
+                         target_1_atr_multiple=min(policy.target_1_atr_multiple, target_atr_multiple),
+                         target_2_atr_multiple=target_atr_multiple)
     risk_per_trade = configured_risk.risk_per_trade_inr if risk_per_trade is None else risk_per_trade
     minimum_net_risk_reward = (
         configured_risk.minimum_net_risk_reward
@@ -344,9 +366,6 @@ def run_yahoo_backtest(
         raise ValueError("minimum_net_risk_reward must be finite and positive")
     if not math.isfinite(slippage_bps_per_side) or not 0 <= slippage_bps_per_side <= 100:
         raise ValueError("slippage_bps_per_side must be finite and between 0 and 100")
-    if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
-        raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
-
     now = datetime.now(IST)
     start = now - timedelta(days=days)
     provider = YahooFinanceMarketData()
@@ -360,8 +379,9 @@ def run_yahoo_backtest(
         minimum_net_risk_reward=minimum_net_risk_reward,
         slippage_bps_per_side=slippage_bps_per_side,
         entry_cutoff=configured_risk.entry_cutoff_ist,
-        square_off_time=configured_risk.square_off_time_ist,
+        square_off_time=policy.time_exit_ist,
         charge_rates=charge_rates,
+        exit_policy=policy,
     )
     trades, summary = backtest_strategy(
         symbol, frame, strategy_name, config=config,
@@ -401,7 +421,7 @@ def run_yahoo_backtest(
 def run_slippage_sensitivity(
     symbol: str, strategy_name: str, days: int = 30,
     output_dir: str | Path = "reports/backtests", risk_per_trade: float | None = None,
-    minimum_net_risk_reward: float | None = None, target_atr_multiple: float = 2.5,
+    minimum_net_risk_reward: float | None = None, target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
     slippage_values: tuple[float, ...] = (2.0, 5.0, 8.0),
 ) -> pd.DataFrame:
@@ -409,6 +429,13 @@ def run_slippage_sensitivity(
     if days < 5 or days > 59:
         raise ValueError("days must be between 5 and 59 for this intraday research workflow")
     configured_risk, charge_rates = load_phase2_settings()
+    policy = load_exit_policy()
+    if target_atr_multiple is not None:
+        if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
+            raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
+        policy = replace(policy, version=f"{policy.version}+target-{target_atr_multiple:g}",
+                         target_1_atr_multiple=min(policy.target_1_atr_multiple, target_atr_multiple),
+                         target_2_atr_multiple=target_atr_multiple)
     risk_per_trade = configured_risk.risk_per_trade_inr if risk_per_trade is None else risk_per_trade
     minimum_net_risk_reward = (
         configured_risk.minimum_net_risk_reward
@@ -420,8 +447,6 @@ def run_slippage_sensitivity(
         raise ValueError("minimum_net_risk_reward must be finite and positive")
     if not slippage_values or any(not math.isfinite(value) or value < 0 or value > 100 for value in slippage_values):
         raise ValueError("slippage values must be finite and between 0 and 100 bps per side")
-    if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
-        raise ValueError("target_atr_multiple must be greater than 1.0 and no more than 10.0")
     now = datetime.now(IST)
     provider = YahooFinanceMarketData()
     raw = provider.historical_candles(symbol, now - timedelta(days=days), now, "5minute")
@@ -437,8 +462,9 @@ def run_slippage_sensitivity(
             minimum_net_risk_reward=minimum_net_risk_reward,
             slippage_bps_per_side=float(bps),
             entry_cutoff=configured_risk.entry_cutoff_ist,
-            square_off_time=configured_risk.square_off_time_ist,
+            square_off_time=policy.time_exit_ist,
             charge_rates=charge_rates,
+            exit_policy=policy,
         )
         trades, summary = backtest_strategy(
             symbol, frame, strategy_name, config=config,
@@ -483,7 +509,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="reports/backtests")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Planned loss budget per trade in INR; defaults to config/settings.yaml")
     parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")
-    parser.add_argument("--target-atr-multiple", type=float, default=2.5, help="Target distance in ATR multiples (test values such as 3.5 or 4.0; does not relax the net R:R filter)")
+    parser.add_argument("--target-atr-multiple", type=float, default=None, help="Explicit research override for shared policy T2 ATR multiple; the 1.5 net R:R gate is unchanged")
     parser.add_argument("--filter-choppy-regimes", action="store_true", help="Experimental: reject entries when regime is CHOPPY or UNKNOWN")
     parser.add_argument("--slippage-bps", type=float, default=None, help="Assumed slippage per side in basis points; defaults to config/settings.yaml")
     parser.add_argument("--slippage-sensitivity", action="store_true", help="Compare 2, 5, and 8 bps per side on identical candles")
@@ -497,12 +523,6 @@ def main() -> None:
         not math.isfinite(args.min_net_rr) or args.min_net_rr <= 0
     ):
         parser.error("--min-net-rr must be finite and positive")
-    if (
-        not math.isfinite(args.target_atr_multiple)
-        or args.target_atr_multiple <= 1.0
-        or args.target_atr_multiple > 10.0
-    ):
-        parser.error("--target-atr-multiple must be greater than 1.0 and no more than 10.0")
     if args.slippage_bps is not None and (
         not math.isfinite(args.slippage_bps) or args.slippage_bps < 0 or args.slippage_bps > 100
     ):

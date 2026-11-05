@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from src.exit_policy import load_exit_policy
 from decimal import Decimal
 from math import floor, isfinite
 from pathlib import Path
@@ -284,16 +285,17 @@ def load_phase2_settings(
         account = raw.get("account", {})
         risk = raw.get("risk", {})
         schedule = raw.get("schedule", {})
+        exit_policy = load_exit_policy()
         cost = raw.get("costs", {})
         settings = RiskSettings(
             capital_inr=float(account.get("capital_inr", 20_000)),
             risk_per_trade_inr=float(account.get("risk_per_trade_inr", 200)),
             minimum_net_risk_reward=float(account.get("minimum_net_risk_reward", 1.5)),
-            minimum_net_rr_target=str(risk.get("minimum_net_rr_target", "target_1")),
+            minimum_net_rr_target=exit_policy.gate_target,
             require_margin_verification=bool(risk.get("require_margin_verification", True)),
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
-            square_off_time_ist=str(schedule.get("intended_square_off_by", "15:15")),
+            square_off_time_ist=exit_policy.time_exit_ist,
             slippage_bps_per_side=float(risk.get("slippage_bps_per_side", 5.0)),
         )
         rates = ChargeRates(

@@ -29,7 +29,7 @@ class RiskSettings:
     entry_cutoff_ist: str = "14:45"
     square_off_time_ist: str = "15:15"
     # Appended to preserve the positional order of existing constructor arguments.
-    minimum_net_rr_target: Literal["target_1", "target_2"] = "target_2"
+    minimum_net_rr_target: Literal["target_1", "target_2"] = "target_1"
 
 
 @dataclass(frozen=True)

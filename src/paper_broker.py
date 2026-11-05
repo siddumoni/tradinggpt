@@ -1,7 +1,7 @@
 """Persistent virtual broker for read-only, research-only NSE paper trading."""
 from __future__ import annotations
 import hashlib, json, math, sqlite3
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -361,7 +361,7 @@ class PaperBroker:
         if not cleaned:
             raise ValueError("symbol is required")
         start=to_ist(candle_start)
-        end=start.replace() + __import__("datetime").timedelta(minutes=int(bar_minutes))
+        end=start + timedelta(minutes=int(bar_minutes))
         closed=0
         with self._connect() as db:
             for trade in self._open_rows(db):

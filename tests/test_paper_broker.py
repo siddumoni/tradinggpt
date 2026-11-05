@@ -113,8 +113,11 @@ def test_open_position_daily_pnl_uses_conservative_net_liquidation_mark(tmp_path
 
 def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
     import pandas as pd
+    from dataclasses import replace
     from src.backtest import BacktestConfig, backtest_fixed_levels
+    from src.exit_policy import load_exit_policy
 
+    policy = replace(load_exit_policy(), time_exit_ist="23:59")
     start = datetime.now(IST).replace(second=0, microsecond=0)
     start = start.replace(minute=(start.minute // 5) * 5)
     stamps = pd.date_range(start, periods=3, freq="5min")
@@ -136,11 +139,12 @@ def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
 
     backtest_trades, _summary = backtest_fixed_levels(
         "INFY", candles, signal,
-        BacktestConfig(initial_capital=100_000, risk_per_trade=500),
+        BacktestConfig(initial_capital=100_000, risk_per_trade=500,
+                       entry_cutoff="23:55", exit_policy=policy),
     )
     assert len(backtest_trades) == 1
 
-    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    broker = PaperBroker(tmp_path / "paper.sqlite3", exit_policy=policy)
     opened = broker.process_scan_report(
         report_file(tmp_path, [candidate()], {"INFY": quote()})
     )

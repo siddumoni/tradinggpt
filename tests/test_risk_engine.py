@@ -138,7 +138,8 @@ costs:
     assert settings.risk_per_trade_inr == 350
     assert settings.slippage_bps_per_side == 7
     assert settings.entry_cutoff_ist == "14:40"
-    assert settings.square_off_time_ist == "15:20"
+    # The legacy schedule field no longer overrides the versioned exit policy.
+    assert settings.square_off_time_ist == "15:15"
     assert str(charges.ipft_rate) == "1E-9"
 
 

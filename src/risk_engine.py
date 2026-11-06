@@ -7,7 +7,7 @@ from src.exit_policy import load_exit_policy
 from decimal import Decimal
 from math import floor, isfinite
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 

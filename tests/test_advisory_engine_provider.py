@@ -644,3 +644,15 @@ def test_advisory_scan_stops_on_nse_equity_holiday(tmp_path):
     assert "EXCHANGE_HOLIDAY" in report["message"]
     assert report["candidates"] == []
     assert report["orders_placed_or_modified"] is False
+
+
+def test_live_advisory_profile_rejects_unverified_yahoo_provider(tmp_path):
+    with pytest.raises(ValueError, match="requires the authenticated read-only Kite provider"):
+        advisory_engine.run_scan(
+            symbols=["INFY"],
+            now=datetime(2026, 10, 16, 11, 0, tzinfo=IST),
+            max_symbols=1,
+            output_dir=tmp_path,
+            data_provider="yahoo",
+            account_profile="live-advisory",
+        )

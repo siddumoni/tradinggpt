@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from html import escape
@@ -192,7 +193,8 @@ def format_event(event: dict[str, Any]) -> str:
     symbol = escape(str(event.get("symbol") or "N/A"))
     details = event.get("details") if isinstance(event.get("details"), dict) else {}
     if event_type == "PAPER_ENTRY":
-        side = escape(str(details.get("side") or details.get("direction") or "PAPER"))
+        side_match = re.search(r"Simulated (LONG|SHORT)", str(event.get("message") or ""), re.IGNORECASE)
+        side = escape(str(details.get("side") or details.get("direction") or (side_match.group(1).upper() if side_match else "PAPER")))
         quantity = details.get("quantity", "—")
         entry = details.get("entry_fill_price", "—")
         stop = details.get("stop_loss", "—")
@@ -205,7 +207,8 @@ def format_event(event: dict[str, Any]) -> str:
             "Research alert only — no broker order was placed."
         )
     if event_type == "PAPER_EXIT":
-        side = escape(str(details.get("side") or "PAPER"))
+        side_match = re.search(r"Simulated (LONG|SHORT)", str(event.get("message") or ""), re.IGNORECASE)
+        side = escape(str(details.get("side") or (side_match.group(1).upper() if side_match else "PAPER")))
         pnl = details.get("net_pnl", "—")
         reason = escape(str(details.get("exit_reason") or "EXIT"))
         exit_price = details.get("exit_fill_price", "—")

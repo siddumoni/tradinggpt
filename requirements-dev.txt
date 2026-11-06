@@ -2,4 +2,5 @@
 
 ruff>=0.14,<1
 mypy>=1.18,<2
+types-PyYAML>=6,<7
 pytest-cov>=6,<8

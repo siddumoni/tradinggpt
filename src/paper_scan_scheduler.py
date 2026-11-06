@@ -143,6 +143,7 @@ def run_scanner_process(
     risk_per_trade: float = 500.0,
     account_profile: str = "paper",
     minimum_net_rr: float = 1.5,
+    slippage_bps_per_side: float = 5.0,
     universe_mode: str = "nse_equity",
     universe_max_symbols: int = 50,
     universe_min_price: float = 50.0,
@@ -169,6 +170,7 @@ def run_scanner_process(
         "--account-capital", str(account_capital),
         "--risk-per-trade", str(risk_per_trade),
         "--minimum-net-rr", str(minimum_net_rr),
+        "--slippage-bps-per-side", str(slippage_bps_per_side),
         "--paper-entry-max-quote-age-minutes", str(paper_entry_max_quote_age_minutes),
     ]
     if universe_mode == "nse_equity":

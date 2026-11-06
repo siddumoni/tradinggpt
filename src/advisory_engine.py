@@ -136,6 +136,8 @@ def run_scan(
     paper_capital_inr: float | None = None,
     paper_risk_per_trade_inr: float | None = None,
     paper_minimum_net_rr: float | None = None,
+    account_profile: str = "research",
+    paper_slippage_bps_per_side: float | None = None,
     universe_mode: str = "watchlist",
     universe_max_symbols: int = 50,
     universe_min_price_inr: float = 50.0,
@@ -153,6 +155,7 @@ def run_scan(
         return {
             "status": "MARKET_CLOSED",
             "as_of": current.isoformat(),
+            "account_profile": account_profile,
             "message": session_message,
             "market_calendar": market_day_status(current.date()),
             "candidates": [],
@@ -165,6 +168,8 @@ def run_scan(
     provider_name = str(data_provider).strip().lower()
     if provider_name not in {"yahoo", "kite"}:
         raise ValueError("data_provider must be 'yahoo' or 'kite'")
+    if account_profile == "live-advisory" and provider_name != "kite":
+        raise ValueError("The live-advisory profile requires the authenticated read-only Kite provider")
     mode = str(universe_mode).strip().lower()
     if mode not in {"watchlist", "nse_equity"}:
         raise ValueError("universe_mode must be 'watchlist' or 'nse_equity'")
@@ -261,13 +266,22 @@ def run_scan(
             index_15m = []
             news_result.setdefault("errors", []).append(f"NIFTY index data unavailable: {exc}")
 
-    risk_settings, charge_rates = load_phase2_settings()
+    risk_settings, charge_rates = load_phase2_settings(profile=account_profile)
     overrides = {}
     if paper_capital_inr is not None: overrides["capital_inr"] = float(paper_capital_inr)
     if paper_risk_per_trade_inr is not None: overrides["risk_per_trade_inr"] = float(paper_risk_per_trade_inr)
-    if paper_minimum_net_rr is not None: overrides["minimum_net_risk_reward"] = float(paper_minimum_net_rr)
+    if paper_minimum_net_rr is not None:
+        minimum_rr_override = float(paper_minimum_net_rr)
+        if not isfinite(minimum_rr_override) or minimum_rr_override < 1.5:
+            raise ValueError("Minimum after-cost net R:R override cannot be below 1.5")
+        overrides["minimum_net_risk_reward"] = minimum_rr_override
     if any(not isfinite(value) or value <= 0 for value in overrides.values()):
-        raise ValueError("Paper risk overrides must be finite and positive")
+        raise ValueError("Paper capital, risk and net R:R overrides must be finite and positive")
+    if paper_slippage_bps_per_side is not None:
+        slippage_override = float(paper_slippage_bps_per_side)
+        if not isfinite(slippage_override) or not 0 <= slippage_override <= 100:
+            raise ValueError("Paper slippage override must be finite and between 0 and 100 bps per side")
+        overrides["slippage_bps_per_side"] = slippage_override
     if overrides: risk_settings = replace(risk_settings, **overrides)
     bundles: dict[str, dict[str, Any]] = {}
     fetch_errors: list[str] = []
@@ -636,6 +650,7 @@ def run_scan(
             "require_margin_verification": risk_settings.require_margin_verification,
         },
         "universe_selection": universe_selection,
+        "account_profile": account_profile,
         "market_calendar": market_day_status(current.date()),
         "market_safety_settings": asdict(market_safety_settings),
         "symbols_requested": selected,
@@ -691,9 +706,11 @@ def main() -> int:
     parser.add_argument("--scan-ledger", type=Path, default=None, help="Optional append-only CSV of scan health and candidate counts; defaults to logs/paper_scan_runs.csv when --paper-journal is enabled")
     parser.add_argument("--candle-archive-dir", type=Path, default=None, help="Optional directory for a provider-pure archive of completed 5-minute candles; enabled automatically at data/paper_candles when --paper-journal is set")
     parser.add_argument("--archive-symbols", default="", help="Additional Kite NSE EQ symbols with open/pending research outcomes; archived but not added to the scan universe")
-    parser.add_argument("--account-capital", type=float, default=None, help="Optional virtual account capital override for risk gating")
+    parser.add_argument("--profile", choices=("research", "paper", "live-advisory"), default="research", help="Named account/risk profile; CLI capital/risk flags override it")
+    parser.add_argument("--account-capital", type=float, default=None, help="Optional capital override for the selected profile")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Optional virtual account planned risk per trade")
     parser.add_argument("--minimum-net-rr", type=float, default=None, help="Optional minimum after-cost reward/risk gate")
+    parser.add_argument("--slippage-bps-per-side", type=float, default=None, help="Optional slippage assumption override (0-100 bps per side)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
@@ -715,6 +732,8 @@ def main() -> int:
         data_provider=args.provider, candle_archive_dir=candle_archive_dir,
         paper_capital_inr=args.account_capital, paper_risk_per_trade_inr=args.risk_per_trade,
         paper_minimum_net_rr=args.minimum_net_rr,
+        account_profile=args.profile,
+        paper_slippage_bps_per_side=args.slippage_bps_per_side,
         universe_mode=args.universe,
         universe_max_symbols=args.universe_max_symbols,
         universe_min_price_inr=args.universe_min_price,

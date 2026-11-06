@@ -106,12 +106,26 @@ def save_token_cache(
         created_at=current,
         expires_at=token_expiry_for(current),
     )
+    use_keyring = os.getenv("TRADINGGPT_USE_KEYRING", "").strip().lower() in {"1", "true", "yes", "on"}
     payload = {
-        "access_token": cached.access_token,
         "api_key": cached.api_key,
         "created_at": cached.created_at.isoformat(),
         "expires_at": cached.expires_at.isoformat(),
+        "token_storage": "keyring" if use_keyring else "file",
     }
+    if use_keyring:
+        try:
+            import keyring
+            keyring.set_password("tradinggpt.kite", cached.api_key, cached.access_token)
+        except ImportError as exc:
+            raise TokenCacheError(
+                "TRADINGGPT_USE_KEYRING is enabled but keyring is not installed. "
+                "Install optional dependencies with: pip install -r requirements-keyring.txt"
+            ) from exc
+        except Exception as exc:
+            raise TokenCacheError(f"Could not save the Kite token to the OS keyring: {exc}") from exc
+    else:
+        payload["access_token"] = cached.access_token
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -135,9 +149,25 @@ def load_token_cache(
         return None
     try:
         payload: dict[str, Any] = json.loads(cache_path.read_text(encoding="utf-8"))
+        api_key_in_cache = str(payload["api_key"])
+        if payload.get("token_storage", "file") == "keyring":
+            try:
+                import keyring
+            except ImportError as exc:
+                raise TokenCacheError(
+                    "This token is stored in the OS keyring. Install optional dependencies "
+                    "with: pip install -r requirements-keyring.txt"
+                ) from exc
+            access_token = keyring.get_password("tradinggpt.kite", api_key_in_cache)
+            if not access_token:
+                raise TokenCacheError(
+                    "The Kite token is missing from the OS keyring. Run the login command again."
+                )
+        else:
+            access_token = str(payload["access_token"])
         cached = CachedToken(
-            access_token=str(payload["access_token"]),
-            api_key=str(payload["api_key"]),
+            access_token=str(access_token),
+            api_key=api_key_in_cache,
             created_at=datetime.fromisoformat(payload["created_at"]),
             expires_at=datetime.fromisoformat(payload["expires_at"]),
         )

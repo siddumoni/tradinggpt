@@ -86,3 +86,59 @@ def test_credentials_require_non_placeholder_values(tmp_path: Path, monkeypatch:
     monkeypatch.delenv("KITE_API_SECRET", raising=False)
     with pytest.raises(AuthConfigurationError, match="Set KITE_API_KEY"):
         load_credentials(env_file)
+
+
+def test_keyring_token_storage_keeps_access_token_out_of_json_cache(tmp_path, monkeypatch):
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    secrets = {}
+
+    def set_password(service, username, password):
+        secrets[(service, username)] = password
+
+    def get_password(service, username):
+        return secrets.get((service, username))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "keyring",
+        SimpleNamespace(set_password=set_password, get_password=get_password),
+    )
+    monkeypatch.setenv("TRADINGGPT_USE_KEYRING", "true")
+    cache = tmp_path / "token.json"
+    now = datetime(2026, 11, 6, 9, 0, tzinfo=IST)
+
+    save_token_cache("secret-access-token", "dummy-key", cache_path=cache, now=now)
+    payload = json.loads(cache.read_text(encoding="utf-8"))
+
+    assert payload["token_storage"] == "keyring"
+    assert "access_token" not in payload
+    assert secrets[("tradinggpt.kite", "dummy-key")] == "secret-access-token"
+    loaded = load_token_cache("dummy-key", cache_path=cache, now=now)
+    assert loaded is not None
+    assert loaded.access_token == "secret-access-token"
+
+
+def test_keyring_mode_does_not_fall_back_to_plaintext_when_dependency_missing(tmp_path, monkeypatch):
+    import sys
+    from src.auth import TokenCacheError
+
+    monkeypatch.setenv("TRADINGGPT_USE_KEYRING", "true")
+    monkeypatch.delitem(sys.modules, "keyring", raising=False)
+    # Force import failure even if a developer machine happens to have keyring installed.
+    import builtins
+    original_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "keyring":
+            raise ImportError("test missing optional dependency")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    with pytest.raises(TokenCacheError, match="keyring is not installed"):
+        save_token_cache(
+            "secret-access-token", "dummy-key", cache_path=tmp_path / "token.json",
+            now=datetime(2026, 11, 6, 9, 0, tzinfo=IST),
+        )

@@ -1,0 +1,11 @@
+kiteconnect==5.2.2
+python-dotenv==1.2.1
+PyYAML==6.0.3
+pytest==8.4.2
+ta==0.11.0
+numpy>=2.0,<3.0
+pandas>=2.2,<3.0
+yfinance>=1.7.0,<2.0
+
+# Optional secure token storage (Windows Credential Manager / platform keyring)
+keyring>=25,<27

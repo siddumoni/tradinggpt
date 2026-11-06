@@ -1,3 +1,5 @@
+> **Historical archive — superseded on 2026-11-06.** This document describes an early scanner state. It incorrectly states that Kite margin verification was not integrated and that Yahoo was the only development provider. Do not use these commands or limitations as the current operating guide. Use the root [README](../../README.md), [NSE scanner guide](../NSE_UNIVERSE_SCANNER.md), and [delivery phases](../PHASES.md) instead.
+
 # Phase 6 — Market Scanner and Advisory Engine
 
 ## What this phase adds

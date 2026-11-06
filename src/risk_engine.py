@@ -7,7 +7,7 @@ from src.exit_policy import load_exit_policy
 from decimal import Decimal
 from math import floor, isfinite
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 
@@ -279,14 +279,62 @@ def _rejected(side: TradeSide, prices: tuple[float, ...], reason: str) -> TradeA
     )
 
 
+def load_account_profile(
+    profile: str = "research",
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Resolve a named account profile while retaining legacy account fallbacks."""
+    path = config_path or Path(__file__).resolve().parents[1] / "config" / "settings.yaml"
+    name = str(profile).strip().lower()
+    if name not in {"research", "paper", "live-advisory"}:
+        raise ValueError("profile must be research, paper, or live-advisory")
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        legacy = raw.get("account", {})
+        profiles = raw.get("profiles", {})
+        configured = profiles.get(name, {}) if isinstance(profiles, dict) else {}
+        if not isinstance(legacy, dict) or not isinstance(configured, dict):
+            raise ValueError("account and profiles settings must be mappings")
+        resolved = {**legacy, **configured}
+        resolved["profile"] = name
+        for key in ("capital_inr", "risk_per_trade_inr", "minimum_net_risk_reward"):
+            value = float(resolved.get(key, 0))
+            if not isfinite(value) or value <= 0:
+                raise ValueError(f"profile {name!r} requires a finite positive {key}")
+            if key == "minimum_net_risk_reward" and value < 1.5:
+                raise ValueError(f"profile {name!r} minimum_net_risk_reward cannot be below 1.5")
+            resolved[key] = value
+        for key in ("max_daily_loss_inr", "max_portfolio_risk_inr"):
+            if key in resolved:
+                value = float(resolved[key])
+                if not isfinite(value) or value <= 0:
+                    raise ValueError(f"profile {name!r} requires a finite positive {key}")
+                resolved[key] = value
+        if "slippage_bps_per_side" in resolved:
+            value = float(resolved["slippage_bps_per_side"])
+            if not isfinite(value) or not 0 <= value <= 100:
+                raise ValueError(f"profile {name!r} slippage_bps_per_side must be between 0 and 100")
+            resolved["slippage_bps_per_side"] = value
+        if "max_open_positions" in resolved:
+            value = resolved["max_open_positions"]
+            if isinstance(value, bool) or int(value) < 1:
+                raise ValueError(f"profile {name!r} requires a positive max_open_positions")
+            resolved["max_open_positions"] = int(value)
+        return resolved
+    except (OSError, TypeError, yaml.YAMLError) as exc:
+        raise ValueError(f"Could not load account profile {name!r} from {path}: {exc}") from exc
+
+
 def load_phase2_settings(
     config_path: Path | None = None,
+    *,
+    profile: str = "research",
 ) -> tuple[RiskSettings, ChargeRates]:
     """Load risk and charge settings from config/settings.yaml."""
     path = config_path or Path(__file__).resolve().parents[1] / "config" / "settings.yaml"
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        account = raw.get("account", {})
+        account = load_account_profile(profile, path)
         risk = raw.get("risk", {})
         schedule = raw.get("schedule", {})
         exit_policy = load_exit_policy()
@@ -300,7 +348,7 @@ def load_phase2_settings(
             skip_if_margin_unavailable=bool(risk.get("skip_if_margin_unavailable", True)),
             entry_cutoff_ist=str(schedule.get("no_new_entries_after", "14:45")),
             square_off_time_ist=exit_policy.time_exit_ist,
-            slippage_bps_per_side=float(risk.get("slippage_bps_per_side", 5.0)),
+            slippage_bps_per_side=float(account.get("slippage_bps_per_side", risk.get("slippage_bps_per_side", 5.0))),
             minimum_stop_distance_pct=float(risk.get("minimum_stop_distance_pct", 0.25)),
         )
         rates = ChargeRates(

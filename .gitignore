@@ -14,3 +14,27 @@ logs/*
 !logs/.gitkeep
 reports/*
 !reports/.gitkeep
+
+# Local databases and runtime state
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db-*
+*.log
+*.log.*
+
+# Local research output and generated artifacts
+coverage.xml
+htmlcov/
+.coverage
+.coverage.*
+junit/
+test-results/
+
+# Static-analysis and formatter caches
+.mypy_cache/
+.ruff_cache/
+.pytype/

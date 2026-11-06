@@ -8,8 +8,16 @@ This document is the current phase index. Historical phase notes are retained un
 | 2 | Backtesting, execution assumptions, risk/cost validation and reproducible research settings | Complete |
 | 3 | Statistical validation, paper-report adapters and multi-day report analysis | Complete; historical evidence remains inconclusive |
 | 4 | Telegram paper alerts, NSE calendar, circuit-band checks, relative-volume and MIS margin safeguards | Complete; merged to main as `87ac62e`; main CI: 400 passed |
-| 5 | Repository hygiene, named account profiles, scanner consistency, secure optional token storage and cross-platform quality gates | In progress on `feature/phase5-repository-hygiene` |
-| 6 | Evidence-led README/results refresh after adequate prospective paper sessions | Not started |
+| 5 | Repository hygiene, named account profiles, scanner consistency, secure optional token storage and cross-platform quality gates | Complete; merged to main as `07ab215`; Ubuntu and Windows Python 3.13 CI passed |
+| 6 | Evidence-led README/results refresh after adequate prospective paper sessions | Groundwork complete; awaiting evidence gate |
+
+## Phase 6 status and evidence gate
+
+Phase 6 is intentionally evidence-gated. The statistical pipeline and promotion thresholds are implemented, but the public performance summary must not be refreshed from an under-sized sample.
+
+As of 2026-11-06, the available archived daily paper reports cover 2026-11-03 through 2026-11-05 only (at most three independent sessions per track). This is below the configured minimum of 20 sessions and 100 accepted, completed trades. The current status is therefore **insufficient prospective evidence**, not a positive or negative strategy result.
+
+See [the Phase 6 readiness guide](PHASE6_READINESS.md) for data handling, per-track analysis commands, the acceptance gate and the final documentation checklist.
 
 ## Safety and research status
 

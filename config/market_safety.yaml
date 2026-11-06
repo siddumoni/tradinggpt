@@ -1,0 +1,8 @@
+circuit_limits:
+  near_band_buffer_pct: 0.5
+
+relative_volume:
+  lookback_sessions: 20
+  minimum_valid_sessions: 10
+  minimum_ratio: 1.0
+  lookback_calendar_days: 45

@@ -228,3 +228,15 @@ def test_paper_broker_refuses_minimum_net_rr_below_1_5(tmp_path):
 
     with pytest.raises(ValueError, match="minimum_net_rr must be at least 1.5"):
         PaperBroker(tmp_path / "paper.sqlite3", minimum_net_rr=1.4)
+
+
+def test_paper_broker_reserves_ten_percent_of_risk_budget_for_stop_gaps(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    result = broker.process_scan_report(report_file(tmp_path, [candidate()], {"INFY": quote()}))
+    assert result["opened"] == 1
+    trade = broker.snapshot()["open_positions"][0]
+    assert trade["risk_budget_inr"] == pytest.approx(500.0)
+    assert trade["planned_net_risk_inr"] <= 450.0
+    entry = next(event for event in broker.snapshot()["events"] if event["event_type"] == "PAPER_ENTRY")
+    assert entry["details"]["stop_gap_risk_reserve_pct"] == pytest.approx(0.10)
+    assert entry["details"]["sizing_risk_budget_inr"] == pytest.approx(450.0)

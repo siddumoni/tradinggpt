@@ -349,6 +349,23 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
 
     candles_5m = make_candles(21, 5)   # completed through 10:55 IST
     candles_15m = make_candles(8, 15)  # current 11:00 bar is dropped by the scanner
+    prior_session_days = (
+        "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09",
+        "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16",
+    )
+    candles_5m_history = []
+    for prior_day in prior_session_days:
+        session_start = datetime.fromisoformat(f"{prior_day}T09:15:00").replace(tzinfo=IST)
+        for index in range(21):
+            price = 10.0 + index * 0.1
+            candles_5m_history.append({
+                "date": session_start + timedelta(minutes=index * 5),
+                "open": price - 0.05,
+                "high": price + 0.1,
+                "low": price - 0.1,
+                "close": price,
+                "volume": 500,
+            })
 
     class FakeKite:
         def instruments(self, now=None):
@@ -380,10 +397,13 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
                 "quote": {
                     "last_price": 14.0,
                     "timestamp": now,
+                    "lower_circuit_limit": 10.0,
+                    "upper_circuit_limit": 18.0,
                     "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
                 },
                 "candles_5m": candles_5m,
                 "candles_15m": candles_15m,
+                "candles_5m_history": candles_5m_history,
                 "provider": "test Kite",
             }
 
@@ -392,6 +412,8 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
             return {"NSE:INFY": {
                 "last_price": 14.0,
                 "timestamp": now,
+                "lower_circuit_limit": 10.0,
+                "upper_circuit_limit": 18.0,
                 "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
             }}
 

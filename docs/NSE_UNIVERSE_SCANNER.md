@@ -109,3 +109,26 @@ Only one instance of a broad scan should be launched at a time using the same Ki
 - Screening by current-day turnover proxy does not establish order-book depth or execution capacity.
 - The top-N list is a liquidity ranking, not a forecast.
 - A scan and its generated candidates do not demonstrate strategy profitability. Backtests, historical replays and forward observations require separate controls for look-ahead bias, survivorship bias, missing data, costs, slippage, overlapping signals and out-of-sample validation.
+
+
+## Phase 4 market-session and microstructure safeguards
+
+### NSE equity calendar
+
+The intraday scanner uses `config/nse_equity_calendar.yaml` for the published 2026 NSE cash-equity holidays. The file records its source and verified coverage dates. Normal-session scans and the direct Kite bundle fetch both refuse weekends, listed holidays, unsupported special sessions, and dates outside the calendar's verified range. The current calendar is valid only from **2026-01-01 through 2026-12-31**; it deliberately fails closed beyond that date until the next official calendar is reviewed and added. Muhurat Trading is not enabled because its special timing is outside the normal 09:15–15:30 session model.
+
+Update the calendar only from the official NSE equity-segment holiday circular/page. Do not assume a date is open simply because it is a weekday.
+
+### Circuit-limit protection
+
+Kite full quotes must include positive `lower_circuit_limit` and `upper_circuit_limit` values with a valid last price inside the band. Missing or invalid band data is rejected. A stock is blocked when its last price is within **0.5%** of either band. During final executable-entry refresh, the same check is repeated against the actual best ask for LONG or best bid for SHORT, not just LTP. This is a conservative paper/advisory filter; it does not guarantee an order could execute or that the band will remain unchanged.
+
+### Time-of-day relative volume
+
+Live Kite candidates must pass a same-clock-time cumulative-volume check before strategy/risk approval. Current-session 5-minute volume from 09:15 through the latest completed candle is compared with the **median** cumulative volume over up to the previous **20 complete sessions**, using exactly the same 5-minute time prefix. At least **10 valid prior sessions** and a minimum ratio of **1.0x** are required by default. Missing bars are never imputed; incomplete current sessions, insufficient historical sessions, malformed volume, or a below-threshold ratio fail closed.
+
+The Kite adapter fetches a 45-calendar-day historical 5-minute window ending on the previous calendar day. Newly listed or thinly covered symbols may not have enough valid history and will remain watch/no-trade until the required sample exists. Relative volume is a participation filter, not a directional signal or proof of edge.
+
+### MIS margin check
+
+The existing MIS margin validation remains a read-only hypothetical one-share margin calculation through Kite's margin estimator. Missing or invalid estimates continue to fail closed. It does not place an order and is not a guarantee of broker eligibility or execution.

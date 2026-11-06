@@ -371,7 +371,6 @@ class CandidateOutcomeTracker:
             skip_if_margin_unavailable=False, slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist=base.entry_cutoff_ist, square_off_time_ist=base.square_off_time_ist,
             minimum_net_rr_target=base.minimum_net_rr_target,
-            stop_gap_buffer_bps=base.stop_gap_buffer_bps,
         )
         try:
             assessment = assess_trade(

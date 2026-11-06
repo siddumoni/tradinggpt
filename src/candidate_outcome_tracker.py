@@ -31,7 +31,7 @@ MIN_ENTRY_RR = 0.01
 ENTRY_CUTOFF = dtime(14, 45)
 LAST_BAR = dtime(15, 10)
 RR_REASON_PATTERN = re.compile(r"rejected:\s*target\s*[12]\s+net\s+r:r\s+is\s+below\s+1\.50", re.IGNORECASE)
-METHOD_VERSION = "availability_aware_v2"
+METHOD_VERSION = "availability_aware_v3"
 LEGACY_INVALIDATION_REASON = (
     "Superseded: the legacy evaluator entered from the signal candle without waiting for "
     "scanner publication and also double-counted entry slippage in risk sizing."
@@ -60,6 +60,7 @@ def _candidate_id(candidate: dict[str, Any]) -> str:
     except (TypeError, ValueError, OverflowError):
         canonical_signal_time = raw_signal_time
     parts = (
+        METHOD_VERSION,
         str(candidate.get("symbol") or "").strip().upper(),
         str(candidate.get("side") or "").strip().upper(),
         str(candidate.get("strategy") or "").strip().lower(),

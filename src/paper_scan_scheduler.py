@@ -141,6 +141,8 @@ def run_scanner_process(
     after_report: Callable[[Path], None] | None = None,
     account_capital: float = 100_000.0,
     risk_per_trade: float = 500.0,
+    account_profile: str = "paper",
+    minimum_net_rr: float = 1.5,
     universe_mode: str = "nse_equity",
     universe_max_symbols: int = 50,
     universe_min_price: float = 50.0,
@@ -163,9 +165,10 @@ def run_scanner_process(
         "--paper-journal", str(paper_journal),
         "--scan-ledger", str(scan_ledger),
         "--candle-archive-dir", str(candle_archive_dir),
+        "--profile", account_profile,
         "--account-capital", str(account_capital),
         "--risk-per-trade", str(risk_per_trade),
-        "--minimum-net-rr", "1.5",
+        "--minimum-net-rr", str(minimum_net_rr),
         "--paper-entry-max-quote-age-minutes", str(paper_entry_max_quote_age_minutes),
     ]
     if universe_mode == "nse_equity":

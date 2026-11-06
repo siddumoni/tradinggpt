@@ -310,6 +310,11 @@ def load_account_profile(
                 if not isfinite(value) or value <= 0:
                     raise ValueError(f"profile {name!r} requires a finite positive {key}")
                 resolved[key] = value
+        if "slippage_bps_per_side" in resolved:
+            value = float(resolved["slippage_bps_per_side"])
+            if not isfinite(value) or not 0 <= value <= 100:
+                raise ValueError(f"profile {name!r} slippage_bps_per_side must be between 0 and 100")
+            resolved["slippage_bps_per_side"] = value
         if "max_open_positions" in resolved:
             value = resolved["max_open_positions"]
             if isinstance(value, bool) or int(value) < 1:

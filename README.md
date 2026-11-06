@@ -250,7 +250,7 @@ After running a shared-capital portfolio replay, evaluate its accepted trade-det
 python -m src.performance_stats --trades reports/backtests/portfolio_replay_trade_details.csv --initial-capital 20000
 
 # Or select one isolated paper-report track
-python -m src.performance_stats --trades reports/paper_daily_2026-11-05_trades.csv --track CHAMPION --initial-capital 100000
+python -m src.performance_stats --trades reports/paper_daily_2026-11-03_trades.csv reports/paper_daily_2026-11-04_trades.csv reports/paper_daily_2026-11-05_trades.csv --track CHAMPION --initial-capital 100000
 ```
 
 This produces a 10,000-resample session-block bootstrap expectancy interval at 8 bps per-side slippage, net performance metrics, realized drawdown, losing streak, MAE/MFE when recorded, hour buckets, and symbol/session profit concentration. Promotion criteria are fixed in `config/promotion.yaml`. A PROMOTE decision only advances the strategy to another research-validation stage; it is not live-trading approval. See [the statistical validation guide](docs/PERFORMANCE_STATS.md) and [the current results](docs/RESULTS.md).

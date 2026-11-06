@@ -70,3 +70,12 @@ def test_single_session_does_not_claim_a_bootstrap_confidence_interval():
     assert stats["expectancy_ci_95_inr"]["status"]=="not_estimable_fewer_than_two_sessions"
     config={"thresholds":{"minimum_trades":1,"minimum_sessions":1,"minimum_profit_factor":0,"maximum_symbol_or_session_profit_share":1}}
     assert evaluate_promotion(stats,config)["checks"]["positive_95pct_expectancy_lower_bound_at_8bps"] is False
+
+def test_loader_combines_daily_files_with_different_optional_columns(tmp_path):
+    one=tmp_path/"day1.csv"; two=tmp_path/"day2.csv"
+    base={"track":"CHAMPION","strategy_version":"champion_v1","status":"CLOSED","symbol":"AAA","side":"LONG","entry_time":"2026-01-01 10:00+05:30","exit_time":"2026-01-01 10:30+05:30","entry_fill_price":100,"exit_fill_price":101,"quantity":2,"gross_pnl":2,"transaction_charges":1}
+    pd.DataFrame([{**base,"scan_as_of":"2026-01-01T10:01+05:30"}]).to_csv(one,index=False)
+    pd.DataFrame([{**base,"symbol":"BBB","entry_time":"2026-01-02 10:00+05:30","exit_time":"2026-01-02 10:30+05:30"}]).to_csv(two,index=False)
+    combined=load_trades([one,two],track="CHAMPION")
+    assert len(combined)==2
+    assert set(combined.symbol)=={"AAA","BBB"}

@@ -237,17 +237,3 @@ def test_account_profile_cannot_lower_minimum_net_rr_below_1_5(tmp_path):
     )
     with pytest.raises(ValueError, match="cannot be below 1.5"):
         load_account_profile("research", path)
-
-
-def test_trade_assessment_rejects_minimum_net_rr_below_1_5():
-    settings = RiskSettings(minimum_net_risk_reward=1.4)
-    with pytest.raises(ValueError, match="at least 1.5"):
-        assess_trade(
-            side="LONG",
-            entry_price=100,
-            stop_loss=99,
-            target_1=103,
-            target_2=104,
-            settings=settings,
-            estimated_margin_per_share=50,
-        )

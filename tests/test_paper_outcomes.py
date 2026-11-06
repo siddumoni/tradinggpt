@@ -93,6 +93,10 @@ def test_target_two_exit_recalculates_costs_and_marks_unverified_source(tmp_path
     assert result["net_pnl"] < result["gross_pnl"]
     assert result["research_only"] is True
     assert result["source_live_data_verified"] is False
+    assert result["mae_points"] == pytest.approx(0.5)
+    assert result["mfe_points"] == pytest.approx(5.0)
+    assert result["mae_r"] == pytest.approx(0.5)
+    assert result["mfe_r"] == pytest.approx(5.0)
 
 
 def test_stop_first_when_stop_and_target_hit_same_bar(tmp_path):

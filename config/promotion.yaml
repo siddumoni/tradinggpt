@@ -1,0 +1,13 @@
+version: 1
+description: Conservative research-stage promotion thresholds; never authorizes live trading.
+bootstrap:
+  resamples: 10000
+  confidence_level: 0.95
+  seed: 42
+evaluation:
+  slippage_bps_per_side: 8
+thresholds:
+  minimum_trades: 100
+  minimum_sessions: 20
+  minimum_profit_factor: 1.0
+  maximum_symbol_or_session_profit_share: 0.30

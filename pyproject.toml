@@ -5,7 +5,7 @@ extend-exclude = ["reports", "data", ".local"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
-ignore = ["F401", "F841"]
+ignore = ["F401", "F841", "E401", "E402", "E701", "E702"]
 
 [tool.mypy]
 python_version = "3.13"

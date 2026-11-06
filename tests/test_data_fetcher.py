@@ -262,6 +262,25 @@ def test_screen_liquid_nse_equities_ranks_fresh_quotes_and_explains_exclusions()
     assert summary["exclusions"]["QUOTE_MISSING"] == 1
 
 
+def test_fetch_symbol_bundle_refuses_nse_equity_holiday():
+    client = KiteMarketData(
+        FakeKite(),
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+    )
+    instrument = {
+        "tradingsymbol": "RELIANCE",
+        "instrument_token": 1,
+        "exchange": "NSE",
+        "segment": "NSE",
+        "instrument_type": "EQ",
+    }
+    with pytest.raises(MarketClosedError, match="EXCHANGE_HOLIDAY"):
+        client.fetch_symbol_bundle(
+            instrument,
+            now=datetime(2026, 11, 10, 10, 0, tzinfo=IST),
+        )
+
+
 def test_fetch_symbol_bundle_reuses_bulk_quote_and_can_skip_daily_history():
     kite = FakeKite()
     client = KiteMarketData(

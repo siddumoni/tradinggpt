@@ -87,6 +87,8 @@ class PaperBroker:
         self.max_daily_loss = float(max_daily_loss)
         self.max_open_positions = int(max_open_positions)
         self.slippage_bps = float(slippage_bps)
+        if float(minimum_net_rr) < 1.5:
+            raise ValueError("minimum_net_rr must be at least 1.5")
         self.minimum_net_rr = float(minimum_net_rr)
         self.exit_policy = exit_policy or load_exit_policy()
         self.max_entry_quote_age_seconds = float(max_entry_quote_age_seconds)

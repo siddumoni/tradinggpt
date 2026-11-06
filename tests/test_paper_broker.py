@@ -221,3 +221,10 @@ def test_manual_close_rejects_unknown_position(tmp_path):
     broker = PaperBroker(tmp_path / "paper.sqlite3")
     with pytest.raises(ValueError, match="not found"):
         broker.close_position(999)
+
+
+def test_paper_broker_refuses_minimum_net_rr_below_1_5(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="minimum_net_rr must be at least 1.5"):
+        PaperBroker(tmp_path / "paper.sqlite3", minimum_net_rr=1.4)

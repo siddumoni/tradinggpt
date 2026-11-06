@@ -60,6 +60,7 @@ def _candidate_id(candidate: dict[str, Any]) -> str:
     except (TypeError, ValueError, OverflowError):
         canonical_signal_time = raw_signal_time
     parts = (
+        METHOD_VERSION,
         str(candidate.get("symbol") or "").strip().upper(),
         str(candidate.get("side") or "").strip().upper(),
         str(candidate.get("strategy") or "").strip().lower(),
@@ -68,11 +69,18 @@ def _candidate_id(candidate: dict[str, Any]) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
 
 
+def _is_net_rr_rejection(value: Any) -> bool:
+    return bool(RR_REASON_PATTERN.search(str(value or "")))
+
+
 def _reason(candidate: dict[str, Any]) -> str:
+    validation = candidate.get("entry_validation")
+    if isinstance(validation, dict) and _is_net_rr_rejection(validation.get("reason")):
+        return str(validation.get("reason"))
     reasons = candidate.get("reasons")
     if not isinstance(reasons, list):
         return ""
-    return next((str(value) for value in reasons if RR_REASON in str(value).lower()), "")
+    return next((str(value) for value in reasons if _is_net_rr_rejection(value)), "")
 
 
 class CandidateOutcomeTracker:
@@ -176,7 +184,7 @@ class CandidateOutcomeTracker:
             return "Scanner live-entry validation did not pass."
         if str(validation.get("status") or "").upper() != "REJECTED_NET_RR":
             return "Scanner rejection was not exclusively the minimum net-R:R gate."
-        if RR_REASON not in str(validation.get("reason") or "").lower():
+        if not _is_net_rr_rejection(validation.get("reason")):
             return "Scanner entry-validation reason does not confirm the minimum net-R:R gate."
         if not validation.get("quote_timestamp"):
             return "Scanner entry-validation quote timestamp is missing."
@@ -362,6 +370,8 @@ class CandidateOutcomeTracker:
             minimum_net_risk_reward=MIN_ENTRY_RR, require_margin_verification=False,
             skip_if_margin_unavailable=False, slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist=base.entry_cutoff_ist, square_off_time_ist=base.square_off_time_ist,
+            minimum_net_rr_target=base.minimum_net_rr_target,
+            stop_gap_buffer_bps=base.stop_gap_buffer_bps,
         )
         try:
             assessment = assess_trade(

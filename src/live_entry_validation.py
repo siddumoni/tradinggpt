@@ -144,6 +144,7 @@ def revalidate_candidate_at_quote(
         now=now,
         max_age_minutes=max_quote_age_minutes,
     )
+    prior_validation = dict(getattr(candidate, "entry_validation", {}) or {})
     reasons = [
         reason for reason in candidate.reasons
         if not any(token in reason for token in (
@@ -162,6 +163,7 @@ def revalidate_candidate_at_quote(
     def failed(status: str, reason: str, *, verified: bool | None = None) -> Any:
         reasons.append(reason)
         validation = {
+            **prior_validation,
             **details,
             "status": status,
             "reason": reason,
@@ -287,6 +289,7 @@ def revalidate_candidate_at_quote(
 
     reasons.append(reason)
     validation = {
+        **prior_validation,
         **details,
         "status": status,
         "reason": reason,

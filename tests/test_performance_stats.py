@@ -37,3 +37,11 @@ def test_promotion_inconclusive_for_small_sample_and_promote_only_all_checks_pas
     assert result["decision"] in {"PROMOTE","INCONCLUSIVE"}
     config["thresholds"]["minimum_trades"]=100
     assert evaluate_promotion(stats,config)["decision"]=="INCONCLUSIVE"
+
+def test_profit_factor_handles_no_losses_without_nonfinite_json_values():
+    trades=sample_trades()
+    trades["gross_pnl"]=[100,80,60,40,30,20]
+    trades["exit"]=100+trades["gross_pnl"]/10
+    stats=calculate_statistics(trades,bootstrap_resamples=1000)
+    assert stats["profit_factor"] is None
+    assert stats["profit_factor_status"]=="infinite_no_losses"

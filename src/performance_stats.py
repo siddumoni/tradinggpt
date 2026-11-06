@@ -131,7 +131,7 @@ def calculate_statistics(trades: pd.DataFrame, *, initial_capital: float = 20_00
         "expectancy_ci_95_inr": {"lower": ci_low, "upper": ci_high, "method": "session-block percentile bootstrap", "resamples": int(bootstrap_resamples), "seed": int(seed)},
         "win_rate_pct": float((net > 0).mean()*100),
         "profit_factor": None if pf is None or not math.isfinite(pf) else float(pf),
-        "profit_factor_status": "infinite_no_losses" if math.isinf(pf) else "not_available" if pf is None else "finite",
+        "profit_factor_status": "infinite_no_losses" if pf is not None and math.isinf(pf) else "not_available" if pf is None else "finite",
         "max_realized_drawdown_inr": max_dd,
         "max_realized_drawdown_pct": max_dd_pct,
         "max_losing_streak": _max_losing_streak(net),

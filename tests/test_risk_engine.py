@@ -178,6 +178,11 @@ def test_named_account_profiles_resolve_expected_risk_budgets():
     assert paper["max_portfolio_risk_inr"] == 1500
     assert (live_advisory["capital_inr"], live_advisory["risk_per_trade_inr"]) == (20000, 200)
     assert all(profile["advisory_only"] is True for profile in (research, paper, live_advisory))
+    from src.risk_engine import load_phase2_settings
+    paper_risk, _ = load_phase2_settings(profile="paper")
+    assert paper_risk.capital_inr == 100000
+    assert paper_risk.risk_per_trade_inr == 500
+    assert paper_risk.minimum_net_risk_reward == 1.5
 
 
 def test_profile_settings_override_legacy_account_and_cli_can_override_profile(tmp_path):

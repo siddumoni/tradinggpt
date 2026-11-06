@@ -431,53 +431,107 @@ def evaluate_symbol_bundle(
         idx = completed_candles(candles_to_frame(index_15m_candles), 15, current) if index_15m_candles is not None else pd.DataFrame(columns=OHLCV)
     except (ValueError, TypeError) as exc:
         reasons.append(f"Invalid candle data: {exc}")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=None,
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
 
     if not _is_market_session(current):
         reasons.append("Outside normal NSE cash-market hours or weekend; no current intraday recommendation.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=None,
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     try:
         cutoff = dtime.fromisoformat(settings.entry_cutoff_ist)
     except (TypeError, ValueError):
         reasons.append("Configured no-new-entry cutoff is invalid; entry evaluation fails closed.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=None,
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     if current.time() >= cutoff:
         reasons.append(
             f"No new entries are evaluated at or after {settings.entry_cutoff_ist} IST."
         )
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=None,
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
 
     if c5.empty or c15.empty:
         reasons.append("No completed 5-minute and 15-minute candles are available.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", None, None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=None,
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     age = _latest_candle_age_minutes(c5, current, 5)
     if age is None or age > max_candle_age_minutes:
         reasons.append(f"Latest completed 5-minute candle is stale ({age if age is not None else 'unknown'} minutes old).")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, "UNKNOWN", str(c5.index[-1]), None, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=str(c5.index[-1]),
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
 
     market_safety_validation: dict[str, Any] = {}
     if data_verified_live:
@@ -498,16 +552,21 @@ def evaluate_symbol_bundle(
         if not circuit_check.get("eligible"):
             reason = str(circuit_check.get("reason") or "Circuit-limit safety check failed.")
             reasons.append(f"Circuit-limit safety gate: {reason}")
-            return ScanCandidate(
-                symbol, "NO_TRADE", None, None, 0, "UNKNOWN", str(c5.index[-1]),
-                None, None, None, None, 0, None, None, None, False,
-                data_verified_live, news_status, news_risk, reasons,
-                market_context_status=market_context_status,
-                market_context_risk=market_context_risk,
-                company_headline_match_status=company_headline_match_status,
-                company_specific_risk=company_specific_risk,
-                entry_validation={"status": "REJECTED_CIRCUIT_LIMIT", **market_safety_validation},
-            )
+            return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=str(c5.index[-1]),
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
+            market_context_status=market_context_status,
+            market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status,
+            company_specific_risk=company_specific_risk,
+            entry_validation={"status": "REJECTED_CIRCUIT_LIMIT", **market_safety_validation},
+        )
 
         try:
             historical_5m = candles_to_frame(bundle.get("candles_5m_history", []))
@@ -528,16 +587,21 @@ def evaluate_symbol_bundle(
         if not relative_volume.get("eligible"):
             reason = str(relative_volume.get("reason") or "Relative volume did not pass its minimum threshold.")
             reasons.append(f"Time-of-day relative-volume gate: {reason}")
-            return ScanCandidate(
-                symbol, "NO_TRADE", None, None, 0, "UNKNOWN", str(c5.index[-1]),
-                None, None, None, None, 0, None, None, None, False,
-                data_verified_live, news_status, news_risk, reasons,
-                market_context_status=market_context_status,
-                market_context_risk=market_context_risk,
-                company_headline_match_status=company_headline_match_status,
-                company_specific_risk=company_specific_risk,
-                entry_validation={"status": "REJECTED_RELATIVE_VOLUME", **market_safety_validation},
-            )
+            return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime="UNKNOWN",
+            signal_time=str(c5.index[-1]),
+            reference_entry=None,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
+            market_context_status=market_context_status,
+            market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status,
+            company_specific_risk=company_specific_risk,
+            entry_validation={"status": "REJECTED_RELATIVE_VOLUME", **market_safety_validation},
+        )
         reasons.append(
             f"Time-of-day relative volume passed at {relative_volume['ratio']:.2f}x "
             f"the prior-session median ({relative_volume['sessions_used']} sessions)."
@@ -559,11 +623,20 @@ def evaluate_symbol_bundle(
     close = float(latest["close"])
     if not isfinite(atr) or atr <= 0:
         reasons.append("ATR warm-up is incomplete or invalid; no levels generated.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
 
     strategy_diagnostics: list[str] = []
     strategy_results = [
@@ -575,41 +648,86 @@ def evaluate_symbol_bundle(
     if not signals:
         reasons.extend(strategy_diagnostics)
         reasons.append("No strategy produced a valid setup on the latest completed candle.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     sides = {s.side for s in signals}
     if stock_regime == "UNKNOWN":
         reasons.append("Not enough completed 15-minute candles for higher-timeframe confirmation.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     if stock_regime == "CHOPPY":
         reasons.append("15-minute stock trend is mixed; setup suppressed to avoid forcing a trade.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     if len(sides) > 1:
         reasons.append("Strategies disagree on direction; candidate suppressed rather than forcing a trade.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     signal = sorted(signals, key=lambda s: s.confidence, reverse=True)[0]
     if (signal.side == "LONG" and stock_regime != "BULLISH") or (signal.side == "SHORT" and stock_regime != "BEARISH"):
         reasons.append(f"5-minute {signal.side} setup conflicts with the 15-minute stock trend ({stock_regime}); no trade.")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
             market_context_status=market_context_status,
             market_context_risk=market_context_risk,
             company_headline_match_status=company_headline_match_status,
-            company_specific_risk=company_specific_risk)
+            company_specific_risk=company_specific_risk,
+        )
     reasons.append(signal.reason)
     if len(signals) > 1:
         reasons.append(f"{len(signals)} strategies agreed on {signal.side}; strongest-confidence strategy selected.")
@@ -623,9 +741,20 @@ def evaluate_symbol_bundle(
         reasons.append(f"Structural stop: {stop_plan.reference} at ₹{stop_plan.stop_loss:.2f} ({stop_plan.distance_pct:.2f}% from entry).")
     except (ValueError, TypeError) as exc:
         reasons.append(f"Structural stop validation failed; no trade: {exc}")
-        return ScanCandidate(symbol, "NO_TRADE", None, None, 0, regime, str(ind5.index[-1]), close, None, None, None, 0, None, None, None, False, data_verified_live, news_status, news_risk, reasons,
-            market_context_status=market_context_status, market_context_risk=market_context_risk,
-            company_headline_match_status=company_headline_match_status, company_specific_risk=company_specific_risk)
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
+            market_context_status=market_context_status,
+            market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status,
+            company_specific_risk=company_specific_risk,
+        )
     spread_slippage, spread_status = spread_slippage_bps_per_side(bundle.get("quote"), floor_bps_per_side=settings.slippage_bps_per_side)
     settings = replace(settings, slippage_bps_per_side=spread_slippage)
     reasons.append(f"Execution-cost model: {spread_status}; estimated slippage {spread_slippage:.2f} bps per side (5 bps configured floor).")

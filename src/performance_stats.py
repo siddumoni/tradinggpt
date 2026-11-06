@@ -18,17 +18,23 @@ def _timestamp(value: Any, label: str) -> pd.Timestamp:
         raise ValueError(f"{label} contains a missing timestamp")
     return stamp.tz_localize(IST) if stamp.tzinfo is None else stamp.tz_convert(IST)
 
-def load_trades(path: Path, *, track: str | None = None, strategy_version: str | None = None) -> pd.DataFrame:
+def load_trades(paths: Path | list[Path], *, track: str | None = None, strategy_version: str | None = None) -> pd.DataFrame:
     """Load portfolio replay details or native daily paper-report trade exports.
 
     Native daily reports contain multiple isolated tracks. They must be selected
     explicitly; challenger exports with multiple strategy versions require a
     second explicit selector to prevent accidental pooling.
     """
-    try:
-        frame = pd.read_csv(path)
-    except (OSError, pd.errors.ParserError) as exc:
-        raise ValueError(f"Cannot read trade details {path}: {exc}") from exc
+    selected_paths = [paths] if isinstance(paths, Path) else list(paths)
+    if not selected_paths:
+        raise ValueError("provide at least one trade-detail file")
+    frames = []
+    for path in selected_paths:
+        try:
+            frames.append(pd.read_csv(path))
+        except (OSError, pd.errors.ParserError) as exc:
+            raise ValueError(f"Cannot read trade details {path}: {exc}") from exc
+    frame = pd.concat(frames, ignore_index=True, sort=False)
     selected_track = None
     selected_version = None
     if "track" in frame.columns:
@@ -258,12 +264,12 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
     lines += ["", "No actual fills or future returns are implied. This report is a historical research diagnostic.", ""]
     return "\n".join(lines)
 
-def analyze_file(input_path: Path, *, output_stem: Path, promotion_config: Path, results_doc: Path, initial_capital: float=20_000.0, slippage_bps: float=8.0, bootstrap_resamples: int=10_000, seed: int=42, track: str | None=None, strategy_version: str | None=None) -> tuple[dict[str,Any],dict[str,Any]]:
+def analyze_file(input_path: Path | list[Path], *, output_stem: Path, promotion_config: Path, results_doc: Path, initial_capital: float=20_000.0, slippage_bps: float=8.0, bootstrap_resamples: int=10_000, seed: int=42, track: str | None=None, strategy_version: str | None=None) -> tuple[dict[str,Any],dict[str,Any]]:
     trades=load_trades(input_path,track=track,strategy_version=strategy_version)
     stats=calculate_statistics(trades,initial_capital=initial_capital,slippage_bps=slippage_bps,bootstrap_resamples=bootstrap_resamples,seed=seed)
     promotion=evaluate_promotion(stats,load_promotion_config(promotion_config))
     output_stem.parent.mkdir(parents=True,exist_ok=True)
-    payload={"statistics":stats,"promotion":promotion,"source_file":input_path.name,"selected_track":trades.attrs.get("selected_track"),"selected_strategy_version":trades.attrs.get("selected_strategy_version")}
+    payload={"statistics":stats,"promotion":promotion,"source_files":[p.name for p in ([input_path] if isinstance(input_path,Path) else input_path)],"selected_track":trades.attrs.get("selected_track"),"selected_strategy_version":trades.attrs.get("selected_strategy_version")}
     output_stem.with_suffix(".json").write_text(json.dumps(payload,indent=2,allow_nan=False),encoding="utf-8")
     markdown=render_markdown(stats,promotion)
     output_stem.with_suffix(".md").write_text(markdown,encoding="utf-8")
@@ -277,7 +283,7 @@ def analyze_file(input_path: Path, *, output_stem: Path, promotion_config: Path,
 
 def main() -> None:
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trades",type=Path,required=True,help="One shared-capital portfolio *_trade_details.csv file.")
+    parser.add_argument("--trades",type=Path,nargs="+",required=True,help="One or more shared-capital trade-detail or daily paper-report CSV files.")
     parser.add_argument("--output",type=Path,default=Path("reports/performance/validation"))
     parser.add_argument("--results-doc",type=Path,default=Path("docs/RESULTS.md"))
     parser.add_argument("--promotion-config",type=Path,default=Path("config/promotion.yaml"))

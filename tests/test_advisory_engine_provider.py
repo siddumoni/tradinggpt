@@ -327,7 +327,10 @@ def test_nse_equity_universe_requires_kite_provider():
             universe_mode="nse_equity",
         )
 
-def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=13.99, quote_ask=14.01):
+def _run_directional_kite_scan(
+    monkeypatch, tmp_path, margin_result, quote_bid=13.99, quote_ask=14.01,
+    upper_circuit_limit=18.0,
+):
     """Exercise the real scanner/risk path with deterministic data and a mocked read-only Kite adapter."""
     now = datetime(2026, 10, 26, 11, 0, tzinfo=IST)
     start = datetime(2026, 10, 26, 9, 15, tzinfo=IST)
@@ -398,7 +401,7 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
                     "last_price": 14.0,
                     "timestamp": now,
                     "lower_circuit_limit": 10.0,
-                    "upper_circuit_limit": 18.0,
+                    "upper_circuit_limit": upper_circuit_limit,
                     "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
                 },
                 "candles_5m": candles_5m,
@@ -413,7 +416,7 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
                 "last_price": 14.0,
                 "timestamp": now,
                 "lower_circuit_limit": 10.0,
-                "upper_circuit_limit": 18.0,
+                "upper_circuit_limit": upper_circuit_limit,
                 "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
             }}
 
@@ -602,3 +605,36 @@ def test_open_research_symbols_are_archived_outside_selected_universe(monkeypatc
     assert len(saved) == 3
     assert set(saved["provider_mode"]) == {"kite"}
     assert report["candle_archive"]["additional_symbols_requested"] == ["SYRMA"]
+
+
+def test_refreshed_executable_ask_near_circuit_band_is_rejected(monkeypatch, tmp_path):
+    report, calls = _run_directional_kite_scan(
+        monkeypatch,
+        tmp_path,
+        margin_result=15.0,
+        quote_bid=13.99,
+        quote_ask=14.01,
+        upper_circuit_limit=14.08,
+    )
+    candidate = report["candidates"][0]
+    refresh = report["entry_quote_refresh"][0]
+    assert refresh["circuit_limits"]["status"] == "CLEAR"
+    assert refresh["executable_side_circuit_limits"]["status"] == "NEAR_UPPER_CIRCUIT"
+    assert candidate["action"] == "WATCH_CANDIDATE"
+    assert candidate["quantity"] == 0
+    # The second margin estimate is intentionally skipped after the circuit guard fails.
+    assert len(calls["margin"]) == 1
+
+
+def test_advisory_scan_stops_on_nse_equity_holiday(tmp_path):
+    report = advisory_engine.run_scan(
+        symbols=["INFY"],
+        now=datetime(2026, 11, 10, 10, 0, tzinfo=IST),
+        max_symbols=1,
+        output_dir=tmp_path,
+        data_provider="yahoo",
+    )
+    assert report["status"] == "MARKET_CLOSED"
+    assert "EXCHANGE_HOLIDAY" in report["message"]
+    assert report["candidates"] == []
+    assert report["orders_placed_or_modified"] is False

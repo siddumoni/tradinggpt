@@ -18,6 +18,7 @@ from src.paper_strategy_lab import process_archive, open_shadow_symbols
 from src.candidate_outcome_tracker import CandidateOutcomeTracker
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.paper_scan_scheduler import latest_completed_boundary,process_due_boundary,run_scanner_process,_resolve_path
+from src.telegram_alerts import TelegramEventNotifier
 
 IST=ZoneInfo("Asia/Kolkata")
 LOGGER=logging.getLogger("paper_trading_service")
@@ -343,6 +344,8 @@ def main(argv=None)->int:
  reports=_resolve_path(root,a.reports_dir);log_path=_resolve_path(root,a.log_file);_configure_logging(log_path)
  symbols=list(dict.fromkeys(s.strip().upper() for s in a.symbols.split(",") if s.strip()))
  broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions,max_portfolio_risk_inr=a.max_portfolio_risk)
+ telegram_notifier=TelegramEventNotifier(broker.snapshot,state_path=root/"logs"/"telegram_alert_state.json")
+ telegram_notifier.start()
  watch_shadow=WatchShadowPortfolio(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
  candidate_outcomes=CandidateOutcomeTracker(db_path)
  stop=threading.Event();server=None;server_thread=None;reported_dates=set()
@@ -409,6 +412,7 @@ def main(argv=None)->int:
  except KeyboardInterrupt:
   LOGGER.info("Paper service stopped by keyboard interrupt");return 0
  finally:
+  telegram_notifier.stop()
   stop.set()
   if server:server.shutdown();server.server_close()
   if server_thread:server_thread.join(timeout=3)

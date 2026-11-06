@@ -303,3 +303,18 @@ See [docs/PAPER_PORTFOLIO_ALLOCATION.md](docs/PAPER_PORTFOLIO_ALLOCATION.md) for
 At end-of-day report finalization, TradingGPT can automatically upload the daily reports, per-scan JSON files, date-scoped scan/journal diagnostics, date-filtered service log, and date-scoped Kite candle extracts to a dated folder in a **separate private repository**. The uploader refuses public repositories and excludes the SQLite database, credentials, tokens, and files outside the project root. It batches each day into one Git commit and never changes paper-trading or Kite order behavior.
 
 See [Automatic private GitHub research uploads](docs/GITHUB_RESEARCH_UPLOAD.md) for repository setup, least-privilege token permissions, Windows environment variables, folder layout, and troubleshooting. The public source repository is not a permitted data-upload destination.
+
+
+## Optional Telegram paper-trading alerts
+
+Telegram notifications are opt-in and are disabled by default. The integrated paper service can forward simulated Champion-account entry, exit, and planned-risk-overrun events to a Telegram chat. Alerts are informational only; they do not place, modify, or cancel broker orders.
+
+1. Create a bot with Telegram's official `@BotFather` and start a private chat with it.
+2. Copy `.env.example` to `.env`, then set `TELEGRAM_ALERTS_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`.
+3. Keep `.env` local. Never commit the bot token or share it in chat, screenshots, or logs.
+4. Start the integrated paper service as usual. The notifier polls the paper event journal and sends only new `PAPER_ENTRY`, `PAPER_EXIT`, and `RISK_OVERRUN` events.
+5. To disable notifications, set `TELEGRAM_ALERTS_ENABLED=false` and restart the service.
+
+The notifier stores its last processed event ID in `logs/telegram_alert_state.json`, retries failed deliveries on a later poll, and never blocks or changes the paper broker. Delivery is at-least-once, so a rare duplicate is possible if the process stops after Telegram accepts a message but before the local cursor is saved. The first run seeds the cursor at the current event-log head and does not send historical alerts.
+
+Read [the Telegram alert setup and troubleshooting guide](docs/TELEGRAM_ALERTS.md). Alerts are research notifications, not instructions to trade.

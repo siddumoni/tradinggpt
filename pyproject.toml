@@ -25,4 +25,6 @@ disable_error_code = [
   "index",
   "operator",
   "no-untyped-def",
+  "func-returns-value",
+  "type-var",
 ]

@@ -97,6 +97,11 @@ class TelegramEventNotifier:
         events = snapshot.get("events", []) if isinstance(snapshot, dict) else []
         valid = [event for event in events if isinstance(event, dict) and _valid_event_id(event.get("id"))]
         if not valid:
+            if self._cursor is None:
+                # Persist a zero watermark when the database has no events yet,
+                # so the first event created after startup is not mistaken for history.
+                self._cursor = 0
+                self._write_cursor(self._cursor)
             return 0
         ordered = sorted(valid, key=lambda item: int(item["id"]))
         if self._cursor is None:

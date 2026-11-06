@@ -83,3 +83,17 @@ def test_entry_and_exit_alerts_include_direction_from_broker_event_message():
                                  "details": {"net_pnl": 10}})
     assert "TCS · SHORT" in entry
     assert "TCS · SHORT" in exit_message
+
+
+def test_empty_startup_does_not_skip_the_first_future_event(tmp_path):
+    sent = []
+    events = []
+    notifier = TelegramEventNotifier(
+        lambda: {"events": events}, state_path=tmp_path / "cursor.json",
+        enabled=True, token="token", chat_id="chat", sender=lambda msg: sent.append(msg) or True,
+    )
+    assert notifier.poll_once() == 0
+    assert notifier._cursor == 0
+    events.append({"id": 1, "event_type": "PAPER_ENTRY", "symbol": "INFY", "message": "Simulated LONG entry"})
+    assert notifier.poll_once() == 1
+    assert len(sent) == 1

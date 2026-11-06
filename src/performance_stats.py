@@ -110,8 +110,8 @@ def session_block_bootstrap(values: pd.Series, sessions: pd.Series, *, resamples
         raise ValueError("at least 1,000 bootstrap resamples are required")
     grouped = [values[sessions.eq(key)].to_numpy(dtype=float) for key in sorted(sessions.unique())]
     grouped = [x for x in grouped if len(x)]
-    if not grouped:
-        raise ValueError("no sessions available for bootstrap")
+    if len(grouped) < 2:
+        raise ValueError("at least two independent sessions are required for a session-block confidence interval")
     rng = np.random.default_rng(seed)
     draws = np.empty(resamples, dtype=float)
     count = len(grouped)
@@ -150,7 +150,13 @@ def calculate_statistics(trades: pd.DataFrame, *, initial_capital: float = 20_00
     gross_wins = float(wins.sum())
     gross_losses = abs(float(losses.sum()))
     pf = gross_wins/gross_losses if gross_losses else (math.inf if gross_wins else None)
-    ci_low, ci_high = session_block_bootstrap(net, frame.session, resamples=bootstrap_resamples, seed=seed)
+    session_count = int(frame.session.nunique())
+    if session_count >= 2:
+        ci_low, ci_high = session_block_bootstrap(net, frame.session, resamples=bootstrap_resamples, seed=seed)
+        ci_status = "estimated"
+    else:
+        ci_low = ci_high = None
+        ci_status = "not_estimable_fewer_than_two_sessions"
     equity = initial_capital + net.cumsum()
     peaks = equity.cummax().clip(lower=initial_capital)
     drawdown = peaks-equity
@@ -170,7 +176,7 @@ def calculate_statistics(trades: pd.DataFrame, *, initial_capital: float = 20_00
         "slippage_bps_per_side": float(slippage_bps),
         "net_pnl_8bps_inr": float(net.sum()),
         "expectancy_inr_per_trade": float(net.mean()),
-        "expectancy_ci_95_inr": {"lower": ci_low, "upper": ci_high, "method": "session-block percentile bootstrap", "resamples": int(bootstrap_resamples), "seed": int(seed)},
+        "expectancy_ci_95_inr": {"lower": ci_low, "upper": ci_high, "status": ci_status, "method": "session-block percentile bootstrap", "resamples": int(bootstrap_resamples), "seed": int(seed)},
         "win_rate_pct": float((net > 0).mean()*100),
         "profit_factor": None if pf is None or not math.isfinite(pf) else float(pf),
         "profit_factor_status": "infinite_no_losses" if pf is not None and math.isinf(pf) else "not_available" if pf is None else "finite",
@@ -200,7 +206,7 @@ def evaluate_promotion(stats: dict[str, Any], config: dict[str, Any]) -> dict[st
     checks = {
         "minimum_trades": stats["sample"]["trades"] >= required_trades,
         "minimum_sessions": stats["sample"]["sessions"] >= required_sessions,
-        "positive_95pct_expectancy_lower_bound_at_8bps": stats["expectancy_ci_95_inr"]["lower"] > 0,
+        "positive_95pct_expectancy_lower_bound_at_8bps": stats["expectancy_ci_95_inr"]["lower"] is not None and stats["expectancy_ci_95_inr"]["lower"] > 0,
         "minimum_profit_factor_at_8bps": stats["profit_factor_status"] == "infinite_no_losses" or (stats["profit_factor"] is not None and stats["profit_factor"] >= minimum_pf),
         "maximum_symbol_or_session_profit_concentration": max(stats["profit_concentration"]["max_symbol_share"], stats["profit_concentration"]["max_session_share"]) <= max_concentration,
     }
@@ -230,7 +236,7 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         f"- Trading sessions: {sample['sessions']} ({sample['first_session']} to {sample['last_session']})",
         f"- Net P&L: ₹{s['net_pnl_8bps_inr']:.2f}",
         f"- Expectancy: ₹{s['expectancy_inr_per_trade']:.2f} per trade",
-        f"- 95% session-block bootstrap CI: ₹{ci['lower']:.2f} to ₹{ci['upper']:.2f}",
+        f"- 95% session-block bootstrap CI: ₹{ci['lower']:.2f} to ₹{ci['upper']:.2f}" if ci["lower"] is not None else "- 95% session-block bootstrap CI: not estimable (fewer than two sessions)",
         f"- Win rate: {s['win_rate_pct']:.1f}%",
         f"- Profit factor: {pf if isinstance(pf,str) else f'{pf:.2f}'}",
         f"- Maximum realized drawdown: ₹{s['max_realized_drawdown_inr']:.2f} ({s['max_realized_drawdown_pct']:.2f}%)",

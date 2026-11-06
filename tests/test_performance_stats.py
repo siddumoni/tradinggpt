@@ -60,3 +60,13 @@ def test_daily_report_loader_requires_explicit_track_and_strategy_version(tmp_pa
     assert selected.attrs["selected_track"]=="CHAMPION"
     selected=load_trades(path,track="CHALLENGER",strategy_version="challenger_a")
     assert len(selected)==1 and selected.loc[0,"symbol"]=="BBB"
+
+def test_single_session_does_not_claim_a_bootstrap_confidence_interval():
+    trades=sample_trades()
+    trades["entry_time"]="2026-01-05 10:00:00+05:30"
+    trades["exit_time"]="2026-01-05 10:30:00+05:30"
+    stats=calculate_statistics(trades,bootstrap_resamples=1000)
+    assert stats["expectancy_ci_95_inr"]["lower"] is None
+    assert stats["expectancy_ci_95_inr"]["status"]=="not_estimable_fewer_than_two_sessions"
+    config={"thresholds":{"minimum_trades":1,"minimum_sessions":1,"minimum_profit_factor":0,"maximum_symbol_or_session_profit_share":1}}
+    assert evaluate_promotion(stats,config)["checks"]["positive_95pct_expectancy_lower_bound_at_8bps"] is False

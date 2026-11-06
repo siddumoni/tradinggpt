@@ -3,11 +3,43 @@ app:
   timezone: Asia/Kolkata
 
 account:
+  # Legacy fallback retained for older callers/configs.
   capital_inr: 20000
   risk_per_trade_inr: 200
   minimum_net_risk_reward: 1.5
   product: MIS
   advisory_only: true
+
+# Named account profiles. All profiles remain advisory-only; the paper service
+# simulates fills locally and has no real order-placement path.
+profiles:
+  research:
+    capital_inr: 20000
+    risk_per_trade_inr: 200
+    minimum_net_risk_reward: 1.5
+    slippage_bps_per_side: 5
+    max_daily_loss_inr: 600
+    max_open_positions: 1
+    max_portfolio_risk_inr: 200
+    advisory_only: true
+  paper:
+    capital_inr: 100000
+    risk_per_trade_inr: 500
+    minimum_net_risk_reward: 1.5
+    slippage_bps_per_side: 5
+    max_daily_loss_inr: 2000
+    max_open_positions: 3
+    max_portfolio_risk_inr: 1500
+    advisory_only: true
+  live-advisory:
+    capital_inr: 20000
+    risk_per_trade_inr: 200
+    minimum_net_risk_reward: 1.5
+    slippage_bps_per_side: 5
+    max_daily_loss_inr: 600
+    max_open_positions: 1
+    max_portfolio_risk_inr: 200
+    advisory_only: true
 
 schedule:
   market_open: "09:15"

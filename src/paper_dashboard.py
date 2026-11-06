@@ -575,6 +575,9 @@ def make_handler(
             if not (route.startswith(prefix) and route.endswith(suffix)):
                 body = b'{"error":"not found"}'
                 self.send_response(404)
+            elif self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                body = b'{"error":"application/json content type required"}'
+                self.send_response(415)
             else:
                 raw_id = route[len(prefix):-len(suffix)]
                 try:

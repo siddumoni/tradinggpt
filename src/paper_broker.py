@@ -83,7 +83,10 @@ class PaperBroker:
             raise ValueError("max_open_positions must be a positive integer")
         if not math.isfinite(slippage_bps) or not 0 <= slippage_bps <= 100:
             raise ValueError("slippage_bps must be between 0 and 100")
-        if not math.isfinite(float(stop_gap_risk_reserve_pct)) or not 0 <= float(stop_gap_risk_reserve_pct) < 1:
+        if (
+            not math.isfinite(float(stop_gap_risk_reserve_pct))
+            or not 0 <= float(stop_gap_risk_reserve_pct) < 1
+        ):
             raise ValueError("stop_gap_risk_reserve_pct must be in [0, 1)")
         self.db_path = Path(db_path)
         self.initial_capital = float(initial_capital)

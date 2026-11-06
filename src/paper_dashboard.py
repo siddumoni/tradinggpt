@@ -63,6 +63,7 @@ h1{font-size:23px;line-height:1.2;margin:0;font-weight:750;letter-spacing:-.025e
 .section-kicker{font-size:10px;color:var(--accent);font-weight:800;text-transform:uppercase;letter-spacing:.12em;margin-bottom:3px}
 .btn-link{border:1px solid #dfe3f0;background:#fff;color:var(--accent);border-radius:9px;padding:8px 11px;font-size:11px;font-weight:700}
 .btn-link:hover{background:var(--accent-soft);border-color:#c7d2fe}
+.btn-close{border:1px solid #efb6bd;background:#fff0f1;color:#a3293b;border-radius:7px;padding:6px 9px;font-size:10px;font-weight:750}.btn-close:hover{background:#ffe1e4}.btn-close:disabled{opacity:.55;cursor:wait}
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .metric-card,.panel,.track-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 .metric-card{padding:15px 16px;min-width:0}
@@ -218,7 +219,7 @@ td{color:#d5deec;border-bottom-color:#223147}tbody tr:hover td{background:#17263
         <section class="panel"><div class="panel-head"><div><h3>Portfolio risk usage</h3><p>Planned risk reserved by open positions.</p></div><span class="pill blue">Risk controls</span></div><div class="risk-wrap"><div class="risk-labels"><span>Used risk budget</span><strong id="champion-risk-text">—</strong></div><div class="progress"><div class="progress-fill" id="champion-risk-fill"></div></div><div class="helper" id="champion-risk-note">—</div></div><div class="stat-list" id="champion-guardrails"></div></section>
         <section class="panel"><div class="panel-head"><div><h3>Performance summary</h3><p>Calculated from closed Champion trades.</p></div><span class="pill">Closed trades only</span></div><div class="stat-list" id="champion-performance"></div></section>
       </div>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Open positions</h3><p>Both targets and after-cost reward-to-risk ratios. Net RRR includes estimated charges and slippage.</p></div><span class="pill" id="champion-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last price</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th></tr></thead><tbody id="champion-open-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Open positions</h3><p>Both targets and after-cost reward-to-risk ratios. Net RRR includes estimated charges and slippage.</p></div><span class="pill" id="champion-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last price</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Action</th></tr></thead><tbody id="champion-open-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Champion trade history</h3><p>Completed trades from the main virtual account. Net P&amp;L is after estimated charges and slippage.</p></div><input class="search" type="search" placeholder="Search history…" aria-label="Search Champion history" data-filter-for="champion-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Stock</th><th>Strategy</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="champion-history-rows"></tbody></table></div></section>
     </section>
 
@@ -273,6 +274,24 @@ function goTo(name){
   byId("page-description").textContent=PAGE_META[name][1];
 }
 document.addEventListener("click",e=>{const b=e.target.closest("[data-view-target]");if(b)goTo(b.dataset.viewTarget);});
+document.addEventListener("click",async e=>{
+  const button=e.target.closest("[data-close-trade]");
+  if(!button)return;
+  const tradeId=button.dataset.closeTrade;
+  const symbol=button.closest("tr")?.cells?.[0]?.textContent||"this position";
+  if(!window.confirm("Close the "+symbol+" paper position at the latest available quote? Estimated slippage and charges will be applied. This does not place a real order."))return;
+  button.disabled=true;button.textContent="Closing…";
+  try{
+    const response=await fetch("/api/positions/"+encodeURIComponent(tradeId)+"/close",{method:"POST",headers:{"Content-Type":"application/json"}});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error||("HTTP "+response.status));
+    window.alert("Paper position closed: "+result.symbol+" · Exit ₹"+Number(result.exit_fill_price).toFixed(2)+" · Net P&L ₹"+Number(result.net_pnl).toFixed(2)+".");
+    await refresh();
+  }catch(error){
+    window.alert("Could not close paper position: "+error.message+" The position remains open.");
+    button.disabled=false;button.textContent="Close";
+  }
+});
 document.querySelectorAll("[data-filter-for]").forEach(input=>input.addEventListener("input",()=>{
   const body=byId(input.dataset.filterFor);if(!body)return;const q=input.value.trim().toLowerCase();
   Array.from(body.rows).forEach(row=>{row.hidden=!!q&&!row.textContent.toLowerCase().includes(q);});
@@ -369,7 +388,8 @@ function render(s){
     {key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},{value:x=>fmtMoney(x.entry_fill_price)},
     {value:x=>fmtMoney(x.last_price)},{value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)},
     {value:x=>fmtMoney(x.stop_loss)},{value:x=>fmtMoney(x.target_1)},{value:x=>fmtMoney(x.target_2)},
-    {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)}
+    {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)},
+    {render:(td,x)=>{const button=document.createElement("button");button.type="button";button.className="btn-close";button.dataset.closeTrade=String(x.id);button.textContent="Close";button.setAttribute("aria-label","Manually close "+safeText(x.symbol)+" paper position");td.append(button);}}
   ],"No open Champion positions. A position will appear here when a qualifying simulated entry is accepted.");
   renderTable("champion-history-rows",closed,[
     {value:x=>fmtTime(x.exit_time)},{key:"symbol"},{key:"strategy"},{render:sideCell},{value:x=>fmtNum(x.quantity)},
@@ -544,6 +564,33 @@ def make_handler(
                 status = 404
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            route = urlparse(self.path).path
+            prefix = "/api/positions/"
+            suffix = "/close"
+            if not (route.startswith(prefix) and route.endswith(suffix)):
+                body = b'{"error":"not found"}'
+                self.send_response(404)
+            else:
+                raw_id = route[len(prefix):-len(suffix)]
+                try:
+                    if not raw_id.isdigit():
+                        raise ValueError("Invalid paper position ID.")
+                    result = broker.close_position(int(raw_id))
+                    body = json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+                    self.send_response(200)
+                except ValueError as exc:
+                    body = json.dumps({"error": str(exc)}, ensure_ascii=False).encode("utf-8")
+                    self.send_response(409)
+                except Exception as exc:
+                    body = json.dumps({"error": f"Manual paper exit failed: {type(exc).__name__}"}).encode("utf-8")
+                    self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

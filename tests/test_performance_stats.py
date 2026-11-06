@@ -1,7 +1,7 @@
 import math
 import pandas as pd
 import pytest
-from src.performance_stats import calculate_statistics, evaluate_promotion, session_block_bootstrap
+from src.performance_stats import calculate_statistics, evaluate_promotion, load_trades, session_block_bootstrap
 
 def sample_trades():
     rows=[]
@@ -45,3 +45,18 @@ def test_profit_factor_handles_no_losses_without_nonfinite_json_values():
     stats=calculate_statistics(trades,bootstrap_resamples=1000)
     assert stats["profit_factor"] is None
     assert stats["profit_factor_status"]=="infinite_no_losses"
+
+def test_daily_report_loader_requires_explicit_track_and_strategy_version(tmp_path):
+    path=tmp_path/"daily_trades.csv"
+    pd.DataFrame([
+        {"track":"CHAMPION","strategy_version":"champion_v1","status":"CLOSED","symbol":"AAA","side":"LONG","entry_time":"2026-01-01 10:00+05:30","exit_time":"2026-01-01 10:30+05:30","entry_fill_price":100,"exit_fill_price":101,"quantity":2,"gross_pnl":2,"transaction_charges":1},
+        {"track":"CHALLENGER","strategy_version":"challenger_a","status":"CLOSED","symbol":"BBB","side":"LONG","entry_time":"2026-01-01 10:00+05:30","exit_time":"2026-01-01 10:30+05:30","entry_fill_price":100,"exit_fill_price":102,"quantity":2,"gross_pnl":4,"transaction_charges":1},
+        {"track":"CHALLENGER","strategy_version":"challenger_b","status":"PENDING_ENTRY","symbol":"CCC","side":"LONG","entry_time":"2026-01-01 10:00+05:30","exit_time":"2026-01-01 10:30+05:30","entry_fill_price":100,"exit_fill_price":102,"quantity":2,"gross_pnl":4,"transaction_charges":1},
+    ]).to_csv(path,index=False)
+    with pytest.raises(ValueError,match="multiple tracks"): load_trades(path)
+    with pytest.raises(ValueError,match="multiple strategy versions"): load_trades(path,track="CHALLENGER")
+    selected=load_trades(path,track="CHAMPION")
+    assert len(selected)==1 and selected.loc[0,"entry"]==100
+    assert selected.attrs["selected_track"]=="CHAMPION"
+    selected=load_trades(path,track="CHALLENGER",strategy_version="challenger_a")
+    assert len(selected)==1 and selected.loc[0,"symbol"]=="BBB"

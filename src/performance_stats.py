@@ -18,18 +18,60 @@ def _timestamp(value: Any, label: str) -> pd.Timestamp:
         raise ValueError(f"{label} contains a missing timestamp")
     return stamp.tz_localize(IST) if stamp.tzinfo is None else stamp.tz_convert(IST)
 
-def load_trades(path: Path) -> pd.DataFrame:
+def load_trades(path: Path, *, track: str | None = None, strategy_version: str | None = None) -> pd.DataFrame:
+    """Load portfolio replay details or native daily paper-report trade exports.
+
+    Native daily reports contain multiple isolated tracks. They must be selected
+    explicitly; challenger exports with multiple strategy versions require a
+    second explicit selector to prevent accidental pooling.
+    """
     try:
         frame = pd.read_csv(path)
     except (OSError, pd.errors.ParserError) as exc:
         raise ValueError(f"Cannot read trade details {path}: {exc}") from exc
-    missing = REQUIRED.difference(frame.columns)
-    if missing:
-        raise ValueError(f"Trade details missing required columns: {sorted(missing)}")
+    selected_track = None
+    selected_version = None
+    if "track" in frame.columns:
+        available_tracks = sorted(frame["track"].dropna().astype(str).str.strip().unique())
+        if track is None:
+            if len(available_tracks) != 1:
+                raise ValueError(f"Daily paper report contains multiple tracks {available_tracks}; supply --track explicitly")
+            selected_track = available_tracks[0]
+        else:
+            selected_track = track.strip().upper()
+        frame = frame.loc[frame["track"].astype(str).str.strip().str.upper() == selected_track.upper()].copy()
+        if frame.empty:
+            raise ValueError(f"No rows found for track {selected_track!r}")
+    elif track is not None:
+        raise ValueError("--track can only be used with a daily paper-report CSV containing a track column")
+    if "strategy_version" in frame.columns:
+        versions = sorted(frame["strategy_version"].fillna("").astype(str).str.strip().unique())
+        if strategy_version is None:
+            nonblank = [v for v in versions if v]
+            if len(nonblank) > 1:
+                raise ValueError(f"Selected track contains multiple strategy versions {nonblank}; supply --strategy-version")
+            selected_version = nonblank[0] if nonblank else ""
+        else:
+            selected_version = strategy_version.strip()
+        if selected_version:
+            frame = frame.loc[frame["strategy_version"].fillna("").astype(str).str.strip() == selected_version].copy()
+            if frame.empty:
+                raise ValueError(f"No rows found for strategy version {selected_version!r}")
+    elif strategy_version is not None:
+        raise ValueError("--strategy-version requires a daily paper-report CSV containing strategy_version")
+    if "status" in frame.columns:
+        frame = frame.loc[frame["status"].astype(str).str.strip().str.upper() == "CLOSED"].copy()
+    if "entry_fill_price" in frame.columns and "entry" not in frame.columns:
+        frame = frame.rename(columns={"entry_fill_price": "entry"})
+    if "exit_fill_price" in frame.columns and "exit" not in frame.columns:
+        frame = frame.rename(columns={"exit_fill_price": "exit"})
     if "accepted" in frame:
         accepted = frame["accepted"].astype(str).str.strip().str.casefold().isin({"true", "1", "yes"})
         frame = frame.loc[accepted].copy()
-    return frame.reset_index(drop=True)
+    frame = frame.reset_index(drop=True)
+    frame.attrs["selected_track"] = selected_track
+    frame.attrs["selected_strategy_version"] = selected_version
+    return frame
 
 def _prepare_trades(trades: pd.DataFrame, *, slippage_bps: float) -> pd.DataFrame:
     missing = REQUIRED.difference(trades.columns)
@@ -210,12 +252,12 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
     lines += ["", "No actual fills or future returns are implied. This report is a historical research diagnostic.", ""]
     return "\n".join(lines)
 
-def analyze_file(input_path: Path, *, output_stem: Path, promotion_config: Path, results_doc: Path, initial_capital: float=20_000.0, slippage_bps: float=8.0, bootstrap_resamples: int=10_000, seed: int=42) -> tuple[dict[str,Any],dict[str,Any]]:
-    trades=load_trades(input_path)
+def analyze_file(input_path: Path, *, output_stem: Path, promotion_config: Path, results_doc: Path, initial_capital: float=20_000.0, slippage_bps: float=8.0, bootstrap_resamples: int=10_000, seed: int=42, track: str | None=None, strategy_version: str | None=None) -> tuple[dict[str,Any],dict[str,Any]]:
+    trades=load_trades(input_path,track=track,strategy_version=strategy_version)
     stats=calculate_statistics(trades,initial_capital=initial_capital,slippage_bps=slippage_bps,bootstrap_resamples=bootstrap_resamples,seed=seed)
     promotion=evaluate_promotion(stats,load_promotion_config(promotion_config))
     output_stem.parent.mkdir(parents=True,exist_ok=True)
-    payload={"statistics":stats,"promotion":promotion,"source_file":input_path.name}
+    payload={"statistics":stats,"promotion":promotion,"source_file":input_path.name,"selected_track":trades.attrs.get("selected_track"),"selected_strategy_version":trades.attrs.get("selected_strategy_version")}
     output_stem.with_suffix(".json").write_text(json.dumps(payload,indent=2,allow_nan=False),encoding="utf-8")
     markdown=render_markdown(stats,promotion)
     output_stem.with_suffix(".md").write_text(markdown,encoding="utf-8")
@@ -237,9 +279,11 @@ def main() -> None:
     parser.add_argument("--slippage-bps",type=float,default=8.0)
     parser.add_argument("--bootstrap-resamples",type=int,default=10_000)
     parser.add_argument("--seed",type=int,default=42)
+    parser.add_argument("--track",type=str,default=None,help="Required when a daily paper-report CSV contains multiple tracks (e.g. CHAMPION).")
+    parser.add_argument("--strategy-version",type=str,default=None,help="Required when the selected track contains multiple strategy versions.")
     args=parser.parse_args()
     try:
-        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed)
+        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version)
     except (ValueError,OSError) as exc:
         parser.error(str(exc))
 if __name__=="__main__": main()

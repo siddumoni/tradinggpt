@@ -179,6 +179,12 @@ def _base_result(row: pd.Series, *, candle_path: Path | None) -> dict[str, Any]:
         "slippage_cost": None,
         "total_estimated_costs": None,
         "net_pnl": None,
+        "mae_points": None,
+        "mfe_points": None,
+        "mae_inr": None,
+        "mfe_inr": None,
+        "mae_r": None,
+        "mfe_r": None,
         "exit_reason": "",
         "risk_filter_reason": "",
         "entry_gate_accepted": None,
@@ -378,6 +384,8 @@ def evaluate_signal(
     exit_price: float | None = None
     exit_ts: pd.Timestamp | None = None
     exit_reason = ""
+    max_adverse_points = 0.0
+    max_favorable_points = 0.0
     status = ""
     note = ""
     quantity = int(assessment.quantity)
@@ -389,6 +397,14 @@ def evaluate_signal(
             note = f"Missing expected 5-minute candle after {last_seen.isoformat()}; outcome is not scored across the gap."
             break
         bar_end = stamp + pd.Timedelta(minutes=BAR_MINUTES)
+        bar_high = float(bar["high"])
+        bar_low = float(bar["low"])
+        if side == "LONG":
+            max_adverse_points = max(max_adverse_points, entry_price - bar_low)
+            max_favorable_points = max(max_favorable_points, bar_high - entry_price)
+        else:
+            max_adverse_points = max(max_adverse_points, bar_high - entry_price)
+            max_favorable_points = max(max_favorable_points, entry_price - bar_low)
         decision = evaluate_ohlc_exit(
             side=side, stop_loss=stop, target_2=target_2,
             open_price=float(bar["open"]), high=float(bar["high"]),
@@ -444,6 +460,12 @@ def evaluate_signal(
         "slippage_cost": slippage_cost,
         "total_estimated_costs": total_costs,
         "net_pnl": net,
+        "mae_points": max(0.0, max_adverse_points),
+        "mfe_points": max(0.0, max_favorable_points),
+        "mae_inr": max(0.0, max_adverse_points) * quantity,
+        "mfe_inr": max(0.0, max_favorable_points) * quantity,
+        "mae_r": max(0.0, max_adverse_points) / abs(entry_price - stop),
+        "mfe_r": max(0.0, max_favorable_points) / abs(entry_price - stop),
         "exit_reason": exit_reason,
     })
     return result
@@ -510,11 +532,11 @@ def evaluate_journal(
         completed = outcomes.loc[outcomes["outcome_status"] == "COMPLETED_RESEARCH_ONLY"].copy()
     else:
         completed = pd.DataFrame()
-    portfolio_columns = ["symbol", "side", "entry_time", "exit_time", "entry", "exit", "stop_loss", "quantity", "gross_pnl", "exit_reason", "signal_id", "strategy"]
+    portfolio_columns = ["symbol", "side", "entry_time", "exit_time", "entry", "exit", "stop_loss", "quantity", "gross_pnl", "mae_points", "mfe_points", "mae_inr", "mfe_inr", "mae_r", "mfe_r", "exit_reason", "signal_id", "strategy"]
     if not completed.empty:
         portfolio = completed[[
             "symbol", "side", "entry_time", "exit_time", "fill_entry", "fill_exit",
-            "stop_loss", "evaluated_quantity", "gross_pnl", "exit_reason", "signal_id", "strategy",
+            "stop_loss", "evaluated_quantity", "gross_pnl", "mae_points", "mfe_points", "mae_inr", "mfe_inr", "mae_r", "mfe_r", "exit_reason", "signal_id", "strategy",
         ]].rename(columns={
             "fill_entry": "entry",
             "fill_exit": "exit",

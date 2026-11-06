@@ -242,6 +242,16 @@ python -m src.portfolio_replay --trades reports/backtests/RELIANCE_vwap_trend_tr
 
 The replay records accepted/rejected candidates, allocated quantity, reserved capital, estimated costs and net P&L. It replays saved trades rather than regenerating signals, so it is an allocation diagnostic—not a full portfolio backtest. See [the portfolio replay guide](docs/PORTFOLIO_REPLAY.md).
 
+## Statistical validation and promotion
+
+After running a shared-capital portfolio replay, evaluate its accepted trade-detail CSV:
+
+```powershell
+python -m src.performance_stats --trades reports/backtests/portfolio_replay_trade_details.csv --initial-capital 20000
+```
+
+This produces a 10,000-resample session-block bootstrap expectancy interval at 8 bps per-side slippage, net performance metrics, realized drawdown, losing streak, MAE/MFE when recorded, hour buckets, and symbol/session profit concentration. Promotion criteria are fixed in `config/promotion.yaml`. A PROMOTE decision only advances the strategy to another research-validation stage; it is not live-trading approval. See [the statistical validation guide](docs/PERFORMANCE_STATS.md) and [the current results](docs/RESULTS.md).
+
 ## Isolate slippage cost from trade selection
 
 The ordinary multi-stock sensitivity runner reruns the strategy for each slippage assumption; the minimum-net-R:R rule can therefore change the accepted trade set. To price the **same saved trades** at multiple slippage values, use the frozen-trade-set repricer:

@@ -305,6 +305,14 @@ class PaperBroker:
                float(assessment.quantity)*entry_fill,assessment.net_risk_inr,
                str(candidate.get("market_regime") or "UNKNOWN"),entry_reason,now.isoformat()))
         except sqlite3.IntegrityError as exc: raise _RejectedSignal("Duplicate signal already processed.") from exc
+        # Preserve the verified entry snapshot as the initial liquidation mark.
+        # A later live tick will replace it; manual exits still require a fresh mark.
+        received_at=datetime.now(IST)
+        db.execute("""INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at)
+          VALUES(?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
+          last_price=excluded.last_price,bid=excluded.bid,ask=excluded.ask,
+          market_time=excluded.market_time,received_at=excluded.received_at""",
+          (symbol,last,bid,ask,to_ist(qtime).isoformat(),received_at.isoformat()))
         self._event(db,"PAPER_ENTRY",f"Simulated {side} entry: {assessment.quantity} {symbol} @ ₹{entry_fill:.2f}.",
             symbol=symbol,details={"signal_id":signal_id,"strategy":strategy,"strategy_version":"champion_v1",
             "quantity":int(assessment.quantity),"entry_reference_price":entry_reference,"entry_fill_price":entry_fill,

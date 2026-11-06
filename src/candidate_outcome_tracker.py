@@ -124,7 +124,7 @@ class CandidateOutcomeTracker:
                     gst REAL, stamp_duty REAL, ipft REAL, transaction_charges REAL,
                     slippage_cost REAL, total_estimated_costs REAL, net_pnl REAL,
                     source_rejection_reason TEXT NOT NULL, exclusion_reason TEXT,
-                    method_version TEXT NOT NULL DEFAULT 'availability_aware_v2',
+                    method_version TEXT NOT NULL DEFAULT 'availability_aware_v3',
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_candidate_outcome_status

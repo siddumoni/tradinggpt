@@ -160,6 +160,7 @@ def run_scan(
             "orders_placed_or_modified": False,
         }
 
+    market_safety_settings = load_market_safety_settings()
     provider_name = str(data_provider).strip().lower()
     if provider_name not in {"yahoo", "kite"}:
         raise ValueError("data_provider must be 'yahoo' or 'kite'")
@@ -220,7 +221,7 @@ def run_scan(
                     min_current_day_volume=universe_min_current_day_volume,
                     min_current_day_turnover_inr=universe_min_current_day_turnover_inr,
                     max_quote_age_minutes=universe_max_quote_age_minutes,
-                    circuit_limit_buffer_pct=load_market_safety_settings().circuit_near_band_buffer_pct,
+                    circuit_limit_buffer_pct=market_safety_settings.circuit_near_band_buffer_pct,
                 )
                 selected = [
                     str(row.get("tradingsymbol", "")).strip().upper()
@@ -282,9 +283,14 @@ def run_scan(
                         now=current,
                         quote_data=universe_quotes.get(symbol),
                         include_daily_candles=False,
+                        relative_volume_lookback_days=market_safety_settings.relative_volume_lookback_calendar_days,
                     )
                 else:
-                    bundle = provider.fetch_symbol_bundle(instrument, now=current)
+                    bundle = provider.fetch_symbol_bundle(
+                        instrument,
+                        now=current,
+                        relative_volume_lookback_days=market_safety_settings.relative_volume_lookback_calendar_days,
+                    )
                 # In universe mode, the bulk quote is reused rather than issuing
                 # another per-symbol quote call. For live scans, verify freshness
                 # against the observation time immediately after the bulk quote request.
@@ -337,7 +343,8 @@ def run_scan(
                 continue
             try:
                 archive_bundle = provider.fetch_symbol_bundle(
-                    instrument, now=current, include_daily_candles=False
+                    instrument, now=current, include_daily_candles=False,
+                    include_relative_volume_history=False,
                 )
                 archived = append_completed_candles(
                     symbol, archive_bundle.get("candles_5m", []), candle_archive_dir,
@@ -505,7 +512,7 @@ def run_scan(
 
             circuit_check = inspect_circuit_limits(
                 latest_quote,
-                buffer_pct=load_market_safety_settings().circuit_near_band_buffer_pct,
+                buffer_pct=market_safety_settings.circuit_near_band_buffer_pct,
             )
             audit["circuit_limits"] = circuit_check
             if not circuit_check.get("eligible"):
@@ -529,6 +536,26 @@ def run_scan(
             if not executable.get("valid"):
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["reason"] = executable.get("reason")
+                entry_quote_refresh_checks.append(audit)
+                continue
+
+            executable_side_circuit = inspect_circuit_limits(
+                {
+                    **latest_quote,
+                    "last_price": executable["executable_entry_price"],
+                },
+                buffer_pct=market_safety_settings.circuit_near_band_buffer_pct,
+            )
+            audit["executable_side_circuit_limits"] = executable_side_circuit
+            if not executable_side_circuit.get("eligible"):
+                bundle["verified_live_data"] = False
+                bundle["data_quality_warning"] = (
+                    "Executable bid/ask is at or near an exchange circuit band: "
+                    + str(executable_side_circuit.get("reason") or executable_side_circuit.get("status"))
+                )
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                audit["verified"] = False
+                audit["reason"] = bundle["data_quality_warning"]
                 entry_quote_refresh_checks.append(audit)
                 continue
 

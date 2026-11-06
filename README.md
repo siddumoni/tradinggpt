@@ -44,7 +44,7 @@ python -m src.advisory_engine --profile live-advisory --provider kite --symbols 
 python -m src.paper_trading_service --profile paper
 
 # CLI flags override the selected profile without editing YAML
-python -m src.paper_trading_service --profile paper --account-capital 125000 --risk-per-trade 600 --daily-loss-limit 2500 --max-open-positions 4 --max-portfolio-risk 1800 --minimum-net-rr 1.8
+python -m src.paper_trading_service --profile paper --account-capital 125000 --risk-per-trade 600 --daily-loss-limit 2500 --max-open-positions 4 --max-portfolio-risk 1800 --minimum-net-rr 1.8 --slippage-bps-per-side 6
 ```
 
 The paper service refuses to silently reuse a SQLite account initialized with a different starting capital. Select the matching profile or supply a separate `--db-path`; it never resets existing paper history automatically. Every scan report records the selected profile and effective risk settings.

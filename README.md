@@ -289,6 +289,12 @@ Yahoo Finance is an unofficial data source, is not endorsed by Yahoo, and is int
 
 Transaction-charge rates are configurable estimates. Verify the current broker/exchange charges and applicable statutory levies before relying on net P&L estimates.
 
+## Phase 4 market-safety gates
+
+Live Kite candidates also pass an NSE equity calendar, circuit-band and time-of-day relative-volume checks. The 2026 holiday calendar is in `config/nse_equity_calendar.yaml` and fails closed beyond its verified coverage. Both exchange circuit limits must be present; prices within 0.5% of either band are blocked, including a final check against the executable bid/ask. Relative volume compares completed current-session 5-minute cumulative volume with the median same-time prefix from up to 20 prior complete sessions; at least 10 sessions and 1.0x are required by default. Missing or incomplete history is rejected rather than imputed.
+
+The existing MIS margin call remains read-only and is required for a conditional advisory. These safeguards do not relax the minimum 1.5 after-cost net R:R or any existing quote, risk, news or paper-broker checks. See [the NSE scanner guide](docs/NSE_UNIVERSE_SCANNER.md) for the configuration and limitations.
+
 ## Development principles
 
 1. Preserve advisory-only behavior—no order placement, modification, or cancellation.

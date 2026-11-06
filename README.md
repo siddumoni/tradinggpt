@@ -59,7 +59,7 @@ $env:TRADINGGPT_USE_KEYRING = "true"
 python -m src.main login
 ```
 
-When keyring mode is enabled, the JSON cache stores token metadata only; the access token itself is stored in the OS keyring. If keyring is unavailable, login fails rather than silently falling back to plaintext. Existing file-based caches continue to work when the option is disabled. Keep `TRADINGGPT_USE_KEYRING` enabled consistently for login and service runs.
+When keyring mode is enabled, the JSON cache stores token metadata only; the access token itself is stored in the OS keyring. If keyring is unavailable, login fails rather than silently falling back to plaintext. Existing file-based caches continue to work. A cache marked as keyring-backed is always read from the OS keyring (and therefore still requires the optional package), regardless of the current environment flag; the flag controls where newly saved tokens are written.
 
 ## Requirements
 

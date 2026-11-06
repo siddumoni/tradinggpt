@@ -44,6 +44,12 @@ class TelegramEventNotifier:
             raise ValueError("poll_interval and timeout must be positive")
         self.snapshot_provider = snapshot_provider
         self.state_path = Path(state_path)
+        # Load the same project-local .env file as the Kite authentication flow.
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=False)
+        except ImportError:
+            pass
         self.enabled = _env_bool(os.getenv("TELEGRAM_ALERTS_ENABLED", "false")) if enabled is None else enabled
         self.token = token if token is not None else os.getenv("TELEGRAM_BOT_TOKEN", "")
         self.chat_id = chat_id if chat_id is not None else os.getenv("TELEGRAM_CHAT_ID", "")
@@ -69,6 +75,11 @@ class TelegramEventNotifier:
         if self._thread and self._thread.is_alive():
             return True
         self._stop.clear()
+        if self._cursor is None:
+            try:
+                self.poll_once()  # Seed synchronously before the first scan can create new events.
+            except Exception:
+                LOGGER.exception("Could not seed Telegram event cursor; notifier will retry.")
         self._thread = threading.Thread(target=self._run, daemon=True, name="telegram-advisory-alerts")
         self._thread.start()
         LOGGER.info("Telegram advisory alert worker started.")

@@ -42,7 +42,7 @@ def test_failed_delivery_does_not_advance_cursor_and_is_retried(tmp_path):
     notifier = TelegramEventNotifier(
         lambda: {"events": events}, state_path=tmp_path / "cursor.json",
         enabled=True, token="token", chat_id="chat",
-        sender=lambda msg: attempts.append(msg) and len(attempts) > 1,
+        sender=lambda msg: (attempts.append(msg), len(attempts) > 1)[1],
     )
     notifier._cursor = 4
     assert notifier.poll_once() == 0
@@ -73,3 +73,13 @@ def test_unsupported_event_type_is_rejected():
     import pytest
     with pytest.raises(ValueError, match="Unsupported"):
         format_event({"event_type": "SCAN_PROCESSED"})
+
+
+def test_entry_and_exit_alerts_include_direction_from_broker_event_message():
+    entry = format_event({"event_type": "PAPER_ENTRY", "symbol": "TCS",
+                          "message": "Simulated SHORT entry: 2 TCS @ ₹100.", "details": {}})
+    exit_message = format_event({"event_type": "PAPER_EXIT", "symbol": "TCS",
+                                 "message": "Simulated SHORT exit: 2 TCS @ ₹95; net P&L ₹10.",
+                                 "details": {"net_pnl": 10}})
+    assert "TCS · SHORT" in entry
+    assert "TCS · SHORT" in exit_message

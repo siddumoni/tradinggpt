@@ -155,6 +155,7 @@ def run_scan(
         return {
             "status": "MARKET_CLOSED",
             "as_of": current.isoformat(),
+            "account_profile": account_profile,
             "message": session_message,
             "market_calendar": market_day_status(current.date()),
             "candidates": [],

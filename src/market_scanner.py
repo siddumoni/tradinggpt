@@ -26,6 +26,12 @@ from src.exit_policy import plan_policy_levels
 from src.execution_model import build_structural_stop, session_aware_atr, spread_slippage_bps_per_side
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
+from src.market_calendar import is_regular_market_session
+from src.market_safety import (
+    inspect_circuit_limits,
+    load_market_safety_settings,
+    time_of_day_relative_volume,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 OHLCV = ["open", "high", "low", "close", "volume"]
@@ -198,8 +204,7 @@ def completed_candles(frame: pd.DataFrame, interval_minutes: int, now: datetime)
 
 
 def _is_market_session(now: datetime) -> bool:
-    current = now.astimezone(IST) if now.tzinfo else now.replace(tzinfo=IST)
-    return current.weekday() < 5 and dtime(9, 15) <= current.time() <= dtime(15, 30)
+    return is_regular_market_session(now)
 
 
 def _stock_15m_regime(frame: pd.DataFrame) -> str:
@@ -428,6 +433,71 @@ def evaluate_symbol_bundle(
             company_headline_match_status=company_headline_match_status,
             company_specific_risk=company_specific_risk)
 
+    market_safety_validation: dict[str, Any] = {}
+    if data_verified_live:
+        try:
+            safety_settings = load_market_safety_settings()
+            circuit_check = inspect_circuit_limits(
+                bundle.get("quote"),
+                buffer_pct=safety_settings.circuit_near_band_buffer_pct,
+            )
+        except (TypeError, ValueError, OSError) as exc:
+            circuit_check = {
+                "eligible": False,
+                "status": "CIRCUIT_CHECK_FAILED",
+                "reason": f"Circuit-limit validation could not run: {exc}",
+            }
+            safety_settings = load_market_safety_settings()
+        market_safety_validation["circuit_limits"] = circuit_check
+        if not circuit_check.get("eligible"):
+            reason = str(circuit_check.get("reason") or "Circuit-limit safety check failed.")
+            reasons.append(f"Circuit-limit safety gate: {reason}")
+            return ScanCandidate(
+                symbol, "NO_TRADE", None, None, 0, "UNKNOWN", str(c5.index[-1]),
+                None, None, None, None, 0, None, None, None, False,
+                data_verified_live, news_status, news_risk, reasons,
+                market_context_status=market_context_status,
+                market_context_risk=market_context_risk,
+                company_headline_match_status=company_headline_match_status,
+                company_specific_risk=company_specific_risk,
+                entry_validation={"status": "REJECTED_CIRCUIT_LIMIT", **market_safety_validation},
+            )
+
+        try:
+            historical_5m = candles_to_frame(bundle.get("candles_5m_history", []))
+            relative_volume = time_of_day_relative_volume(
+                c5,
+                historical_5m,
+                lookback_sessions=safety_settings.relative_volume_lookback_sessions,
+                minimum_valid_sessions=safety_settings.relative_volume_minimum_valid_sessions,
+                minimum_ratio=safety_settings.relative_volume_minimum_ratio,
+            )
+        except (ValueError, TypeError) as exc:
+            relative_volume = {
+                "eligible": False,
+                "status": "RELATIVE_VOLUME_DATA_INVALID",
+                "reason": f"Relative-volume input failed validation: {exc}",
+            }
+        market_safety_validation["relative_volume"] = relative_volume
+        if not relative_volume.get("eligible"):
+            reason = str(relative_volume.get("reason") or "Relative volume did not pass its minimum threshold.")
+            reasons.append(f"Time-of-day relative-volume gate: {reason}")
+            return ScanCandidate(
+                symbol, "NO_TRADE", None, None, 0, "UNKNOWN", str(c5.index[-1]),
+                None, None, None, None, 0, None, None, None, False,
+                data_verified_live, news_status, news_risk, reasons,
+                market_context_status=market_context_status,
+                market_context_risk=market_context_risk,
+                company_headline_match_status=company_headline_match_status,
+                company_specific_risk=company_specific_risk,
+                entry_validation={"status": "REJECTED_RELATIVE_VOLUME", **market_safety_validation},
+            )
+        reasons.append(
+            f"Time-of-day relative volume passed at {relative_volume['ratio']:.2f}x "
+            f"the prior-session median ({relative_volume['sessions_used']} sessions)."
+        )
+        market_safety_validation["status"] = "PRELIMINARY_MARKET_SAFETY_PASSED"
+
     ind5 = add_scanner_indicators(c5)
     ind15 = add_scanner_indicators(c15)
     ind5['atr_session_14'] = session_aware_atr(ind5, 14)
@@ -579,6 +649,7 @@ def evaluate_symbol_bundle(
         market_context_risk=market_context_risk,
         company_headline_match_status=company_headline_match_status,
         company_specific_risk=company_specific_risk,
+        entry_validation=market_safety_validation,
     )
 
 

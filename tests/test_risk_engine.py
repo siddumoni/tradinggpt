@@ -162,3 +162,54 @@ def test_net_reward_risk_helper_matches_assess_trade_calculation() -> None:
     assert metrics["net_rr_t1"] == pytest.approx(assessment.net_rr_t1)
     assert metrics["net_rr_t2"] == pytest.approx(assessment.net_rr_t2)
     assert metrics["net_risk_inr"] == pytest.approx(assessment.net_risk_inr)
+
+
+def test_named_account_profiles_resolve_expected_risk_budgets():
+    from src.risk_engine import load_account_profile
+
+    research = load_account_profile("research")
+    paper = load_account_profile("paper")
+    live_advisory = load_account_profile("live-advisory")
+
+    assert (research["capital_inr"], research["risk_per_trade_inr"]) == (20000, 200)
+    assert (paper["capital_inr"], paper["risk_per_trade_inr"]) == (100000, 500)
+    assert paper["max_daily_loss_inr"] == 2000
+    assert paper["max_open_positions"] == 3
+    assert paper["max_portfolio_risk_inr"] == 1500
+    assert (live_advisory["capital_inr"], live_advisory["risk_per_trade_inr"]) == (20000, 200)
+    assert all(profile["advisory_only"] is True for profile in (research, paper, live_advisory))
+
+
+def test_profile_settings_override_legacy_account_and_cli_can_override_profile(tmp_path):
+    import yaml
+    from src.risk_engine import load_account_profile
+
+    path = tmp_path / "settings.yaml"
+    path.write_text(
+        yaml.safe_dump({
+            "account": {"capital_inr": 20000, "risk_per_trade_inr": 200, "minimum_net_risk_reward": 1.5},
+            "profiles": {
+                "paper": {
+                    "capital_inr": 125000,
+                    "risk_per_trade_inr": 600,
+                    "minimum_net_risk_reward": 1.8,
+                    "max_daily_loss_inr": 2500,
+                    "max_open_positions": 4,
+                }
+            },
+        }),
+        encoding="utf-8",
+    )
+    profile = load_account_profile("paper", path)
+    assert profile["capital_inr"] == 125000
+    assert profile["risk_per_trade_inr"] == 600
+    assert profile["minimum_net_risk_reward"] == 1.8
+    assert profile["max_daily_loss_inr"] == 2500
+    assert profile["max_open_positions"] == 4
+
+
+def test_unknown_account_profile_fails_closed():
+    from src.risk_engine import load_account_profile
+
+    with pytest.raises(ValueError, match="profile must be"):
+        load_account_profile("live")

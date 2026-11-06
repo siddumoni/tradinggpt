@@ -159,8 +159,8 @@ def assess_trade(
         raise ValueError("capital, risk, net R:R, and slippage settings must be finite")
     if settings.capital_inr <= 0 or settings.risk_per_trade_inr <= 0:
         raise ValueError("capital and risk_per_trade_inr must be positive")
-    if settings.minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be positive")
+    if settings.minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward must be at least 1.5")
     if settings.minimum_stop_distance_pct <= 0:
         raise ValueError("minimum_stop_distance_pct must be positive")
     if settings.minimum_net_rr_target not in ("target_1", "target_2"):
@@ -301,6 +301,8 @@ def load_account_profile(
             value = float(resolved.get(key, 0))
             if not isfinite(value) or value <= 0:
                 raise ValueError(f"profile {name!r} requires a finite positive {key}")
+            if key == "minimum_net_risk_reward" and value < 1.5:
+                raise ValueError(f"profile {name!r} minimum_net_risk_reward cannot be below 1.5")
             resolved[key] = value
         for key in ("max_daily_loss_inr", "max_portfolio_risk_inr"):
             if key in resolved:

@@ -25,7 +25,7 @@ from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_ledger, append_scan_report
 from src.candle_archive import append_completed_candles
 from src.live_entry_validation import inspect_executable_quote, revalidate_candidate_at_quote
-from src.market_calendar import market_session_message
+from src.market_calendar import market_day_status, market_session_message
 from src.market_safety import inspect_circuit_limits, load_market_safety_settings
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -154,6 +154,7 @@ def run_scan(
             "status": "MARKET_CLOSED",
             "as_of": current.isoformat(),
             "message": session_message,
+            "market_calendar": market_day_status(current.date()),
             "candidates": [],
             "news": {"items": [], "errors": []},
             "advisory_only": True,
@@ -635,6 +636,8 @@ def run_scan(
             "require_margin_verification": risk_settings.require_margin_verification,
         },
         "universe_selection": universe_selection,
+        "market_calendar": market_day_status(current.date()),
+        "market_safety_settings": asdict(market_safety_settings),
         "symbols_requested": selected,
         "entry_quote_refresh": entry_quote_refresh_checks,
         "entry_quote_refresh_errors": entry_quote_refresh_errors,

@@ -349,6 +349,52 @@ def _news_for_symbol(symbol: str, news_items: list[dict[str, Any]]) -> tuple[str
     return status, aggregate, reasons
 
 
+def _no_trade_candidate(
+    symbol: str,
+    reasons: list[str],
+    *,
+    market_regime: str = "UNKNOWN",
+    signal_time: str | None = None,
+    reference_entry: float | None = None,
+    data_verified_live: bool = False,
+    news_status: str = "NOT_CHECKED",
+    news_risk: str = "UNKNOWN",
+    market_context_status: str = "UNKNOWN",
+    market_context_risk: str = "UNKNOWN",
+    company_headline_match_status: str = "UNKNOWN",
+    company_specific_risk: str = "UNKNOWN",
+    entry_validation: dict[str, Any] | None = None,
+) -> ScanCandidate:
+    """Build a consistent zero-quantity NO_TRADE result for every early-exit gate."""
+    return ScanCandidate(
+        symbol=symbol,
+        action="NO_TRADE",
+        side=None,
+        strategy=None,
+        confidence=0,
+        market_regime=market_regime,
+        signal_time=signal_time,
+        reference_entry=reference_entry,
+        stop_loss=None,
+        target_1=None,
+        target_2=None,
+        quantity=0,
+        estimated_net_risk_inr=None,
+        estimated_net_reward_t1_inr=None,
+        net_rr_t1=None,
+        margin_verified=False,
+        data_verified_live=data_verified_live,
+        news_status=news_status,
+        news_risk=news_risk,
+        reasons=reasons,
+        market_context_status=market_context_status,
+        market_context_risk=market_context_risk,
+        company_headline_match_status=company_headline_match_status,
+        company_specific_risk=company_specific_risk,
+        entry_validation=entry_validation or {},
+    )
+
+
 def evaluate_symbol_bundle(
     symbol: str,
     bundle: dict[str, Any],

@@ -19,6 +19,7 @@ from src.candidate_outcome_tracker import CandidateOutcomeTracker
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.paper_scan_scheduler import latest_completed_boundary,process_due_boundary,run_scanner_process,_resolve_path
 from src.telegram_alerts import TelegramEventNotifier
+from src.risk_engine import load_account_profile, load_phase2_settings
 
 IST=ZoneInfo("Asia/Kolkata")
 LOGGER=logging.getLogger("paper_trading_service")
@@ -328,13 +329,26 @@ def main(argv=None)->int:
  p.add_argument("--db-path",type=Path,default=DEFAULT_DB);p.add_argument("--log-file",type=Path,default=Path("logs/paper_trading_service.log"))
  p.add_argument("--reports-dir",type=Path,default=Path("reports"))
  p.add_argument("--dashboard-host",choices=("127.0.0.1","localhost"),default="127.0.0.1");p.add_argument("--dashboard-port",type=int,default=8000)
- p.add_argument("--account-capital",type=float,default=100000);p.add_argument("--risk-per-trade",type=float,default=500)
- p.add_argument("--daily-loss-limit",type=float,default=2000);p.add_argument("--max-open-positions",type=int,default=3)
- p.add_argument("--max-portfolio-risk",type=float,default=None,help="Maximum combined planned stop-out risk across open champion positions; defaults to risk-per-trade × max-open-positions.")
+ p.add_argument("--profile",choices=("research","paper","live-advisory"),default="paper",help="Named account profile; explicit risk flags override profile values")
+ p.add_argument("--account-capital",type=float,default=None);p.add_argument("--risk-per-trade",type=float,default=None)
+ p.add_argument("--daily-loss-limit",type=float,default=None);p.add_argument("--max-open-positions",type=int,default=None)
+ p.add_argument("--max-portfolio-risk",type=float,default=None,help="Maximum combined planned stop-out risk across open Champion positions")
+ p.add_argument("--minimum-net-rr",type=float,default=None);p.add_argument("--slippage-bps-per-side",type=float,default=None)
  a=p.parse_args(argv)
+ profile=load_account_profile(a.profile)
+ profile_risk,_=load_phase2_settings(profile=a.profile)
+ account_capital=a.account_capital if a.account_capital is not None else float(profile["capital_inr"])
+ risk_per_trade=a.risk_per_trade if a.risk_per_trade is not None else float(profile["risk_per_trade_inr"])
+ daily_loss_limit=a.daily_loss_limit if a.daily_loss_limit is not None else float(profile.get("max_daily_loss_inr",2000.0))
+ max_open_positions=a.max_open_positions if a.max_open_positions is not None else int(profile.get("max_open_positions",3))
+ max_portfolio_risk=a.max_portfolio_risk if a.max_portfolio_risk is not None else profile.get("max_portfolio_risk_inr")
+ minimum_net_rr=a.minimum_net_rr if a.minimum_net_rr is not None else profile_risk.minimum_net_risk_reward
+ slippage_bps=a.slippage_bps_per_side if a.slippage_bps_per_side is not None else profile_risk.slippage_bps_per_side
  if a.poll_seconds<=0 or a.grace_seconds<0 or a.max_lateness_seconds<a.grace_seconds or a.scan_timeout_seconds<=0:p.error("Invalid scheduler timing configuration")
- if a.account_capital<=0 or a.risk_per_trade<=0 or a.daily_loss_limit<=0 or a.max_open_positions<1:p.error("Capital and risk limits must be positive")
- if a.max_portfolio_risk is not None and a.max_portfolio_risk<=0:p.error("--max-portfolio-risk must be positive")
+ if any(not math.isfinite(float(v)) or float(v)<=0 for v in (account_capital,risk_per_trade,daily_loss_limit,minimum_net_rr)):p.error("Capital and risk limits must be finite and positive")
+ if max_open_positions<1:p.error("--max-open-positions must be positive")
+ if max_portfolio_risk is not None and (not math.isfinite(float(max_portfolio_risk)) or float(max_portfolio_risk)<=0):p.error("--max-portfolio-risk must be finite and positive")
+ if not math.isfinite(float(slippage_bps)) or not 0<=slippage_bps<=100:p.error("--slippage-bps-per-side must be between 0 and 100")
  if a.universe_max_symbols<1:p.error("--universe-max-symbols must be at least 1")
  if a.universe_max_quote_age_minutes<=0 or a.paper_entry_max_quote_age_minutes<=0:p.error("Quote age limits must be positive")
  if a.universe=="watchlist" and (not a.symbols.strip() or not all(s.strip() for s in a.symbols.split(","))):p.error("--symbols must contain comma-separated non-empty symbols in watchlist mode")
@@ -343,10 +357,13 @@ def main(argv=None)->int:
  scan_state=_resolve_path(root,a.scan_state_file);daily_state=_resolve_path(root,a.daily_state_file);db_path=_resolve_path(root,a.db_path)
  reports=_resolve_path(root,a.reports_dir);log_path=_resolve_path(root,a.log_file);_configure_logging(log_path)
  symbols=list(dict.fromkeys(s.strip().upper() for s in a.symbols.split(",") if s.strip()))
- broker=PaperBroker(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions,max_portfolio_risk_inr=a.max_portfolio_risk)
+ broker=PaperBroker(db_path,initial_capital=account_capital,risk_per_trade=risk_per_trade,max_daily_loss=daily_loss_limit,max_open_positions=max_open_positions,max_portfolio_risk_inr=max_portfolio_risk,minimum_net_rr=minimum_net_rr,slippage_bps=slippage_bps)
+ actual_capital=float(broker.snapshot()["account"]["starting_capital"])
+ if abs(actual_capital-account_capital)>0.01:
+  raise ValueError(f"Paper database was initialized with INR {actual_capital:.2f}, but profile {a.profile!r} requests INR {account_capital:.2f}. Use the matching profile or a separate --db-path; existing paper history is never reset automatically.")
  telegram_notifier=TelegramEventNotifier(broker.snapshot,state_path=root/"logs"/"telegram_alert_state.json")
  telegram_notifier.start()
- watch_shadow=WatchShadowPortfolio(db_path,initial_capital=a.account_capital,risk_per_trade=a.risk_per_trade,max_daily_loss=a.daily_loss_limit,max_open_positions=a.max_open_positions)
+ watch_shadow=WatchShadowPortfolio(db_path,initial_capital=account_capital,risk_per_trade=risk_per_trade,max_daily_loss=daily_loss_limit,max_open_positions=max_open_positions)
  candidate_outcomes=CandidateOutcomeTracker(db_path)
  stop=threading.Event();server=None;server_thread=None;reported_dates=set()
  try:
@@ -355,7 +372,7 @@ def main(argv=None)->int:
   server_thread.start();LOGGER.info("Local dashboard listening at http://%s:%s",a.dashboard_host,a.dashboard_port)
  except OSError:LOGGER.exception("Dashboard could not bind; scan service continues but dashboard is unavailable")
  tick_thread=threading.Thread(target=_ticker_thread,args=(broker,watch_shadow,symbols,stop),kwargs={"universe_mode":a.universe},daemon=True,name="kite-tick-monitor");tick_thread.start()
- LOGGER.info("Paper service started: capital=%.2f risk/trade=%.2f portfolio-risk-cap=%.2f daily-loss=%.2f max-positions=%s universe=%s top_n=%s",a.account_capital,a.risk_per_trade,broker.max_portfolio_risk_inr,a.daily_loss_limit,a.max_open_positions,a.universe,a.universe_max_symbols)
+ LOGGER.info("Paper service started: profile=%s capital=%.2f risk/trade=%.2f min-net-RR=%.2f portfolio-risk-cap=%.2f daily-loss=%.2f max-positions=%s universe=%s top_n=%s",a.profile,account_capital,risk_per_trade,minimum_net_rr,broker.max_portfolio_risk_inr,daily_loss_limit,max_open_positions,a.universe,a.universe_max_symbols)
  LOGGER.info("Paper-only boundary enforced: no real order placement/modification/cancellation.")
  try:
   while True:
@@ -388,7 +405,8 @@ def main(argv=None)->int:
      )
      return run_scanner_process(at,repo_root=root,symbols=a.symbols,paper_journal=journal,scan_ledger=ledger,
       candle_archive_dir=archive,timeout_seconds=a.scan_timeout_seconds,paper_broker=broker,after_report=after_report,
-      archive_symbols=archive_symbols,account_capital=a.account_capital,risk_per_trade=a.risk_per_trade,
+      archive_symbols=archive_symbols,account_capital=account_capital,risk_per_trade=risk_per_trade,
+      account_profile=a.profile,minimum_net_rr=minimum_net_rr,
       universe_mode=a.universe,universe_max_symbols=a.universe_max_symbols,
       universe_min_price=a.universe_min_price,universe_max_price=a.universe_max_price,
       universe_min_volume=a.universe_min_volume,universe_min_turnover=a.universe_min_turnover,

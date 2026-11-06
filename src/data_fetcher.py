@@ -16,6 +16,12 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from src.auth import DEFAULT_TOKEN_CACHE, load_credentials, load_token_cache
+from src.market_calendar import (
+    is_regular_market_session as _is_regular_market_session,
+    market_day_status,
+    market_session_message as _calendar_market_session_message,
+)
+from src.market_safety import inspect_circuit_limits
 
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -90,8 +96,7 @@ def is_nse_cash_equity_instrument(row: dict[str, Any]) -> bool:
 def is_regular_market_hours(now: datetime) -> bool:
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    local = now.astimezone(IST)
-    return (not is_weekend(local.date())) and dtime(9, 15) <= local.time().replace(tzinfo=None) <= dtime(15, 30)
+    return _is_regular_market_session(now)
 
 
 def _retry(operation: Callable[[], Any], *, attempts: int, delay: float, label: str) -> Any:
@@ -264,6 +269,7 @@ class KiteMarketData:
         min_current_day_volume: int = 10000,
         min_current_day_turnover_inr: float = 5000000.0,
         max_quote_age_minutes: float = 15.0,
+        circuit_limit_buffer_pct: float = 0.5,
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, Any]]:
         """Screen the full NSE EQ universe by fresh quotes, then rank by turnover proxy.
 
@@ -281,6 +287,8 @@ class KiteMarketData:
             raise ValueError("Price bounds must be positive and max_price_inr >= min_price_inr")
         if min_current_day_volume < 0 or min_current_day_turnover_inr < 0 or max_quote_age_minutes <= 0:
             raise ValueError("Volume/turnover thresholds must be non-negative and quote age must be positive")
+        if not isfinite(float(circuit_limit_buffer_pct)) or circuit_limit_buffer_pct < 0:
+            raise ValueError("circuit_limit_buffer_pct must be finite and non-negative")
 
         equities: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -357,6 +365,12 @@ class KiteMarketData:
             if not (isfinite(price) and price > 0 and isfinite(average_price) and average_price > 0 and volume >= 0):
                 exclude("QUOTE_FIELDS_INVALID")
                 continue
+            circuit_check = inspect_circuit_limits(
+                quote, buffer_pct=circuit_limit_buffer_pct
+            )
+            if not circuit_check["eligible"]:
+                exclude(str(circuit_check["status"]))
+                continue
             if price < min_price_inr or price > max_price_inr:
                 exclude("PRICE_OUTSIDE_RANGE")
                 continue
@@ -390,6 +404,7 @@ class KiteMarketData:
                 "min_current_day_volume": int(min_current_day_volume),
                 "min_current_day_turnover_inr": float(min_current_day_turnover_inr),
                 "max_quote_age_minutes": float(max_quote_age_minutes),
+                "circuit_limit_buffer_pct": float(circuit_limit_buffer_pct),
             },
             "exclusions": exclusions,
             "selection_metric": "average_price × current-day volume",
@@ -431,11 +446,18 @@ class KiteMarketData:
         *,
         quote_data: dict[str, Any] | None = None,
         include_daily_candles: bool = True,
+        include_relative_volume_history: bool = True,
+        relative_volume_lookback_days: int = 45,
     ) -> dict[str, Any]:
-        """Fetch quote and intraday candles; daily history can be skipped for fast scans."""
+        """Fetch quote/current candles and prior-session 5m history for time-of-day RVOL."""
         current = (now or datetime.now(IST)).astimezone(IST)
-        if is_weekend(current.date()):
-            raise MarketClosedError("Today is a weekend; no NSE cash-market session is expected.")
+        day_status = market_day_status(current.date())
+        if not day_status["is_open"]:
+            raise MarketClosedError(
+                f"Today has no supported normal NSE cash session: {day_status['status']}: {day_status['reason']}"
+            )
+        if relative_volume_lookback_days < 1:
+            raise ValueError("relative_volume_lookback_days must be positive")
         token = instrument.get("instrument_token")
         symbol = str(instrument.get("tradingsymbol", "")).upper()
         if not token or not symbol:
@@ -444,6 +466,19 @@ class KiteMarketData:
         resolved_quote = quote_data if quote_data is not None else self.quotes([symbol]).get(quote_key)
         start_today = datetime.combine(current.date(), dtime(9, 15), tzinfo=IST)
         daily_start = datetime.combine(current.date() - timedelta(days=60), dtime(0, 0), tzinfo=IST)
+        relative_volume_start = datetime.combine(
+            current.date() - timedelta(days=relative_volume_lookback_days), dtime(9, 15), tzinfo=IST
+        )
+        relative_volume_end = datetime.combine(
+            current.date() - timedelta(days=1), dtime(15, 30), tzinfo=IST
+        )
+        relative_volume_history = (
+            self.historical_candles(
+                int(token), relative_volume_start, relative_volume_end, "5minute"
+            )
+            if include_relative_volume_history and relative_volume_start <= relative_volume_end
+            else []
+        )
         return {
             "symbol": symbol,
             "instrument_token": int(token),
@@ -455,6 +490,7 @@ class KiteMarketData:
                 self.historical_candles(int(token), daily_start, current, "day")
                 if include_daily_candles else []
             ),
+            "candles_5m_history": relative_volume_history,
         }
 
 
@@ -572,14 +608,5 @@ class KiteMarketData:
         return amount
 
 def market_session_message(now: datetime | None = None) -> str | None:
-    """Return a graceful notice for weekends or outside normal NSE cash hours.
-
-    Exchange holidays cannot be conclusively identified from weekday/time alone;
-    empty historical candles should be treated as a no-data session, not a signal.
-    """
-    current = (now or datetime.now(IST)).astimezone(IST)
-    if is_weekend(current.date()):
-        return "NSE cash market is normally closed on weekends. No market-data scan was run."
-    if current.time() < dtime(9, 15) or current.time() > dtime(15, 30):
-        return "Outside normal NSE cash-market hours (09:15–15:30 IST). Historical daily data may still be available; intraday signals are not evaluated."
-    return None
+    """Return the calendar-aware normal NSE cash-session status."""
+    return _calendar_market_session_message(now)

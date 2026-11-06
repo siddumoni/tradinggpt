@@ -18,11 +18,12 @@ def test_scanner_command_processes_virtual_broker_and_callback(tmp_path,monkeypa
   def process_scan_report(self,path):captured["processed"].append(path);return {"opened":1,"rejected":0,"neutral":0}
  monkeypatch.setattr(scheduler.subprocess,"run",fake_run)
  boundary=datetime(2026,10,26,10,5,tzinfo=ZoneInfo("Asia/Kolkata"))
- code=scheduler.run_scanner_process(boundary,repo_root=tmp_path,symbols="INFY",paper_journal=tmp_path/"journal.csv",scan_ledger=tmp_path/"ledger.csv",candle_archive_dir=tmp_path/"candles",timeout_seconds=10,paper_broker=Broker(),after_report=lambda path:captured["after"].append(path),account_capital=100000,risk_per_trade=500,account_profile="paper",minimum_net_rr=1.7,archive_symbols=["SYRMA"])
+ code=scheduler.run_scanner_process(boundary,repo_root=tmp_path,symbols="INFY",paper_journal=tmp_path/"journal.csv",scan_ledger=tmp_path/"ledger.csv",candle_archive_dir=tmp_path/"candles",timeout_seconds=10,paper_broker=Broker(),after_report=lambda path:captured["after"].append(path),account_capital=100000,risk_per_trade=500,account_profile="paper",minimum_net_rr=1.7,slippage_bps_per_side=6.5,archive_symbols=["SYRMA"])
  assert code==0 and captured["processed"]==[report] and captured["after"]==[report]
  assert "--profile" in captured["command"] and "paper" in captured["command"]
  assert "--account-capital" in captured["command"] and "100000" in captured["command"]
  assert "--minimum-net-rr" in captured["command"] and "1.7" in captured["command"]
+ assert "--slippage-bps-per-side" in captured["command"] and "6.5" in captured["command"]
  assert "--universe" in captured["command"] and "nse_equity" in captured["command"]
  assert "--universe-max-symbols" in captured["command"] and "50" in captured["command"]
  assert "--archive-symbols" in captured["command"] and "SYRMA" in captured["command"]

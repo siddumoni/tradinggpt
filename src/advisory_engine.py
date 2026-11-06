@@ -269,7 +269,11 @@ def run_scan(
     overrides = {}
     if paper_capital_inr is not None: overrides["capital_inr"] = float(paper_capital_inr)
     if paper_risk_per_trade_inr is not None: overrides["risk_per_trade_inr"] = float(paper_risk_per_trade_inr)
-    if paper_minimum_net_rr is not None: overrides["minimum_net_risk_reward"] = float(paper_minimum_net_rr)
+    if paper_minimum_net_rr is not None:
+        minimum_rr_override = float(paper_minimum_net_rr)
+        if not isfinite(minimum_rr_override) or minimum_rr_override < 1.5:
+            raise ValueError("Minimum after-cost net R:R override cannot be below 1.5")
+        overrides["minimum_net_risk_reward"] = minimum_rr_override
     if any(not isfinite(value) or value <= 0 for value in overrides.values()):
         raise ValueError("Paper capital, risk and net R:R overrides must be finite and positive")
     if paper_slippage_bps_per_side is not None:

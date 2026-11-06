@@ -93,7 +93,10 @@ def test_open_position_daily_pnl_uses_conservative_net_liquidation_mark(tmp_path
   # Write a non-triggering liquidation mark directly: the public tick handler
   # would correctly square off immediately after 15:15.
   db.execute(
-   "INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at) VALUES(?,?,?,?,?,?)",
+   """INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
+      last_price=excluded.last_price,bid=excluded.bid,ask=excluded.ask,
+      market_time=excluded.market_time,received_at=excluded.received_at""",
    ("INFY",101.0,100.95,101.05,now.isoformat(),now.isoformat()),
   )
   trade=db.execute("SELECT * FROM trades WHERE status='OPEN'").fetchone()

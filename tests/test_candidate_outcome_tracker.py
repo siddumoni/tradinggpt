@@ -261,3 +261,10 @@ def test_candidate_rejects_reference_price_outside_levels_before_risk_assessment
     assert "Reference next-bar open" in reason
     assert pnl is None
     assert result["open_or_pending"] == 0
+
+
+def test_candidate_tracker_accepts_target_two_rr_gate(tmp_path):
+    tracker = CandidateOutcomeTracker(tmp_path / "paper.sqlite3")
+    item = candidate("BSE", reasons=["Rejected: Target 2 net R:R is below 1.50."], entry_validation={"valid": True, "status": "REJECTED_NET_RR", "reason": "Rejected: Target 2 net R:R is below 1.50.", "quote_timestamp": "2026-11-03T09:31:00+05:30"})
+    counts = tracker.process_scan_report(write_report(tmp_path, [item]))
+    assert counts == {"seen": 1, "eligible": 1, "excluded": 0, "duplicates": 0}

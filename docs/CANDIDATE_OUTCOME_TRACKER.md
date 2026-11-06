@@ -2,7 +2,7 @@
 
 ## Purpose and separation from the Watch-Shadow portfolio
 
-The integrated paper service keeps an independent, candle-based outcome record for every eligible scanner `WATCH_CANDIDATE` whose only technical/risk rejection is the minimum after-cost Target 1 reward-to-risk gate.
+The integrated paper service keeps an independent, candle-based outcome record for every eligible scanner `WATCH_CANDIDATE` whose only technical/risk rejection is the configured minimum after-cost reward-to-risk gate (Target 2 in the current `config/exit_policy.yaml`).
 
 This tracker is an **independent single-candidate experiment ledger**, not a portfolio. It deliberately does not apply the existing Watch-Shadow portfolio's three-position limit, same-symbol overlap limit, or shared-cash reservation. This reveals how eligible near-miss candidates behaved without allowing portfolio capacity to suppress observations.
 
@@ -12,7 +12,7 @@ That means signals can overlap in time, repeat a symbol, and each use the same f
 
 A candidate is recorded when:
 - the scan report asserts `RESEARCH_SCAN_ONLY`, the provider is Kite, and `orders_placed_or_modified=false`;
-- the action is `WATCH_CANDIDATE` and a reason explicitly identifies the Target 1 net R:R below 1.50 gate;
+- the action is `WATCH_CANDIDATE` and the entry-validation reason explicitly identifies the configured Target 1 or Target 2 net R:R below 1.50 gate;
 - live quote data and read-only MIS margin verification both passed;
 - company-specific risk is not HIGH and RSS/news checks are available;
 - side, signal timestamp, reference close, stop and target levels are valid; and
@@ -38,7 +38,7 @@ The signal is not available merely because its source candle has closed. The tra
 | Stop gap | Worse of stop level or bar open |
 | Target gap | No favorable price improvement |
 
-The 0.01 entry gate is not a strategy-rule change. It permits the ledger to measure candidates which the normal 1.50 scanner gate declined, while still requiring a positive, defensible after-cost reward/risk calculation. The scanner, Champion account, Challenger rules and Watch-Shadow acceptance logic remain unchanged.
+The evaluator uses the same configured gate target as the scanner; its 0.01 entry gate is not a strategy-rule change. It permits the ledger to measure candidates which the normal 1.50 scanner gate declined, while still requiring a positive, defensible after-cost reward/risk calculation. The scanner, Champion account, Challenger rules and Watch-Shadow acceptance logic remain unchanged.
 
 ## Data integrity
 

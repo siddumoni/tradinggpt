@@ -52,6 +52,7 @@ risk:
   skip_if_margin_unavailable: true
   slippage_bps_per_side: 5       # hard minimum assumed slippage per side, in basis points
   minimum_stop_distance_pct: 0.25 # minimum stop distance as % of entry
+  stop_gap_buffer_bps: 5.0 # extra adverse stop-gap reserve, separate from slippage
 
 paths:
   token_cache: .local/kite_token.json

@@ -23,6 +23,7 @@ DEFAULT_RISK_PER_TRADE_INR = 500.0
 DEFAULT_DAILY_LOSS_LIMIT_INR = 2_000.0
 DEFAULT_MAX_OPEN_POSITIONS = 3
 DEFAULT_SLIPPAGE_BPS = 5.0
+DEFAULT_STOP_GAP_RISK_RESERVE_PCT = 0.10
 MAX_ENTRY_QUOTE_AGE_SECONDS = 120.0
 # The configured time exit is sourced from config/exit_policy.yaml.
 
@@ -63,6 +64,7 @@ class PaperBroker:
         max_daily_loss: float = DEFAULT_DAILY_LOSS_LIMIT_INR,
         max_open_positions: int = DEFAULT_MAX_OPEN_POSITIONS,
         slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
+        stop_gap_risk_reserve_pct: float = DEFAULT_STOP_GAP_RISK_RESERVE_PCT,
         minimum_net_rr: float = 1.5,
         max_entry_quote_age_seconds: float = MAX_ENTRY_QUOTE_AGE_SECONDS,
         max_portfolio_risk_inr: float | None = None,
@@ -81,12 +83,18 @@ class PaperBroker:
             raise ValueError("max_open_positions must be a positive integer")
         if not math.isfinite(slippage_bps) or not 0 <= slippage_bps <= 100:
             raise ValueError("slippage_bps must be between 0 and 100")
+        if (
+            not math.isfinite(float(stop_gap_risk_reserve_pct))
+            or not 0 <= float(stop_gap_risk_reserve_pct) < 1
+        ):
+            raise ValueError("stop_gap_risk_reserve_pct must be in [0, 1)")
         self.db_path = Path(db_path)
         self.initial_capital = float(initial_capital)
         self.risk_per_trade = float(risk_per_trade)
         self.max_daily_loss = float(max_daily_loss)
         self.max_open_positions = int(max_open_positions)
         self.slippage_bps = float(slippage_bps)
+        self.stop_gap_risk_reserve_pct = float(stop_gap_risk_reserve_pct)
         if float(minimum_net_rr) < 1.5:
             raise ValueError("minimum_net_rr must be at least 1.5")
         self.minimum_net_rr = float(minimum_net_rr)
@@ -529,10 +537,13 @@ class PaperBroker:
         if remaining_portfolio_risk <= 0:
             raise _RejectedSignal("Aggregate open portfolio-risk limit is fully allocated.")
         allocated_risk_budget = min(self.risk_per_trade, remaining_portfolio_risk)
+        # Reserve 10% of the approved budget for adverse stop gaps beyond the
+        # configured per-side slippage estimate. The budget itself remains unchanged.
+        sizing_risk_budget = allocated_risk_budget * (1.0 - self.stop_gap_risk_reserve_pct)
         _, rates = load_phase2_settings()
         settings = RiskSettings(
             capital_inr=available,
-            risk_per_trade_inr=allocated_risk_budget,
+            risk_per_trade_inr=sizing_risk_budget,
             minimum_net_risk_reward=self.minimum_net_rr,
             require_margin_verification=False,
             skip_if_margin_unavailable=False,
@@ -624,6 +635,8 @@ class PaperBroker:
                 "risk_budget_inr": allocated_risk_budget,
                 "per_trade_risk_limit_inr": self.risk_per_trade,
                 "allocated_risk_budget_inr": allocated_risk_budget,
+                "sizing_risk_budget_inr": sizing_risk_budget,
+                "stop_gap_risk_reserve_pct": self.stop_gap_risk_reserve_pct,
                 "planned_net_risk_inr": assessment.net_risk_inr,
                 "open_portfolio_risk_after_entry_inr": existing_open_risk + assessment.net_risk_inr,
                 "max_portfolio_risk_inr": self.max_portfolio_risk_inr,
@@ -951,6 +964,16 @@ class PaperBroker:
                     "trade_id": trade["id"],
                     "signal_id": trade["signal_id"],
                     "planned_risk_inr": planned_risk,
+                    "planned_net_risk_inr": float(trade["planned_net_risk_inr"] or 0),
+                    "stop_loss": float(trade["stop_loss"]),
+                    "stop_gap_loss_inr": (
+                        max(0.0, float(trade["stop_loss"]) - exit_ref) * qty
+                        if exit_reason == "STOP_LOSS" and side == "LONG"
+                        else max(0.0, exit_ref - float(trade["stop_loss"])) * qty
+                        if exit_reason == "STOP_LOSS" and side == "SHORT"
+                        else 0.0
+                    ),
+                    "stop_gap_risk_reserve_pct": self.stop_gap_risk_reserve_pct,
                     "realized_net_loss_inr": abs(net),
                     "excess_loss_inr": abs(net) - planned_risk,
                     "exit_reason": exit_reason,

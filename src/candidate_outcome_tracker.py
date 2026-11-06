@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from datetime import datetime, time as dtime
 from pathlib import Path
@@ -29,8 +30,8 @@ SLIPPAGE_BPS = 5.0
 MIN_ENTRY_RR = 0.01
 ENTRY_CUTOFF = dtime(14, 45)
 LAST_BAR = dtime(15, 10)
-RR_REASON = "target 1 net r:r is below 1.50"
-METHOD_VERSION = "availability_aware_v2"
+RR_REASON_PATTERN = re.compile(r"rejected:\s*target\s*[12]\s+net\s+r:r\s+is\s+below\s+1\.50", re.IGNORECASE)
+METHOD_VERSION = "availability_aware_v3"
 LEGACY_INVALIDATION_REASON = (
     "Superseded: the legacy evaluator entered from the signal candle without waiting for "
     "scanner publication and also double-counted entry slippage in risk sizing."
@@ -59,6 +60,7 @@ def _candidate_id(candidate: dict[str, Any]) -> str:
     except (TypeError, ValueError, OverflowError):
         canonical_signal_time = raw_signal_time
     parts = (
+        METHOD_VERSION,
         str(candidate.get("symbol") or "").strip().upper(),
         str(candidate.get("side") or "").strip().upper(),
         str(candidate.get("strategy") or "").strip().lower(),
@@ -67,11 +69,15 @@ def _candidate_id(candidate: dict[str, Any]) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
 
 
+def _is_net_rr_rejection(value: Any) -> bool:
+    return bool(RR_REASON_PATTERN.search(str(value or "")))
+
+
 def _reason(candidate: dict[str, Any]) -> str:
     reasons = candidate.get("reasons")
     if not isinstance(reasons, list):
         return ""
-    return next((str(value) for value in reasons if RR_REASON in str(value).lower()), "")
+    return next((str(value) for value in reasons if _is_net_rr_rejection(value)), "")
 
 
 class CandidateOutcomeTracker:
@@ -118,7 +124,7 @@ class CandidateOutcomeTracker:
                     gst REAL, stamp_duty REAL, ipft REAL, transaction_charges REAL,
                     slippage_cost REAL, total_estimated_costs REAL, net_pnl REAL,
                     source_rejection_reason TEXT NOT NULL, exclusion_reason TEXT,
-                    method_version TEXT NOT NULL DEFAULT 'availability_aware_v2',
+                    method_version TEXT NOT NULL DEFAULT 'availability_aware_v3',
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_candidate_outcome_status
@@ -175,7 +181,7 @@ class CandidateOutcomeTracker:
             return "Scanner live-entry validation did not pass."
         if str(validation.get("status") or "").upper() != "REJECTED_NET_RR":
             return "Scanner rejection was not exclusively the minimum net-R:R gate."
-        if RR_REASON not in str(validation.get("reason") or "").lower():
+        if not _is_net_rr_rejection(validation.get("reason")):
             return "Scanner entry-validation reason does not confirm the minimum net-R:R gate."
         if not validation.get("quote_timestamp"):
             return "Scanner entry-validation quote timestamp is missing."
@@ -361,6 +367,7 @@ class CandidateOutcomeTracker:
             minimum_net_risk_reward=MIN_ENTRY_RR, require_margin_verification=False,
             skip_if_margin_unavailable=False, slippage_bps_per_side=self.slippage_bps,
             entry_cutoff_ist=base.entry_cutoff_ist, square_off_time_ist=base.square_off_time_ist,
+            minimum_net_rr_target=base.minimum_net_rr_target,
         )
         try:
             assessment = assess_trade(

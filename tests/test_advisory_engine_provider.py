@@ -52,7 +52,7 @@ def test_kite_provider_uses_authenticated_read_only_client_and_marks_quote_statu
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             captured["instrument"] = instrument
             return {
                 "quote": {"last_price": 1500.0, "timestamp": now},
@@ -101,7 +101,7 @@ def test_kite_provider_skips_symbols_not_in_nse_equity_dump(monkeypatch, tmp_pat
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             raise AssertionError("missing symbols must not trigger a data fetch")
 
     monkeypatch.setattr(
@@ -154,7 +154,7 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             return {
                 "quote": {
                     "last_price": 1500.0,
@@ -227,7 +227,10 @@ def test_nse_equity_universe_uses_bulk_quote_screen_and_selected_instruments(mon
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None, *, quote_data=None, include_daily_candles=True):
+        def fetch_symbol_bundle(
+            self, instrument, now=None, *, quote_data=None, include_daily_candles=True,
+            relative_volume_lookback_days=45, **kwargs,
+        ):
             captured["bundle_args"] = {
                 "symbol": instrument["tradingsymbol"],
                 "quote_data": quote_data,
@@ -394,7 +397,7 @@ def _run_directional_kite_scan(
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return candles_15m
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             assert instrument["tradingsymbol"] == "INFY"
             return {
                 "quote": {
@@ -570,7 +573,10 @@ def test_open_research_symbols_are_archived_outside_selected_universe(monkeypatc
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None, *, include_daily_candles=True):
+        def fetch_symbol_bundle(
+            self, instrument, now=None, *, include_daily_candles=True,
+            relative_volume_lookback_days=45, include_relative_volume_history=True,
+        ):
             symbol = instrument["tradingsymbol"]
             fetched.append((symbol, include_daily_candles))
             candles = []

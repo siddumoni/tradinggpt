@@ -699,6 +699,7 @@ def main(argv=None) -> int:
                         risk_per_trade=risk_per_trade,
                         account_profile=a.profile,
                         minimum_net_rr=minimum_net_rr,
+                        slippage_bps_per_side=slippage_bps,
                         universe_mode=a.universe,
                         universe_max_symbols=a.universe_max_symbols,
                         universe_min_price=a.universe_min_price,

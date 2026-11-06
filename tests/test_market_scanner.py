@@ -299,3 +299,25 @@ def test_live_scanner_requires_time_of_day_relative_volume_history():
     assert result.quantity == 0
     assert result.entry_validation["status"] == "REJECTED_RELATIVE_VOLUME"
     assert result.entry_validation["relative_volume"]["status"] == "HISTORICAL_SESSIONS_MISSING"
+
+
+def test_no_trade_factory_always_returns_zero_quantity_and_preserves_gate_context():
+    from src.market_scanner import _no_trade_candidate
+
+    result = _no_trade_candidate(
+        "reliance",
+        ["Circuit limit gate rejected the quote."],
+        market_regime="BULLISH",
+        signal_time="2026-10-16T11:00:00+05:30",
+        reference_entry=100.0,
+        data_verified_live=True,
+        news_status="CHECKED_MATCHES",
+        news_risk="LOW",
+        entry_validation={"status": "REJECTED_CIRCUIT_LIMIT"},
+    )
+    assert result.symbol == "reliance"
+    assert result.action == "NO_TRADE"
+    assert result.side is None and result.strategy is None
+    assert result.quantity == 0
+    assert result.margin_verified is False
+    assert result.entry_validation["status"] == "REJECTED_CIRCUIT_LIMIT"

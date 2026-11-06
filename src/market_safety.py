@@ -6,11 +6,12 @@ from datetime import date, datetime, time as dtime
 from math import isfinite
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yaml
 
-IST = __import__("zoneinfo").ZoneInfo("Asia/Kolkata")
+IST = ZoneInfo("Asia/Kolkata")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SAFETY_PATH = PROJECT_ROOT / "config" / "market_safety.yaml"
 

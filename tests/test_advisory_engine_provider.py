@@ -52,7 +52,7 @@ def test_kite_provider_uses_authenticated_read_only_client_and_marks_quote_statu
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             captured["instrument"] = instrument
             return {
                 "quote": {"last_price": 1500.0, "timestamp": now},
@@ -101,7 +101,7 @@ def test_kite_provider_skips_symbols_not_in_nse_equity_dump(monkeypatch, tmp_pat
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             raise AssertionError("missing symbols must not trigger a data fetch")
 
     monkeypatch.setattr(
@@ -154,7 +154,7 @@ def test_live_quote_verification_uses_observation_time_not_scan_start(monkeypatc
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             return {
                 "quote": {
                     "last_price": 1500.0,
@@ -227,7 +227,10 @@ def test_nse_equity_universe_uses_bulk_quote_screen_and_selected_instruments(mon
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None, *, quote_data=None, include_daily_candles=True):
+        def fetch_symbol_bundle(
+            self, instrument, now=None, *, quote_data=None, include_daily_candles=True,
+            relative_volume_lookback_days=45, **kwargs,
+        ):
             captured["bundle_args"] = {
                 "symbol": instrument["tradingsymbol"],
                 "quote_data": quote_data,
@@ -327,7 +330,10 @@ def test_nse_equity_universe_requires_kite_provider():
             universe_mode="nse_equity",
         )
 
-def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=13.99, quote_ask=14.01):
+def _run_directional_kite_scan(
+    monkeypatch, tmp_path, margin_result, quote_bid=13.99, quote_ask=14.01,
+    upper_circuit_limit=18.0,
+):
     """Exercise the real scanner/risk path with deterministic data and a mocked read-only Kite adapter."""
     now = datetime(2026, 10, 26, 11, 0, tzinfo=IST)
     start = datetime(2026, 10, 26, 9, 15, tzinfo=IST)
@@ -349,6 +355,23 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
 
     candles_5m = make_candles(21, 5)   # completed through 10:55 IST
     candles_15m = make_candles(8, 15)  # current 11:00 bar is dropped by the scanner
+    prior_session_days = (
+        "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09",
+        "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16",
+    )
+    candles_5m_history = []
+    for prior_day in prior_session_days:
+        session_start = datetime.fromisoformat(f"{prior_day}T09:15:00").replace(tzinfo=IST)
+        for index in range(21):
+            price = 10.0 + index * 0.1
+            candles_5m_history.append({
+                "date": session_start + timedelta(minutes=index * 5),
+                "open": price - 0.05,
+                "high": price + 0.1,
+                "low": price - 0.1,
+                "close": price,
+                "volume": 500,
+            })
 
     class FakeKite:
         def instruments(self, now=None):
@@ -374,16 +397,19 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return candles_15m
 
-        def fetch_symbol_bundle(self, instrument, now=None):
+        def fetch_symbol_bundle(self, instrument, now=None, **kwargs):
             assert instrument["tradingsymbol"] == "INFY"
             return {
                 "quote": {
                     "last_price": 14.0,
                     "timestamp": now,
+                    "lower_circuit_limit": 10.0,
+                    "upper_circuit_limit": upper_circuit_limit,
                     "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
                 },
                 "candles_5m": candles_5m,
                 "candles_15m": candles_15m,
+                "candles_5m_history": candles_5m_history,
                 "provider": "test Kite",
             }
 
@@ -392,6 +418,8 @@ def _run_directional_kite_scan(monkeypatch, tmp_path, margin_result, quote_bid=1
             return {"NSE:INFY": {
                 "last_price": 14.0,
                 "timestamp": now,
+                "lower_circuit_limit": 10.0,
+                "upper_circuit_limit": upper_circuit_limit,
                 "depth": {"buy": [{"price": quote_bid}], "sell": [{"price": quote_ask}]},
             }}
 
@@ -545,7 +573,10 @@ def test_open_research_symbols_are_archived_outside_selected_universe(monkeypatc
         def fetch_nifty50_15m_candles(self, instrument_rows, now=None):
             return []
 
-        def fetch_symbol_bundle(self, instrument, now=None, *, include_daily_candles=True):
+        def fetch_symbol_bundle(
+            self, instrument, now=None, *, include_daily_candles=True,
+            relative_volume_lookback_days=45, include_relative_volume_history=True,
+        ):
             symbol = instrument["tradingsymbol"]
             fetched.append((symbol, include_daily_candles))
             candles = []
@@ -580,3 +611,36 @@ def test_open_research_symbols_are_archived_outside_selected_universe(monkeypatc
     assert len(saved) == 3
     assert set(saved["provider_mode"]) == {"kite"}
     assert report["candle_archive"]["additional_symbols_requested"] == ["SYRMA"]
+
+
+def test_refreshed_executable_ask_near_circuit_band_is_rejected(monkeypatch, tmp_path):
+    report, calls = _run_directional_kite_scan(
+        monkeypatch,
+        tmp_path,
+        margin_result=15.0,
+        quote_bid=13.99,
+        quote_ask=14.01,
+        upper_circuit_limit=14.08,
+    )
+    candidate = report["candidates"][0]
+    refresh = report["entry_quote_refresh"][0]
+    assert refresh["circuit_limits"]["status"] == "CLEAR"
+    assert refresh["executable_side_circuit_limits"]["status"] == "NEAR_UPPER_CIRCUIT"
+    assert candidate["action"] == "WATCH_CANDIDATE"
+    assert candidate["quantity"] == 0
+    # The second margin estimate is intentionally skipped after the circuit guard fails.
+    assert len(calls["margin"]) == 1
+
+
+def test_advisory_scan_stops_on_nse_equity_holiday(tmp_path):
+    report = advisory_engine.run_scan(
+        symbols=["INFY"],
+        now=datetime(2026, 11, 10, 10, 0, tzinfo=IST),
+        max_symbols=1,
+        output_dir=tmp_path,
+        data_provider="yahoo",
+    )
+    assert report["status"] == "MARKET_CLOSED"
+    assert "EXCHANGE_HOLIDAY" in report["message"]
+    assert report["candidates"] == []
+    assert report["orders_placed_or_modified"] is False

@@ -25,6 +25,8 @@ from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_ledger, append_scan_report
 from src.candle_archive import append_completed_candles
 from src.live_entry_validation import inspect_executable_quote, revalidate_candidate_at_quote
+from src.market_calendar import market_day_status, market_session_message
+from src.market_safety import inspect_circuit_limits, load_market_safety_settings
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -121,6 +123,8 @@ def _paper_market_snapshot(bundle: dict[str, Any]) -> dict[str, Any]:
         return price if isfinite(price) and price > 0 else None
     return {"last_price": quote.get("last_price"), "timestamp": quote.get("timestamp"),
         "last_trade_time": quote.get("last_trade_time"), "bid": best(buys), "ask": best(sells),
+        "lower_circuit_limit": quote.get("lower_circuit_limit"),
+        "upper_circuit_limit": quote.get("upper_circuit_limit"),
         "verified_live": bundle.get("verified_live_data") is True}
 
 
@@ -144,9 +148,20 @@ def run_scan(
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
-    if current.weekday() >= 5 or current.time() < dtime(9, 15) or current.time() > dtime(15, 30):
-        return {"status": "MARKET_CLOSED", "as_of": current.isoformat(), "message": "NSE cash-market hours are normally 09:15–15:30 IST on weekdays. No intraday scan was run.", "candidates": [], "news": {"items": [], "errors": []}}
+    session_message = market_session_message(current)
+    if session_message:
+        return {
+            "status": "MARKET_CLOSED",
+            "as_of": current.isoformat(),
+            "message": session_message,
+            "market_calendar": market_day_status(current.date()),
+            "candidates": [],
+            "news": {"items": [], "errors": []},
+            "advisory_only": True,
+            "orders_placed_or_modified": False,
+        }
 
+    market_safety_settings = load_market_safety_settings()
     provider_name = str(data_provider).strip().lower()
     if provider_name not in {"yahoo", "kite"}:
         raise ValueError("data_provider must be 'yahoo' or 'kite'")
@@ -207,6 +222,7 @@ def run_scan(
                     min_current_day_volume=universe_min_current_day_volume,
                     min_current_day_turnover_inr=universe_min_current_day_turnover_inr,
                     max_quote_age_minutes=universe_max_quote_age_minutes,
+                    circuit_limit_buffer_pct=market_safety_settings.circuit_near_band_buffer_pct,
                 )
                 selected = [
                     str(row.get("tradingsymbol", "")).strip().upper()
@@ -268,9 +284,14 @@ def run_scan(
                         now=current,
                         quote_data=universe_quotes.get(symbol),
                         include_daily_candles=False,
+                        relative_volume_lookback_days=market_safety_settings.relative_volume_lookback_calendar_days,
                     )
                 else:
-                    bundle = provider.fetch_symbol_bundle(instrument, now=current)
+                    bundle = provider.fetch_symbol_bundle(
+                        instrument,
+                        now=current,
+                        relative_volume_lookback_days=market_safety_settings.relative_volume_lookback_calendar_days,
+                    )
                 # In universe mode, the bulk quote is reused rather than issuing
                 # another per-symbol quote call. For live scans, verify freshness
                 # against the observation time immediately after the bulk quote request.
@@ -323,7 +344,8 @@ def run_scan(
                 continue
             try:
                 archive_bundle = provider.fetch_symbol_bundle(
-                    instrument, now=current, include_daily_candles=False
+                    instrument, now=current, include_daily_candles=False,
+                    include_relative_volume_history=False,
                 )
                 archived = append_completed_candles(
                     symbol, archive_bundle.get("candles_5m", []), candle_archive_dir,
@@ -489,6 +511,23 @@ def run_scan(
                 entry_quote_refresh_checks.append(audit)
                 continue
 
+            circuit_check = inspect_circuit_limits(
+                latest_quote,
+                buffer_pct=market_safety_settings.circuit_near_band_buffer_pct,
+            )
+            audit["circuit_limits"] = circuit_check
+            if not circuit_check.get("eligible"):
+                bundle["verified_live_data"] = False
+                bundle["data_quality_warning"] = (
+                    "Final quote failed the circuit-limit safety gate: "
+                    + str(circuit_check.get("reason") or circuit_check.get("status"))
+                )
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                audit["verified"] = False
+                audit["reason"] = bundle["data_quality_warning"]
+                entry_quote_refresh_checks.append(audit)
+                continue
+
             executable = inspect_executable_quote(
                 latest_quote, candidate.side, now=refresh_time,
                 max_age_minutes=paper_entry_max_quote_age_minutes,
@@ -498,6 +537,26 @@ def run_scan(
             if not executable.get("valid"):
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["reason"] = executable.get("reason")
+                entry_quote_refresh_checks.append(audit)
+                continue
+
+            executable_side_circuit = inspect_circuit_limits(
+                {
+                    **latest_quote,
+                    "last_price": executable["executable_entry_price"],
+                },
+                buffer_pct=market_safety_settings.circuit_near_band_buffer_pct,
+            )
+            audit["executable_side_circuit_limits"] = executable_side_circuit
+            if not executable_side_circuit.get("eligible"):
+                bundle["verified_live_data"] = False
+                bundle["data_quality_warning"] = (
+                    "Executable bid/ask is at or near an exchange circuit band: "
+                    + str(executable_side_circuit.get("reason") or executable_side_circuit.get("status"))
+                )
+                margin_per_share_by_symbol.pop(candidate.symbol, None)
+                audit["verified"] = False
+                audit["reason"] = bundle["data_quality_warning"]
                 entry_quote_refresh_checks.append(audit)
                 continue
 
@@ -577,6 +636,8 @@ def run_scan(
             "require_margin_verification": risk_settings.require_margin_verification,
         },
         "universe_selection": universe_selection,
+        "market_calendar": market_day_status(current.date()),
+        "market_safety_settings": asdict(market_safety_settings),
         "symbols_requested": selected,
         "entry_quote_refresh": entry_quote_refresh_checks,
         "entry_quote_refresh_errors": entry_quote_refresh_errors,

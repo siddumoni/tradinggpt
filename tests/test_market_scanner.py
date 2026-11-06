@@ -256,3 +256,46 @@ def test_no_trade_report_explains_each_strategy_rejection():
     assert any(reason.startswith("VWAP trend:") for reason in result.reasons)
     assert any(reason.startswith("VWAP pullback:") for reason in result.reasons)
 
+
+
+def test_live_scanner_rejects_quote_near_circuit_band():
+    now = datetime(2026, 10, 16, 11, 0, tzinfo=IST)
+    bundle = {
+        "provider": "verified Kite",
+        "verified_live_data": True,
+        "quote": {
+            "last_price": 100.0,
+            "lower_circuit_limit": 80.0,
+            "upper_circuit_limit": 100.2,
+            "timestamp": now,
+        },
+        "candles_5m": sample_candles(60),
+        "candles_15m": sample_candles(24),
+    }
+    result = evaluate_symbol_bundle("RELIANCE", bundle, now=now)
+    assert result.action == "NO_TRADE"
+    assert result.quantity == 0
+    assert result.entry_validation["status"] == "REJECTED_CIRCUIT_LIMIT"
+    assert result.entry_validation["circuit_limits"]["status"] == "NEAR_UPPER_CIRCUIT"
+
+
+def test_live_scanner_requires_time_of_day_relative_volume_history():
+    now = datetime(2026, 10, 16, 11, 0, tzinfo=IST)
+    bundle = {
+        "provider": "verified Kite",
+        "verified_live_data": True,
+        "quote": {
+            "last_price": 100.0,
+            "lower_circuit_limit": 80.0,
+            "upper_circuit_limit": 120.0,
+            "timestamp": now,
+        },
+        "candles_5m": sample_candles(60),
+        "candles_15m": sample_candles(24),
+        "candles_5m_history": [],
+    }
+    result = evaluate_symbol_bundle("RELIANCE", bundle, now=now)
+    assert result.action == "NO_TRADE"
+    assert result.quantity == 0
+    assert result.entry_validation["status"] == "REJECTED_RELATIVE_VOLUME"
+    assert result.entry_validation["relative_volume"]["status"] == "HISTORICAL_SESSIONS_MISSING"

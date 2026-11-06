@@ -45,6 +45,9 @@ def test_weekend_and_market_hours():
     assert market_session_message(datetime(2026, 10, 17, 10, 0, tzinfo=IST))
     assert market_session_message(datetime(2026, 10, 19, 8, 0, tzinfo=IST))
     assert market_session_message(datetime(2026, 10, 19, 10, 0, tzinfo=IST)) is None
+    holiday = datetime(2026, 11, 10, 10, 0, tzinfo=IST)
+    assert not is_regular_market_hours(holiday)
+    assert "EXCHANGE_HOLIDAY" in market_session_message(holiday)
 
 
 def test_instrument_cache_is_reused_for_same_day(tmp_path: Path):
@@ -216,6 +219,8 @@ def test_screen_liquid_nse_equities_ranks_fresh_quotes_and_explains_exclusions()
                     "volume": volume,
                     "average_price": average,
                     "timestamp": timestamp,
+                    "lower_circuit_limit": price * 0.8,
+                    "upper_circuit_limit": price * 1.2,
                 }
             return values
 
@@ -257,6 +262,25 @@ def test_screen_liquid_nse_equities_ranks_fresh_quotes_and_explains_exclusions()
     assert summary["exclusions"]["QUOTE_MISSING"] == 1
 
 
+def test_fetch_symbol_bundle_refuses_nse_equity_holiday():
+    client = KiteMarketData(
+        FakeKite(),
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+    )
+    instrument = {
+        "tradingsymbol": "RELIANCE",
+        "instrument_token": 1,
+        "exchange": "NSE",
+        "segment": "NSE",
+        "instrument_type": "EQ",
+    }
+    with pytest.raises(MarketClosedError, match="EXCHANGE_HOLIDAY"):
+        client.fetch_symbol_bundle(
+            instrument,
+            now=datetime(2026, 11, 10, 10, 0, tzinfo=IST),
+        )
+
+
 def test_fetch_symbol_bundle_reuses_bulk_quote_and_can_skip_daily_history():
     kite = FakeKite()
     client = KiteMarketData(
@@ -282,5 +306,6 @@ def test_fetch_symbol_bundle_reuses_bulk_quote_and_can_skip_daily_history():
     )
     assert bundle["quote"] is quote
     assert kite.quote_calls == []
-    assert [call[3] for call in kite.historical_calls] == ["5minute", "15minute"]
+    assert [call[3] for call in kite.historical_calls] == ["5minute", "15minute", "5minute"]
+    assert bundle["candles_5m_history"]
     assert bundle["candles_daily_60d"] == []

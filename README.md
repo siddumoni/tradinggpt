@@ -17,7 +17,7 @@ The local Champion dashboard provides a confirmed **Close** action for each open
 - **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, shared-capital portfolio replay, prospective paper-signal journal/outcome evaluator, candle data-quality audit, and chronological validation.
 - **Tests:** offline unit and regression tests. Tests should not require a live brokerage session.
 
-The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge.
+The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge. See [the delivery phase index](docs/PHASES.md) for the current milestone and acceptance criteria.
 
 ## Account profiles
 
@@ -77,6 +77,8 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+# Optional contributor tools (Ruff, MyPy and coverage)
+python -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 

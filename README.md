@@ -4,6 +4,10 @@ TradingGPT is a Python research and advisory project for NSE equities. It combin
 
 **Safety boundary:** the project is advisory-only. It must not place, modify, or cancel orders. Backtests and scanner signals are research outputs, not promises of profit or recommendations to trade.
 
+## Manual paper-position exit
+
+The local Champion dashboard provides a confirmed **Close** action for each open virtual position. It uses the latest cached bid for LONG positions or ask for SHORT positions, and refuses to close if the quote is missing, stale (older than 120 seconds), or future-dated. Estimated slippage and NSE charges are included in the exit accounting, and the normal `PAPER_EXIT` event is emitted for Telegram notifications. The endpoint is localhost-only, requires a JSON request, and never submits a broker order.
+
 ## What is in the repository
 
 - **Authentication and session checks:** Zerodha Kite Connect login/session helpers.

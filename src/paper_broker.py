@@ -305,6 +305,14 @@ class PaperBroker:
                float(assessment.quantity)*entry_fill,assessment.net_risk_inr,
                str(candidate.get("market_regime") or "UNKNOWN"),entry_reason,now.isoformat()))
         except sqlite3.IntegrityError as exc: raise _RejectedSignal("Duplicate signal already processed.") from exc
+        # Preserve the verified entry snapshot as the initial liquidation mark.
+        # A later live tick will replace it; manual exits still require a fresh mark.
+        received_at=datetime.now(IST)
+        db.execute("""INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at)
+          VALUES(?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
+          last_price=excluded.last_price,bid=excluded.bid,ask=excluded.ask,
+          market_time=excluded.market_time,received_at=excluded.received_at""",
+          (symbol,last,bid,ask,to_ist(qtime).isoformat(),received_at.isoformat()))
         self._event(db,"PAPER_ENTRY",f"Simulated {side} entry: {assessment.quantity} {symbol} @ ₹{entry_fill:.2f}.",
             symbol=symbol,details={"signal_id":signal_id,"strategy":strategy,"strategy_version":"champion_v1",
             "quantity":int(assessment.quantity),"entry_reference_price":entry_reference,"entry_fill_price":entry_fill,
@@ -392,6 +400,38 @@ class PaperBroker:
                 exit_ref=float(mark["bid"] or mark["last_price"]) if trade["side"]=="LONG" else float(mark["ask"] or mark["last_price"])
                 self._close_trade(db,trade,exit_ref,"TIME_SQUARE_OFF","Time-based square-off using a recent cached quote.",current); closed+=1
         return closed
+    def close_position(self,trade_id:int,*,max_quote_age_seconds:float=120.0)->dict[str,Any]:
+        """Manually close a Champion paper position using its latest fresh executable-side quote."""
+        if isinstance(trade_id,bool) or int(trade_id)<=0:
+            raise ValueError("trade_id must be a positive integer")
+        if not math.isfinite(float(max_quote_age_seconds)) or max_quote_age_seconds<=0:
+            raise ValueError("max_quote_age_seconds must be finite and positive")
+        current=datetime.now(IST)
+        with self._connect() as db:
+            trade=db.execute("SELECT * FROM trades WHERE id=?",(int(trade_id),)).fetchone()
+            if trade is None:
+                raise ValueError("Paper position was not found.")
+            if trade["status"]!="OPEN":
+                raise ValueError("Paper position is already closed.")
+            mark=db.execute("SELECT * FROM market_marks WHERE symbol=?",(trade["symbol"],)).fetchone()
+            if mark is None:
+                raise ValueError("No market quote is available; position remains open.")
+            age=(current-to_ist(mark["received_at"])).total_seconds()
+            if age < -2 or age > float(max_quote_age_seconds):
+                raise ValueError("Latest market quote is stale or future-dated; position remains open.")
+            side=str(trade["side"])
+            quote_value=mark["bid"] if side=="LONG" else mark["ask"]
+            if quote_value is None or not math.isfinite(float(quote_value)) or float(quote_value)<=0:
+                raise ValueError("A valid bid/ask quote is unavailable; position remains open.")
+            exit_reference=float(quote_value)
+            detail=f"Manually closed from the local paper dashboard using the latest quote ({age:.1f}s old); estimated slippage and charges applied."
+            self._close_trade(db,trade,exit_reference,"MANUAL_EXIT",detail,current)
+            closed=db.execute("SELECT exit_fill_price,net_pnl,transaction_charges,slippage_cost FROM trades WHERE id=?",(int(trade_id),)).fetchone()
+            return {"trade_id":int(trade_id),"symbol":trade["symbol"],"side":side,"quantity":int(trade["quantity"]),
+                    "exit_reference_price":exit_reference,"exit_fill_price":float(closed["exit_fill_price"]),
+                    "net_pnl":float(closed["net_pnl"]),"transaction_charges":float(closed["transaction_charges"]),
+                    "slippage_cost":float(closed["slippage_cost"]),"exit_reason":"MANUAL_EXIT"}
+
     def _close_trade(self,db,trade,exit_reference,exit_reason,exit_detail,at):
         if trade["status"]!="OPEN": return
         side=trade["side"]; qty=int(trade["quantity"]); entry_ref=float(trade["entry_reference_price"]); entry_fill=float(trade["entry_fill_price"])

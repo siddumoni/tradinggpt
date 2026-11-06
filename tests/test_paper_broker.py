@@ -170,3 +170,51 @@ def test_backtest_and_paper_broker_share_identical_candle_exit(tmp_path):
     assert backtest_trades.iloc[0]["exit_reason"] == "TARGET_2"
     assert paper_trade["exit_reference_price"] == pytest.approx(backtest_trades.iloc[0]["exit"])
     assert pd.Timestamp(paper_trade["exit_time"]) == pd.Timestamp(backtest_trades.iloc[0]["exit_time"])
+
+
+def test_manual_close_uses_fresh_executable_quote_and_records_costs(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    broker.process_scan_report(report_file(tmp_path, [candidate()], {"INFY": quote()}))
+    trade = broker.snapshot()["open_positions"][0]
+    result = broker.close_position(trade["id"])
+    assert result["exit_reason"] == "MANUAL_EXIT"
+    assert result["exit_reference_price"] == pytest.approx(99.99)
+    assert result["exit_fill_price"] < result["exit_reference_price"]
+    assert result["transaction_charges"] > 0
+    assert result["slippage_cost"] > 0
+    state = broker.snapshot()
+    assert state["account"]["open_positions"] == 0
+    closed = state["closed_trades"][0]
+    assert closed["exit_reason"] == "MANUAL_EXIT"
+    assert closed["net_pnl"] == pytest.approx(
+        closed["gross_pnl"] - closed["total_estimated_costs"]
+    )
+    assert any(
+        event["event_type"] == "PAPER_EXIT"
+        and event["details"]["exit_reason"] == "MANUAL_EXIT"
+        for event in state["events"]
+    )
+
+
+def test_manual_close_fails_closed_without_fresh_quote_or_for_closed_trade(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    broker.process_scan_report(report_file(tmp_path, [candidate()], {"INFY": quote()}))
+    trade = broker.snapshot()["open_positions"][0]
+    with broker._connect() as db:
+        db.execute("UPDATE market_marks SET received_at=?", (
+            (datetime.now(IST) - timedelta(minutes=5)).isoformat(),
+        ))
+    with pytest.raises(ValueError, match="stale"):
+        broker.close_position(trade["id"])
+    assert broker.snapshot()["account"]["open_positions"] == 1
+    with broker._connect() as db:
+        db.execute("UPDATE market_marks SET received_at=?", (datetime.now(IST).isoformat(),))
+    broker.close_position(trade["id"])
+    with pytest.raises(ValueError, match="already closed"):
+        broker.close_position(trade["id"])
+
+
+def test_manual_close_rejects_unknown_position(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    with pytest.raises(ValueError, match="not found"):
+        broker.close_position(999)

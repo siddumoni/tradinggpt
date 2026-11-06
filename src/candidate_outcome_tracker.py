@@ -73,9 +73,6 @@ def _is_net_rr_rejection(value: Any) -> bool:
 
 
 def _reason(candidate: dict[str, Any]) -> str:
-    validation = candidate.get("entry_validation")
-    if isinstance(validation, dict) and _is_net_rr_rejection(validation.get("reason")):
-        return str(validation.get("reason"))
     reasons = candidate.get("reasons")
     if not isinstance(reasons, list):
         return ""

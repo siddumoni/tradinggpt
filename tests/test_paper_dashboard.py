@@ -40,6 +40,8 @@ def test_dashboard_displays_both_targets_net_rrr_and_dark_theme():
 
 def test_dashboard_manual_close_endpoint_closes_position_and_emits_paper_exit(tmp_path):
     from urllib.request import Request
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
     broker = PaperBroker(tmp_path / "paper.db")
     now = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()

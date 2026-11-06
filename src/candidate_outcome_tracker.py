@@ -60,7 +60,6 @@ def _candidate_id(candidate: dict[str, Any]) -> str:
     except (TypeError, ValueError, OverflowError):
         canonical_signal_time = raw_signal_time
     parts = (
-        METHOD_VERSION,
         str(candidate.get("symbol") or "").strip().upper(),
         str(candidate.get("side") or "").strip().upper(),
         str(candidate.get("strategy") or "").strip().lower(),

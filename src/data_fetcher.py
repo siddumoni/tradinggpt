@@ -466,6 +466,18 @@ class KiteMarketData:
         resolved_quote = quote_data if quote_data is not None else self.quotes([symbol]).get(quote_key)
         start_today = datetime.combine(current.date(), dtime(9, 15), tzinfo=IST)
         daily_start = datetime.combine(current.date() - timedelta(days=60), dtime(0, 0), tzinfo=IST)
+        candles_5m = (
+            self.historical_candles(int(token), start_today, current, "5minute")
+            if current.time() >= dtime(9, 15) else []
+        )
+        candles_15m = (
+            self.historical_candles(int(token), start_today, current, "15minute")
+            if current.time() >= dtime(9, 15) else []
+        )
+        daily_candles = (
+            self.historical_candles(int(token), daily_start, current, "day")
+            if include_daily_candles else []
+        )
         relative_volume_start = datetime.combine(
             current.date() - timedelta(days=relative_volume_lookback_days), dtime(9, 15), tzinfo=IST
         )
@@ -484,12 +496,9 @@ class KiteMarketData:
             "instrument_token": int(token),
             "fetched_at": current.isoformat(),
             "quote": resolved_quote,
-            "candles_5m": self.historical_candles(int(token), start_today, current, "5minute") if current.time() >= dtime(9, 15) else [],
-            "candles_15m": self.historical_candles(int(token), start_today, current, "15minute") if current.time() >= dtime(9, 15) else [],
-            "candles_daily_60d": (
-                self.historical_candles(int(token), daily_start, current, "day")
-                if include_daily_candles else []
-            ),
+            "candles_5m": candles_5m,
+            "candles_15m": candles_15m,
+            "candles_daily_60d": daily_candles,
             "candles_5m_history": relative_volume_history,
         }
 

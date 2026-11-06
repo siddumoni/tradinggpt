@@ -19,6 +19,48 @@ The local Champion dashboard provides a confirmed **Close** action for each open
 
 The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge.
 
+## Account profiles
+
+Risk and capital defaults are selected from `config/settings.yaml`:
+
+| Profile | Capital | Risk per trade | Daily loss cap | Max positions | Portfolio risk cap |
+|---|---:|---:|---:|---:|---:|
+| `research` | ₹20,000 | ₹200 | ₹600 | 1 | ₹200 |
+| `paper` | ₹1,00,000 | ₹500 | ₹2,000 | 3 | ₹1,500 |
+| `live-advisory` | ₹20,000 | ₹200 | ₹600 | 1 | ₹200 |
+
+All profiles remain advisory-only. `live-advisory` means stricter live-data/margin validation in the advisory pipeline; it does **not** enable broker order placement. The integrated virtual-broker service defaults to `paper`; the standalone scanner defaults to `research`.
+
+Examples:
+
+```powershell
+# Historical/research scanner profile
+python -m src.advisory_engine --profile research --provider yahoo --symbols RELIANCE,HDFCBANK
+
+# Live-data advisory profile (read-only Kite; no real orders)
+python -m src.advisory_engine --profile live-advisory --provider kite --symbols RELIANCE,HDFCBANK
+
+# Integrated virtual account
+python -m src.paper_trading_service --profile paper
+
+# CLI flags override the selected profile without editing YAML
+python -m src.paper_trading_service --profile paper --account-capital 125000 --risk-per-trade 600 --daily-loss-limit 2500 --max-open-positions 4 --max-portfolio-risk 1800 --minimum-net-rr 1.8
+```
+
+The paper service refuses to silently reuse a SQLite account initialized with a different starting capital. Select the matching profile or supply a separate `--db-path`; it never resets existing paper history automatically. Every scan report records the selected profile and effective risk settings.
+
+## Optional OS keyring
+
+By default, the Kite access token is stored in the local ignored `.local/kite_token.json` file. For Windows Credential Manager or another supported OS keyring backend, install the optional dependency set and opt in:
+
+```powershell
+python -m pip install -r requirements-keyring.txt
+$env:TRADINGGPT_USE_KEYRING = "true"
+python -m src.main login
+```
+
+When keyring mode is enabled, the JSON cache stores token metadata only; the access token itself is stored in the OS keyring. If keyring is unavailable, login fails rather than silently falling back to plaintext. Existing file-based caches continue to work when the option is disabled. Keep `TRADINGGPT_USE_KEYRING` enabled consistently for login and service runs.
+
 ## Requirements
 
 - Windows 11
@@ -61,8 +103,11 @@ The token cache is plaintext under `.local\kite_token.json`; treat it like a pas
 ## Run the test suite
 
 ```powershell
-python -m pytest -q
 python -m compileall -q src tests
+ruff check src tests
+ruff format --check src/paper_broker.py src/paper_trading_service.py
+mypy src --ignore-missing-imports --follow-imports=silent
+python -m pytest -q --cov=src --cov-report=term-missing
 ```
 
 Unit tests are expected to use dummy values and local data. Do not add tests that submit real orders or require live market access.

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from datetime import datetime, time as dtime
 from pathlib import Path
@@ -29,8 +30,8 @@ SLIPPAGE_BPS = 5.0
 MIN_ENTRY_RR = 0.01
 ENTRY_CUTOFF = dtime(14, 45)
 LAST_BAR = dtime(15, 10)
-RR_REASON = "target 1 net r:r is below 1.50"
-METHOD_VERSION = "availability_aware_v2"
+RR_REASON_PATTERN = re.compile(r"rejected:\s*target\s*[12]\s+net\s+r:r\s+is\s+below\s+1\.50", re.IGNORECASE)
+METHOD_VERSION = "availability_aware_v3"
 LEGACY_INVALIDATION_REASON = (
     "Superseded: the legacy evaluator entered from the signal candle without waiting for "
     "scanner publication and also double-counted entry slippage in risk sizing."

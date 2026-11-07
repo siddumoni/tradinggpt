@@ -84,7 +84,7 @@ def audit_candidates(
             raise ValueError("invalid LONG stop/entry/target ordering")
         if side == "SHORT" and not target_2 <= target_1 < entry < stop:
             raise ValueError("invalid SHORT stop/entry/target ordering")
-        quantity_value = raw.get("quantity", 1)
+        quantity_value = raw.get("quantity")
         try:
             quantity_float = float(quantity_value)
         except (TypeError, ValueError, OverflowError):

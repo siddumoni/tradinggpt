@@ -107,6 +107,53 @@ def market_day_status(day: date, calendar_path: Path = DEFAULT_CALENDAR_PATH) ->
     return {"is_open": True, "status": "OPEN", "reason": ""}
 
 
+def calendar_maintenance_status(
+    day: date | datetime,
+    *,
+    warning_days: int = 30,
+    calendar_path: Path = DEFAULT_CALENDAR_PATH,
+) -> dict[str, Any]:
+    """Warn before the verified exchange calendar expires; never invent future holidays."""
+    if warning_days < 0:
+        raise ValueError("warning_days must be non-negative")
+    current = day.astimezone(IST).date() if isinstance(day, datetime) and day.tzinfo else (
+        day.date() if isinstance(day, datetime) else day
+    )
+    calendar = _load_calendar(str(Path(calendar_path).resolve()))
+    valid_through = calendar["valid_through"]
+    days_remaining = (valid_through - current).days
+    next_year = current.year + 1
+    next_year_covered = calendar["valid_from"].year <= next_year <= calendar["valid_through"].year
+    expired = current > valid_through
+    warning = expired or days_remaining < warning_days
+    if expired:
+        status = "CALENDAR_COVERAGE_EXPIRED"
+        message = (
+            f"Verified NSE calendar coverage ended on {valid_through}; "
+            "normal-session decisions outside coverage fail closed."
+        )
+    elif warning:
+        status = "CALENDAR_UPDATE_REQUIRED"
+        message = (
+            f"Verified NSE calendar coverage ends in {days_remaining} calendar days "
+            f"({valid_through}). Add the next year's official NSE equity holiday list when published."
+        )
+    else:
+        status = "CURRENT"
+        message = ""
+    return {
+        "status": status,
+        "warning": warning,
+        "as_of": current.isoformat(),
+        "valid_through": valid_through.isoformat(),
+        "days_remaining": days_remaining,
+        "warning_days": warning_days,
+        "next_calendar_year": next_year,
+        "next_year_covered": next_year_covered,
+        "message": message,
+    }
+
+
 def is_trading_day(day: date, calendar_path: Path = DEFAULT_CALENDAR_PATH) -> bool:
     return bool(market_day_status(day, calendar_path)["is_open"])
 

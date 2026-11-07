@@ -165,8 +165,8 @@ def test_short_trade_pnl_is_calculated_correctly():
 
     config = BacktestConfig(
         risk_per_trade=200,
-        slippage_bps_per_side=0,
-        minimum_net_risk_reward=1.0,
+        slippage_bps_per_side=5,
+        minimum_net_risk_reward=1.5,
     )
     trades, _ = backtest_fixed_levels("TEST", df, short_signal, config)
 
@@ -215,8 +215,8 @@ def test_cash_only_notional_limit_is_respected():
     config = BacktestConfig(
         initial_capital=20_000,
         risk_per_trade=350,
-        slippage_bps_per_side=0,
-        minimum_net_risk_reward=1.0,
+        slippage_bps_per_side=5,
+        minimum_net_risk_reward=1.5,
     )
     trades, _ = backtest_fixed_levels("TEST", make_candles(), one_signal, config)
 
@@ -249,10 +249,8 @@ def test_backtest_rejects_non_finite_price_values():
 
 
 def test_backtest_rejects_invalid_slippage_configuration():
-    candles = make_candles()
-    config = BacktestConfig(slippage_bps_per_side=float("nan"))
     with pytest.raises(ValueError, match="must be finite"):
-        backtest_fixed_levels("TEST", candles, one_signal, config)
+        BacktestConfig(slippage_bps_per_side=float("nan"))
 
 
 
@@ -279,8 +277,8 @@ def test_cash_only_position_size_uses_remaining_realised_equity():
     config = BacktestConfig(
         initial_capital=20_000,
         risk_per_trade=50_000,
-        minimum_net_risk_reward=1.0,
-        slippage_bps_per_side=0,
+        minimum_net_risk_reward=1.5,
+        slippage_bps_per_side=5,
     )
     trades, _ = backtest_fixed_levels("TEST", df, two_signals, config)
 

@@ -30,7 +30,7 @@ LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_SYMBOLS = ("RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY")
 DEFAULT_STRATEGIES = ("vwap_trend", "vwap_pullback")
-DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
+DEFAULT_SLIPPAGE_BPS = (5.0, 8.0)
 
 
 def _load_or_fetch_candles(
@@ -206,12 +206,12 @@ def run_validation(
     )
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         raise ValueError("risk_per_trade must be a finite positive INR amount")
-    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be finite and positive")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward must be finite and at least 1.5")
     if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
         raise ValueError("target_atr_multiple must be finite, > 1.0 and <= 10.0")
-    if any(not math.isfinite(bps) or bps < 0 or bps > 100 for bps in slippage_values):
-        raise ValueError("slippage values must be finite and between 0 and 100 bps per side")
+    if any(not math.isfinite(bps) or bps < 5 or bps > 100 for bps in slippage_values):
+        raise ValueError("slippage values must be finite and between 5 and 100 bps per side")
 
     out = Path(output_dir)
     cache_dir = out / "candle_cache"
@@ -393,7 +393,7 @@ def main() -> None:
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Positive planned loss budget in INR; defaults to config/settings.yaml")
     parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")
     parser.add_argument("--target-atr-multiple", type=float, default=2.5)
-    parser.add_argument("--slippage-bps", default="2,5,8", help="Comma-separated per-side slippage scenarios")
+    parser.add_argument("--slippage-bps", default="5,8", help="Comma-separated per-side slippage scenarios; minimum 5 bps")
     parser.add_argument("--refresh-data", action="store_true", help="Redownload candle data instead of using saved cache")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

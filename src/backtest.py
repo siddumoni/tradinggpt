@@ -42,6 +42,10 @@ class BacktestConfig:
     exit_policy: ExitPolicy = field(default_factory=load_exit_policy)
 
     def __post_init__(self) -> None:
+        if not isfinite(self.slippage_bps_per_side) or not 5 <= self.slippage_bps_per_side <= 100:
+            raise ValueError("slippage_bps_per_side must be finite and between 5 and 100")
+        if not isfinite(self.minimum_net_risk_reward) or self.minimum_net_risk_reward < 1.5:
+            raise ValueError("minimum_net_risk_reward cannot be below 1.5")
         if self.square_off_time is None:
             object.__setattr__(self, "square_off_time", self.exit_policy.time_exit_ist)
         elif self.square_off_time != self.exit_policy.time_exit_ist:

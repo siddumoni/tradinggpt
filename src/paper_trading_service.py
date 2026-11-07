@@ -543,14 +543,16 @@ def main(argv=None) -> int:
         for v in (account_capital, risk_per_trade, daily_loss_limit, minimum_net_rr)
     ):
         p.error("Capital and risk limits must be finite and positive")
+    if minimum_net_rr < 1.5:
+        p.error("--minimum-net-rr cannot be below 1.5")
     if max_open_positions < 1:
         p.error("--max-open-positions must be positive")
     if max_portfolio_risk is not None and (
         not math.isfinite(float(max_portfolio_risk)) or float(max_portfolio_risk) <= 0
     ):
         p.error("--max-portfolio-risk must be finite and positive")
-    if not math.isfinite(float(slippage_bps)) or not 0 <= slippage_bps <= 100:
-        p.error("--slippage-bps-per-side must be between 0 and 100")
+    if not math.isfinite(float(slippage_bps)) or not 5 <= slippage_bps <= 100:
+        p.error("--slippage-bps-per-side must be between 5 and 100")
     if a.universe_max_symbols < 1:
         p.error("--universe-max-symbols must be at least 1")
     if a.universe_max_quote_age_minutes <= 0 or a.paper_entry_max_quote_age_minutes <= 0:

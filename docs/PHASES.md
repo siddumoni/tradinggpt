@@ -11,6 +11,19 @@ This document is the current phase index. Historical phase notes are retained un
 | 5 | Repository hygiene, named account profiles, scanner consistency, secure optional token storage and cross-platform quality gates | Complete; merged to main as `07ab215`; Ubuntu and Windows Python 3.13 CI passed |
 | 6 | Evidence-led README/results refresh after adequate prospective paper sessions | Groundwork complete; awaiting evidence gate |
 
+## November 2026 research-foundation sequence
+
+| Step | Scope | Status |
+|---|---|---|
+| 0 | Advisory-only broker API tripwire | Complete; PR #39 merged |
+| A | Shared structural-stop selection and replay parity | Complete; PR #40 merged |
+| B | Prior-session ATR seed with strict session completeness | Complete; PR #41 merged |
+| C | Validated pre-entry Telegram trade plans and EOD digest | Complete; PR #42 merged |
+| D | Signal-journal cost feasibility, profile-aware forward sizing, paired challenger comparison and results gate | In progress |
+| E | Prior-day level proximity filter, MIS eligibility/surveillance checks, 45-day relative-volume cache and calendar rollover warning | Pending |
+
+All foundation steps preserve the advisory-only boundary. The `nse_champion_v2` freeze remains deferred until A, B and E are complete and the full version boundary is recorded; foundation-candidate results are not pooled with `champion_v1`.
+
 ## Phase 6 status and evidence gate
 
 Phase 6 is intentionally evidence-gated. The statistical pipeline and promotion thresholds are implemented, but the public performance summary must not be refreshed from an under-sized sample.
@@ -23,7 +36,7 @@ See [the Phase 6 readiness guide](PHASE6_READINESS.md) for data handling, per-tr
 
 - The repository remains advisory-only. No real broker order placement, modification or cancellation is in scope.
 - Fail-closed data, quote, circuit, margin, risk and cost gates remain mandatory.
-- The minimum after-cost net reward/risk gate remains 1.5 unless a research-only CLI override is explicitly supplied; the paper profile defaults to 1.5.
+- The minimum after-cost net reward/risk gate for approved scanner, paper, backtest and sensitivity entries is a hard 1.5; lower CLI/config overrides are rejected. The independent candidate-outcome tracker retains an internal 0.01 sizing sentinel only to simulate signals already rejected by the 1.5 scanner gate; it is research-only, cannot approve an entry, and is never included in Champion performance. The per-side slippage floor is hard 5 bps, and performance promotion is evaluated at 8 bps.
 - Historical or paper results do not establish a repeatable edge. Do not promote a strategy solely because of a small-sample backtest.
 - The 2026 NSE holiday calendar currently fails closed outside its verified coverage ending 2026-12-31.
 

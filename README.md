@@ -144,6 +144,16 @@ The runner requires at least 10 complete sessions in both chronological partitio
 
 Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
 
+## Audit prospective signal cost feasibility
+
+Run the cost audit directly against the append-only signal journal. It calculates Target 2 net R:R at the 5 bps/side floor and 8 bps/side stress case, with date/symbol pass rates:
+
+```powershell
+python -m src.cost_feasibility logs/paper_signals.csv --output reports/cost_feasibility_detail.csv --summary-output reports/cost_feasibility_by_day_symbol.csv --profile research
+```
+
+Zero-quantity journal rows remain unscorable and are excluded from the pass-rate denominator. The journal itself is not rewritten. See [the cost-feasibility guide](docs/COST_FEASIBILITY.md).
+
 ## Evaluate paper outcomes
 
 After the journal has enough later 5-minute data, evaluate the saved signals with a next-bar-open hypothesis and conservative stop/target handling:
@@ -163,7 +173,7 @@ To test the frozen candidates selected in the historical study using new Kite ca
 python -m src.prospective_strategy_evaluator --candles-dir data/paper_candles_kite --candidates HDFCBANK:vwap_trend,INFY:vwap_pullback
 ```
 
-The first launch seeds a per-symbol watermark at the current archive head and skips pre-start bars. Keep it running as new completed candles are appended. It uses the same baseline strategy callbacks, ₹20,000 individual-signal sizing, ₹500 risk budget, fixed 1.5 after-cost Target 2 net R:R gate (matching the historical single-target backtest), and 2/5/8 bps per-side slippage scenarios. Only signals rejected specifically by the net R:R gate get a separate research-only shadow outcome; other risk/data failures stay fail-closed. Reports are written to `reports/prospective_strategy_evaluation`. Individual signals may overlap, so their summed P&L is not portfolio P&L. Read [the forward evaluator guide](docs/PROSPECTIVE_STRATEGY_EVALUATOR.md) before interpreting results. This process has no order-placement path and does not change the integrated paper broker.
+The first launch seeds a per-symbol watermark at the current archive head and skips pre-start bars. Keep it running as new completed candles are appended. The evaluator uses the named profile selected by `--profile`: `research` and `live-advisory` are ₹20,000 capital / ₹200 risk per signal; `paper` is ₹1,00,000 / ₹500. The default slippage scenarios are 5 and 8 bps per side; values below the 5 bps floor are rejected. Run each profile with its own output directory and state file so profile-specific outcomes cannot overwrite or pool one another. The fixed 1.5 after-cost Target 2 net R:R gate remains unchanged. Only signals rejected specifically by that gate get a separate research-only shadow outcome; other risk/data failures stay fail-closed. Individual signals may overlap, so their summed P&L is not portfolio P&L. The candle-only evaluator does not validate fresh quotes and always remains research-only, including when `live-advisory` is selected. Read [the forward evaluator guide](docs/PROSPECTIVE_STRATEGY_EVALUATOR.md) before interpreting results.
 
 ## NSE equity universe scanner
 

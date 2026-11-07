@@ -408,10 +408,10 @@ def run_yahoo_backtest(
     )
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         raise ValueError("risk_per_trade must be finite and positive")
-    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be finite and positive")
-    if not math.isfinite(slippage_bps_per_side) or not 0 <= slippage_bps_per_side <= 100:
-        raise ValueError("slippage_bps_per_side must be finite and between 0 and 100")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward must be finite and at least 1.5")
+    if not math.isfinite(slippage_bps_per_side) or not 5 <= slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be finite and between 5 and 100")
     now = datetime.now(IST)
     start = now - timedelta(days=days)
     provider = YahooFinanceMarketData()
@@ -469,7 +469,7 @@ def run_slippage_sensitivity(
     output_dir: str | Path = "reports/backtests", risk_per_trade: float | None = None,
     minimum_net_risk_reward: float | None = None, target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
-    slippage_values: tuple[float, ...] = (2.0, 5.0, 8.0),
+    slippage_values: tuple[float, ...] = (5.0, 8.0),
 ) -> pd.DataFrame:
     """Compare slippage assumptions using one identical downloaded candle dataset."""
     if days < 5 or days > 59:
@@ -489,10 +489,10 @@ def run_slippage_sensitivity(
     )
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         raise ValueError("risk_per_trade must be finite and positive")
-    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be finite and positive")
-    if not slippage_values or any(not math.isfinite(value) or value < 0 or value > 100 for value in slippage_values):
-        raise ValueError("slippage values must be finite and between 0 and 100 bps per side")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward must be finite and at least 1.5")
+    if not slippage_values or any(not math.isfinite(value) or value < 5 or value > 100 for value in slippage_values):
+        raise ValueError("slippage values must be finite and between 5 and 100 bps per side")
     now = datetime.now(IST)
     provider = YahooFinanceMarketData()
     raw = provider.historical_candles(symbol, now - timedelta(days=days), now, "5minute")
@@ -558,7 +558,7 @@ def main() -> None:
     parser.add_argument("--target-atr-multiple", type=float, default=None, help="Explicit research override for shared policy T2 ATR multiple; the 1.5 net R:R gate is unchanged")
     parser.add_argument("--filter-choppy-regimes", action="store_true", help="Experimental: reject entries when regime is CHOPPY or UNKNOWN")
     parser.add_argument("--slippage-bps", type=float, default=None, help="Assumed slippage per side in basis points; defaults to config/settings.yaml")
-    parser.add_argument("--slippage-sensitivity", action="store_true", help="Compare 2, 5, and 8 bps per side on identical candles")
+    parser.add_argument("--slippage-sensitivity", action="store_true", help="Compare 5 and 8 bps per side on identical candles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if args.risk_per_trade is not None and (
@@ -566,13 +566,13 @@ def main() -> None:
     ):
         parser.error("--risk-per-trade must be a finite value greater than 0")
     if args.min_net_rr is not None and (
-        not math.isfinite(args.min_net_rr) or args.min_net_rr <= 0
+        not math.isfinite(args.min_net_rr) or args.min_net_rr < 1.5
     ):
-        parser.error("--min-net-rr must be finite and positive")
+        parser.error("--min-net-rr must be finite and at least 1.5")
     if args.slippage_bps is not None and (
-        not math.isfinite(args.slippage_bps) or args.slippage_bps < 0 or args.slippage_bps > 100
+        not math.isfinite(args.slippage_bps) or args.slippage_bps < 5 or args.slippage_bps > 100
     ):
-        parser.error("--slippage-bps must be finite and between 0 and 100")
+        parser.error("--slippage-bps must be finite and between 5 and 100")
     if args.slippage_sensitivity:
         run_slippage_sensitivity(
             args.symbol, args.strategy, args.days, args.output_dir,

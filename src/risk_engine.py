@@ -84,8 +84,8 @@ def calculate_net_reward_risk(
         raise ValueError("all prices must be finite and greater than zero")
     if isinstance(quantity, bool) or int(quantity) != quantity or int(quantity) < 1:
         raise ValueError("quantity must be a positive integer")
-    if not isfinite(float(slippage_bps_per_side)) or not 0 <= float(slippage_bps_per_side) <= 100:
-        raise ValueError("slippage_bps_per_side must be between 0 and 100")
+    if not isfinite(float(slippage_bps_per_side)) or not 5 <= float(slippage_bps_per_side) <= 100:
+        raise ValueError("slippage_bps_per_side must be between 5 and 100")
     if side == "LONG":
         valid_levels = stop_loss < entry_price < target_1 <= target_2
     else:
@@ -159,14 +159,16 @@ def assess_trade(
         raise ValueError("capital, risk, net R:R, and slippage settings must be finite")
     if settings.capital_inr <= 0 or settings.risk_per_trade_inr <= 0:
         raise ValueError("capital and risk_per_trade_inr must be positive")
+    # Low-level RiskSettings also supports research-only shadow scoring of candidates
+    # already rejected by the 1.5 gate. Production callers enforce >= 1.5 separately.
     if settings.minimum_net_risk_reward <= 0:
         raise ValueError("minimum_net_risk_reward must be positive")
     if settings.minimum_stop_distance_pct <= 0:
         raise ValueError("minimum_stop_distance_pct must be positive")
     if settings.minimum_net_rr_target not in ("target_1", "target_2"):
         raise ValueError("minimum_net_rr_target must be target_1 or target_2")
-    if not 0 <= settings.slippage_bps_per_side <= 100:
-        raise ValueError("slippage_bps_per_side must be between 0 and 100")
+    if not 5 <= settings.slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be between 5 and 100")
 
     if side == "LONG":
         valid_levels = stop_loss < entry_price < target_1 <= target_2
@@ -312,8 +314,8 @@ def load_account_profile(
                 resolved[key] = value
         if "slippage_bps_per_side" in resolved:
             value = float(resolved["slippage_bps_per_side"])
-            if not isfinite(value) or not 0 <= value <= 100:
-                raise ValueError(f"profile {name!r} slippage_bps_per_side must be between 0 and 100")
+            if not isfinite(value) or not 5 <= value <= 100:
+                raise ValueError(f"profile {name!r} slippage_bps_per_side must be between 5 and 100")
             resolved["slippage_bps_per_side"] = value
         if "max_open_positions" in resolved:
             value = resolved["max_open_positions"]

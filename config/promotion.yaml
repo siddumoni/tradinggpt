@@ -11,3 +11,8 @@ thresholds:
   minimum_sessions: 20
   minimum_profit_factor: 1.0
   maximum_symbol_or_session_profit_share: 0.30
+paired_comparison:
+  minimum_common_sessions: 20
+  familywise_alpha: 0.05
+  family_size: 3
+  adjustment: bonferroni

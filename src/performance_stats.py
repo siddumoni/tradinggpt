@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 import numpy as np
 import pandas as pd
 import yaml
+
+from src.risk_engine import load_phase2_settings
 
 IST = "Asia/Kolkata"
 REQUIRED = {"symbol", "side", "entry_time", "exit_time", "entry", "exit", "quantity", "gross_pnl", "transaction_charges"}
@@ -83,8 +86,8 @@ def _prepare_trades(trades: pd.DataFrame, *, slippage_bps: float) -> pd.DataFram
     missing = REQUIRED.difference(trades.columns)
     if missing:
         raise ValueError(f"Trade details missing required columns: {sorted(missing)}")
-    if not math.isfinite(slippage_bps) or slippage_bps < 8 or slippage_bps > 100:
-        raise ValueError("promotion analysis slippage must be between 8 and 100 bps per side")
+    if not math.isfinite(slippage_bps) or slippage_bps != 8.0:
+        raise ValueError("promotion analysis must use exactly 8 bps per side")
     frame = trades.copy().reset_index(drop=True)
     frame["side"] = frame["side"].astype(str).str.upper()
     if not frame["side"].isin(["LONG", "SHORT"]).all():
@@ -203,21 +206,145 @@ def calculate_statistics(trades: pd.DataFrame, *, initial_capital: float = 20_00
         ],
     }
 
-def evaluate_promotion(stats: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def _daily_report_sessions(paths: Path | list[Path]) -> list[str]:
+    """Extract the full evaluated session calendar from date-stamped daily exports."""
+    selected_paths = [paths] if isinstance(paths, Path) else list(paths)
+    sessions: set[str] = set()
+    for path in selected_paths:
+        match = re.search(r"(20\d{2}-\d{2}-\d{2})", path.name)
+        if match is None:
+            raise ValueError(
+                f"Paired comparison requires date-stamped daily report filenames; "
+                f"cannot determine the session for {path.name!r}"
+            )
+        sessions.add(pd.Timestamp(match.group(1)).date().isoformat())
+    if not sessions:
+        raise ValueError("Paired comparison requires at least one dated daily report")
+    return sorted(sessions)
+
+
+def paired_session_bootstrap(
+    challenger_trades: pd.DataFrame,
+    champion_trades: pd.DataFrame,
+    *,
+    slippage_bps: float = 8.0,
+    resamples: int = 10_000,
+    seed: int = 42,
+    family_size: int = 3,
+    familywise_alpha: float = 0.05,
+    session_calendar: list[str] | None = None,
+) -> dict[str, Any]:
+    """Paired session-level challenger-minus-champion bootstrap with Bonferroni control."""
+    if family_size < 3:
+        raise ValueError("family_size must include all three active challenger tracks")
+    if not 0 < familywise_alpha <= 0.05:
+        raise ValueError("familywise_alpha must be positive and cannot exceed 0.05")
+    if slippage_bps != 8.0:
+        raise ValueError("paired promotion comparison must use exactly 8 bps per side")
+    if resamples < 1_000:
+        raise ValueError("at least 1,000 bootstrap resamples are required")
+    challenger = _prepare_trades(challenger_trades, slippage_bps=slippage_bps)
+    champion = _prepare_trades(champion_trades, slippage_bps=slippage_bps)
+    challenger_daily = challenger.groupby("session").net_pnl_8bps.sum()
+    champion_daily = champion.groupby("session").net_pnl_8bps.sum()
+    if session_calendar is None:
+        calendar = sorted(set(challenger_daily.index).intersection(champion_daily.index))
+    else:
+        calendar = sorted({pd.Timestamp(day).date().isoformat() for day in session_calendar})
+    if session_calendar is not None and (
+        not set(challenger_daily.index).issubset(calendar)
+        or not set(champion_daily.index).issubset(calendar)
+    ):
+        raise ValueError("paired trade sessions fall outside the declared evaluation calendar")
+    challenger_session_counts = challenger.groupby("session").size()
+    champion_session_counts = champion.groupby("session").size()
+    challenger_zero_trade_sessions = int((challenger_session_counts.reindex(calendar, fill_value=0) == 0).sum())
+    champion_zero_trade_sessions = int((champion_session_counts.reindex(calendar, fill_value=0) == 0).sum())
+    challenger_aligned = challenger_daily.reindex(calendar, fill_value=0.0)
+    champion_aligned = champion_daily.reindex(calendar, fill_value=0.0)
+    alpha = familywise_alpha / family_size
+    if len(calendar) < 2:
+        return {
+            "status": "not_estimable_insufficient_common_sessions",
+            "common_sessions": len(calendar),
+            "first_common_session": calendar[0] if calendar else None,
+            "last_common_session": calendar[-1] if calendar else None,
+            "challenger_zero_trade_sessions": challenger_zero_trade_sessions,
+            "champion_zero_trade_sessions": champion_zero_trade_sessions,
+            "mean_difference_inr_per_session": None,
+            "adjusted_lower_bound_inr_per_session": None,
+            "adjusted_upper_bound_inr_per_session": None,
+            "family_size": family_size,
+            "familywise_alpha": familywise_alpha,
+            "per_comparison_alpha": alpha,
+            "method": "paired evaluation-session bootstrap with zero-P&L sessions retained and Bonferroni adjustment",
+        }
+    differences = (
+        challenger_aligned.to_numpy(dtype=float)
+        - champion_aligned.to_numpy(dtype=float)
+    )
+    rng = np.random.default_rng(seed)
+    draws = np.empty(resamples, dtype=float)
+    count = len(differences)
+    for index in range(resamples):
+        sample = rng.integers(0, count, size=count)
+        draws[index] = float(differences[sample].mean())
+    return {
+        "status": "estimated",
+        "common_sessions": count,
+        "first_common_session": calendar[0],
+        "last_common_session": calendar[-1],
+        "challenger_zero_trade_sessions": challenger_zero_trade_sessions,
+        "champion_zero_trade_sessions": champion_zero_trade_sessions,
+        "mean_difference_inr_per_session": float(differences.mean()),
+        "adjusted_lower_bound_inr_per_session": float(np.quantile(draws, alpha)),
+        "adjusted_upper_bound_inr_per_session": float(np.quantile(draws, 1 - alpha)),
+        "family_size": family_size,
+        "familywise_alpha": familywise_alpha,
+        "per_comparison_alpha": alpha,
+        "method": "paired evaluation-session percentile bootstrap with zero-P&L sessions retained and Bonferroni adjustment",
+        "resamples": resamples,
+        "seed": seed,
+    }
+
+
+def evaluate_promotion(
+    stats: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    paired_comparison: dict[str, Any] | None = None,
+    require_paired_comparison: bool = False,
+    eligible_for_promotion: bool = True,
+) -> dict[str, Any]:
     thresholds = config.get("thresholds", {})
     required_trades = int(thresholds.get("minimum_trades", 100))
     required_sessions = int(thresholds.get("minimum_sessions", 20))
     minimum_pf = float(thresholds.get("minimum_profit_factor", 1.0))
     max_concentration = float(thresholds.get("maximum_symbol_or_session_profit_share", 0.30))
+    paired_config = config.get("paired_comparison", {})
+    minimum_common_sessions = max(required_sessions, int(paired_config.get("minimum_common_sessions", required_sessions)))
     checks = {
+        "eligible_strategy_track": eligible_for_promotion,
         "minimum_trades": stats["sample"]["trades"] >= required_trades,
         "minimum_sessions": stats["sample"]["sessions"] >= required_sessions,
         "positive_95pct_expectancy_lower_bound_at_8bps": stats["expectancy_ci_95_inr"]["lower"] is not None and stats["expectancy_ci_95_inr"]["lower"] > 0,
         "minimum_profit_factor_at_8bps": stats["profit_factor_status"] == "infinite_no_losses" or (stats["profit_factor"] is not None and stats["profit_factor"] >= minimum_pf),
         "maximum_symbol_or_session_profit_concentration": max(stats["profit_concentration"]["max_symbol_share"], stats["profit_concentration"]["max_session_share"]) <= max_concentration,
     }
+    if require_paired_comparison:
+        checks["minimum_common_paired_sessions"] = paired_comparison is not None and paired_comparison.get("common_sessions", 0) >= minimum_common_sessions
+        checks["positive_paired_challenger_minus_champion_mean_at_8bps"] = paired_comparison is not None and paired_comparison.get("mean_difference_inr_per_session") is not None and paired_comparison["mean_difference_inr_per_session"] > 0
+        checks["positive_multiplicity_adjusted_paired_lower_bound_at_8bps"] = paired_comparison is not None and paired_comparison.get("adjusted_lower_bound_inr_per_session") is not None and paired_comparison["adjusted_lower_bound_inr_per_session"] > 0
     failures = [key for key, passed in checks.items() if not passed]
-    return {"decision": "PROMOTE" if not failures else "INCONCLUSIVE", "promotion_scope": "next research-validation stage only; never live trading authorization", "checks": checks, "failed_checks": failures, "thresholds": thresholds}
+    return {
+        "decision": "PROMOTE" if not failures else "INCONCLUSIVE",
+        "promotion_scope": "next research-validation stage only; never live trading authorization",
+        "checks": checks,
+        "failed_checks": failures,
+        "thresholds": thresholds,
+        "paired_comparison": paired_comparison,
+        "paired_comparison_required": require_paired_comparison,
+    }
 
 def load_promotion_config(path: Path) -> dict[str, Any]:
     try:
@@ -238,6 +365,7 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         "",
         "## Sample and net performance (8 bps per side)",
         "",
+        f"- Account profile: {stats.get('account_profile', 'unspecified')} (initial capital ₹{stats.get('initial_capital_inr', 'unspecified')})",
         f"- Completed accepted trades: {sample['trades']}",
         f"- Trading sessions: {sample['sessions']} ({sample['first_session']} to {sample['last_session']})",
         f"- Net P&L: ₹{s['net_pnl_8bps_inr']:.2f}",
@@ -258,28 +386,129 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         "",
     ]
     lines += [f"- [{'x' if passed else ' '}] {name}" for name,passed in promotion["checks"].items()]
+    if promotion.get("paired_comparison_required"):
+        paired = promotion.get("paired_comparison") or {}
+        lines += ["", "## Paired challenger-minus-Champion comparison", ""]
+        lines += [
+            f"- Common evaluation sessions: {paired.get('common_sessions', 0)}",
+            f"- Challenger no-trade sessions (zero P&L): {paired.get('challenger_zero_trade_sessions', 0)}",
+            f"- Champion no-trade sessions (zero P&L): {paired.get('champion_zero_trade_sessions', 0)}",
+            f"- Mean paired difference at 8 bps/side: {paired.get('mean_difference_inr_per_session') if paired.get('mean_difference_inr_per_session') is not None else 'not estimable'} INR/session",
+            f"- Bonferroni-adjusted lower bound: {paired.get('adjusted_lower_bound_inr_per_session') if paired.get('adjusted_lower_bound_inr_per_session') is not None else 'not estimable'} INR/session",
+            f"- Multiple-testing family size: {paired.get('family_size', 3)}",
+        ]
     lines += ["", "## Hour-of-entry buckets", "", "| IST hour | Trades | Expectancy | Net P&L |", "|---:|---:|---:|---:|"]
     lines += [f"| {x['hour_ist']:02d}:00 | {x['trades']} | ₹{x['expectancy_inr']:.2f} | ₹{x['net_pnl_inr']:.2f} |" for x in s["hour_buckets"]]
     lines += ["", "## Limitations", ""] + [f"- {x}" for x in s["limitations"]]
     lines += ["", "No actual fills or future returns are implied. This report is a historical research diagnostic.", ""]
     return "\n".join(lines)
 
-def analyze_file(input_path: Path | list[Path], *, output_stem: Path, promotion_config: Path, results_doc: Path, initial_capital: float=20_000.0, slippage_bps: float=8.0, bootstrap_resamples: int=10_000, seed: int=42, track: str | None=None, strategy_version: str | None=None) -> tuple[dict[str,Any],dict[str,Any]]:
-    trades=load_trades(input_path,track=track,strategy_version=strategy_version)
-    stats=calculate_statistics(trades,initial_capital=initial_capital,slippage_bps=slippage_bps,bootstrap_resamples=bootstrap_resamples,seed=seed)
-    promotion=evaluate_promotion(stats,load_promotion_config(promotion_config))
-    output_stem.parent.mkdir(parents=True,exist_ok=True)
-    payload={"statistics":stats,"promotion":promotion,"source_files":[p.name for p in ([input_path] if isinstance(input_path,Path) else input_path)],"selected_track":trades.attrs.get("selected_track"),"selected_strategy_version":trades.attrs.get("selected_strategy_version")}
-    output_stem.with_suffix(".json").write_text(json.dumps(payload,indent=2,allow_nan=False),encoding="utf-8")
-    markdown=render_markdown(stats,promotion)
-    output_stem.with_suffix(".md").write_text(markdown,encoding="utf-8")
-    results_doc.parent.mkdir(parents=True,exist_ok=True)
-    results_doc.write_text(markdown,encoding="utf-8")
+def analyze_file(
+    input_path: Path | list[Path],
+    *,
+    output_stem: Path,
+    promotion_config: Path,
+    results_doc: Path,
+    initial_capital: float | None = None,
+    profile: str = "research",
+    champion_profile: str | None = None,
+    slippage_bps: float = 8.0,
+    bootstrap_resamples: int = 10_000,
+    seed: int = 42,
+    track: str | None = None,
+    strategy_version: str | None = None,
+    champion_input_path: Path | list[Path] | None = None,
+    champion_strategy_version: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    trades = load_trades(input_path, track=track, strategy_version=strategy_version)
+    profile_risk, _charge_rates = load_phase2_settings(profile=profile)
+    if initial_capital is not None and (
+        not math.isfinite(initial_capital)
+        or not math.isclose(initial_capital, profile_risk.capital_inr, rel_tol=0.0, abs_tol=0.01)
+    ):
+        raise ValueError("initial capital must match the selected account profile; change the profile configuration instead")
+    capital = profile_risk.capital_inr
+    stats = calculate_statistics(
+        trades, initial_capital=capital, slippage_bps=slippage_bps,
+        bootstrap_resamples=bootstrap_resamples, seed=seed,
+    )
+    stats["account_profile"] = profile
+    stats["initial_capital_inr"] = capital
+    selected_track = str(trades.attrs.get("selected_track") or "").upper()
+    selected_version = str(trades.attrs.get("selected_strategy_version") or "").lower()
+    require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
+    shadow_markers = ("SHADOW", "CANDIDATE_OUTCOME", "INDEPENDENT_OUTCOME", "NEAR_MISS")
+    eligible_track = selected_track in {"", "CHAMPION", "CHALLENGER"} and not any(
+        marker in selected_track or marker.lower() in selected_version for marker in shadow_markers
+    )
+    paired = None
+    if champion_input_path is not None:
+        if not require_paired:
+            raise ValueError("--champion-trades is only valid when analyzing a CHALLENGER track")
+        if initial_capital is not None:
+            raise ValueError("paired comparison must use the selected profile capital; remove --initial-capital override")
+        if champion_profile is None or champion_profile != profile:
+            raise ValueError("paired comparison requires matching explicit profile and champion-profile declarations")
+        challenger_paths = [input_path] if isinstance(input_path, Path) else input_path
+        champion_paths = [champion_input_path] if isinstance(champion_input_path, Path) else champion_input_path
+        challenger_calendar = _daily_report_sessions(challenger_paths)
+        champion_calendar = _daily_report_sessions(champion_paths)
+        if challenger_calendar != champion_calendar:
+            raise ValueError("paired challenger and Champion exports must cover the same evaluation-session calendar")
+        paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})
+        if str(paired_cfg.get("adjustment", "bonferroni")).lower() != "bonferroni":
+            raise ValueError("paired promotion comparison requires Bonferroni multiple-testing adjustment")
+        champion_trades = load_trades(
+            champion_input_path, track="CHAMPION",
+            strategy_version=champion_strategy_version,
+        )
+        paired = paired_session_bootstrap(
+            trades, champion_trades, slippage_bps=slippage_bps,
+            resamples=bootstrap_resamples, seed=seed,
+            family_size=int(paired_cfg.get("family_size", 3)),
+            familywise_alpha=float(paired_cfg.get("familywise_alpha", 0.05)),
+            session_calendar=challenger_calendar,
+        )
+    elif require_paired:
+        paired = None
+    config = load_promotion_config(promotion_config)
+    promotion = evaluate_promotion(
+        stats, config, paired_comparison=paired,
+        require_paired_comparison=require_paired,
+        eligible_for_promotion=eligible_track,
+    )
+    output_stem.parent.mkdir(parents=True, exist_ok=True)
+    source_paths = [input_path] if isinstance(input_path, Path) else input_path
+    payload = {
+        "statistics": stats,
+        "promotion": promotion,
+        "source_files": [path.name for path in source_paths],
+        "selected_track": trades.attrs.get("selected_track"),
+        "selected_strategy_version": trades.attrs.get("selected_strategy_version"),
+        "account_profile": profile,
+        "initial_capital_inr": capital,
+        "eligible_strategy_track": eligible_track,
+        "champion_account_profile": champion_profile,
+        "paired_champion_source_files": (
+            [path.name for path in ([champion_input_path] if isinstance(champion_input_path, Path) else champion_input_path)]
+            if champion_input_path is not None else []
+        ),
+    }
+    output_stem.with_suffix(".json").write_text(
+        json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    markdown = render_markdown(stats, promotion)
+    output_stem.with_suffix(".md").write_text(markdown, encoding="utf-8")
+    if promotion["decision"] == "PROMOTE":
+        results_doc.parent.mkdir(parents=True, exist_ok=True)
+        results_doc.write_text(markdown, encoding="utf-8")
+        print(f"Sanitized results document updated: {results_doc}")
+    else:
+        print(f"Sanitized results document unchanged; evidence gate is INCONCLUSIVE: {results_doc}")
     print(f"Performance JSON: {output_stem.with_suffix('.json')}")
     print(f"Performance Markdown: {output_stem.with_suffix('.md')}")
-    print(f"Sanitized results document: {results_doc}")
     print(f"Promotion decision: {promotion['decision']}")
-    return stats,promotion
+    return stats, promotion
 
 def main() -> None:
     parser=argparse.ArgumentParser(description=__doc__)
@@ -287,15 +516,19 @@ def main() -> None:
     parser.add_argument("--output",type=Path,default=Path("reports/performance/validation"))
     parser.add_argument("--results-doc",type=Path,default=Path("docs/RESULTS.md"))
     parser.add_argument("--promotion-config",type=Path,default=Path("config/promotion.yaml"))
-    parser.add_argument("--initial-capital",type=float,default=20_000.0)
+    parser.add_argument("--initial-capital",type=float,default=None,help="Optional assertion of capital; it must equal the selected account profile capital.")
+    parser.add_argument("--profile",choices=("research","paper","live-advisory"),default="research",help="Sizing/capital profile for the challenger or selected trade stream.")
+    parser.add_argument("--champion-profile",choices=("research","paper","live-advisory"),default=None,help="Required with --champion-trades; must match --profile.")
     parser.add_argument("--slippage-bps",type=float,default=8.0)
     parser.add_argument("--bootstrap-resamples",type=int,default=10_000)
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--track",type=str,default=None,help="Required when a daily paper-report CSV contains multiple tracks (e.g. CHAMPION).")
     parser.add_argument("--strategy-version",type=str,default=None,help="Required when the selected track contains multiple strategy versions.")
+    parser.add_argument("--champion-trades",type=Path,nargs="+",default=None,help="Champion daily trade exports used for paired challenger-minus-champion comparison.")
+    parser.add_argument("--champion-strategy-version",type=str,default=None,help="Required if the selected Champion files contain multiple strategy versions.")
     args=parser.parse_args()
     try:
-        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version)
+        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,profile=args.profile,champion_profile=args.champion_profile,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version,champion_input_path=args.champion_trades,champion_strategy_version=args.champion_strategy_version)
     except (ValueError,OSError) as exc:
         parser.error(str(exc))
 if __name__=="__main__": main()

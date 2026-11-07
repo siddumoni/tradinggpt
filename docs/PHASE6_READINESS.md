@@ -57,10 +57,11 @@ For a different isolated paper track, use its exact track label and the correct 
 
 For portfolio-level claims, first run `src.portfolio_replay` on one frozen baseline trade log per candidate stream, then pass the resulting shared-capital trade-detail CSV to `src.performance_stats`. Record the exact input filenames and frozen evaluation window in the review notes.
 
-The command writes:
-- `reports/performance/validation.json` — machine-readable statistics and gate checks;
-- `reports/performance/validation.md` — detailed research report; and
-- `docs/RESULTS.md` — sanitized public aggregate summary.
+The command always writes:
+- `reports/performance/validation.json` — machine-readable statistics and gate checks; and
+- `reports/performance/validation.md` — detailed research report.
+
+It updates `docs/RESULTS.md` only when every configured promotion check passes. If the sample, paired-comparison, or any other gate is inconclusive, the existing public results status is left unchanged.
 
 Do not run the command against an under-sized sample if the intent is to update the public results page. The current `docs/RESULTS.md` is deliberately a status statement until the evidence gate is met.
 

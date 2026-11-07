@@ -174,8 +174,8 @@ def simulate_portfolio(
     ):
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
-    if not math.isfinite(slippage_bps_per_side) or not 0 <= slippage_bps_per_side <= 100:
-        raise ValueError("slippage_bps_per_side must be finite and between 0 and 100")
+    if not math.isfinite(slippage_bps_per_side) or not 5 <= slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be finite and between 5 and 100")
     if isinstance(max_concurrent_positions, bool) or max_concurrent_positions < 1:
         raise ValueError("max_concurrent_positions must be a positive integer")
 
@@ -439,8 +439,8 @@ def main() -> None:
         parser.error("--initial-capital must be finite and positive")
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         parser.error("--risk-per-trade must be finite and positive")
-    if not math.isfinite(slippage) or not 0 <= slippage <= 100:
-        parser.error("--slippage-bps must be between 0 and 100")
+    if not math.isfinite(slippage) or not 5 <= slippage <= 100:
+        parser.error("--slippage-bps must be between 5 and 100")
     if args.max_concurrent_positions < 1:
         parser.error("--max-concurrent-positions must be a positive integer")
     run_portfolio_replay(

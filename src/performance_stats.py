@@ -214,10 +214,12 @@ def paired_session_bootstrap(
     familywise_alpha: float = 0.05,
 ) -> dict[str, Any]:
     """Paired session-level challenger-minus-champion bootstrap with Bonferroni control."""
-    if family_size < 1:
-        raise ValueError("family_size must be at least one")
-    if not 0 < familywise_alpha < 1:
-        raise ValueError("familywise_alpha must be between zero and one")
+    if family_size < 3:
+        raise ValueError("family_size must include all three active challenger tracks")
+    if not 0 < familywise_alpha <= 0.05:
+        raise ValueError("familywise_alpha must be positive and cannot exceed 0.05")
+    if slippage_bps != 8.0:
+        raise ValueError("paired promotion comparison must use exactly 8 bps per side")
     if resamples < 1_000:
         raise ValueError("at least 1,000 bootstrap resamples are required")
     challenger = _prepare_trades(challenger_trades, slippage_bps=slippage_bps)
@@ -280,7 +282,7 @@ def evaluate_promotion(
     minimum_pf = float(thresholds.get("minimum_profit_factor", 1.0))
     max_concentration = float(thresholds.get("maximum_symbol_or_session_profit_share", 0.30))
     paired_config = config.get("paired_comparison", {})
-    minimum_common_sessions = int(paired_config.get("minimum_common_sessions", required_sessions))
+    minimum_common_sessions = max(required_sessions, int(paired_config.get("minimum_common_sessions", required_sessions)))
     checks = {
         "minimum_trades": stats["sample"]["trades"] >= required_trades,
         "minimum_sessions": stats["sample"]["sessions"] >= required_sessions,
@@ -342,6 +344,15 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         "",
     ]
     lines += [f"- [{'x' if passed else ' '}] {name}" for name,passed in promotion["checks"].items()]
+    if promotion.get("paired_comparison_required"):
+        paired = promotion.get("paired_comparison") or {}
+        lines += ["", "## Paired challenger-minus-Champion comparison", ""]
+        lines += [
+            f"- Common entry sessions: {paired.get('common_sessions', 0)}",
+            f"- Mean paired difference at 8 bps/side: {paired.get('mean_difference_inr_per_session') if paired.get('mean_difference_inr_per_session') is not None else 'not estimable'} INR/session",
+            f"- Bonferroni-adjusted lower bound: {paired.get('adjusted_lower_bound_inr_per_session') if paired.get('adjusted_lower_bound_inr_per_session') is not None else 'not estimable'} INR/session",
+            f"- Multiple-testing family size: {paired.get('family_size', 3)}",
+        ]
     lines += ["", "## Hour-of-entry buckets", "", "| IST hour | Trades | Expectancy | Net P&L |", "|---:|---:|---:|---:|"]
     lines += [f"| {x['hour_ist']:02d}:00 | {x['trades']} | ₹{x['expectancy_inr']:.2f} | ₹{x['net_pnl_inr']:.2f} |" for x in s["hour_buckets"]]
     lines += ["", "## Limitations", ""] + [f"- {x}" for x in s["limitations"]]
@@ -373,11 +384,13 @@ def analyze_file(
     require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
     paired = None
     if champion_input_path is not None:
+        paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})
+        if str(paired_cfg.get("adjustment", "bonferroni")).lower() != "bonferroni":
+            raise ValueError("paired promotion comparison requires Bonferroni multiple-testing adjustment")
         champion_trades = load_trades(
             champion_input_path, track="CHAMPION",
             strategy_version=champion_strategy_version,
         )
-        paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})
         paired = paired_session_bootstrap(
             trades, champion_trades, slippage_bps=slippage_bps,
             resamples=bootstrap_resamples, seed=seed,

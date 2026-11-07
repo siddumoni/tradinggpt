@@ -151,8 +151,8 @@ def test_trade_plan_alert_is_html_safe_and_deduplicated(tmp_path):
     plan = _trade_plan()
     message = format_trade_plan(plan)
     assert "M&amp;M" in message
-    assert "Stop-loss: ₹98.00" in message
-    assert "Net R:R: T1 1.60" in message
+    assert "<b>Stop-loss:</b> ₹98.00" in message
+    assert "<b>Net R:R:</b> T1 1.60" in message
     assert notifier.send_trade_plan(plan) is True
     assert notifier.send_trade_plan(plan) is True
     assert len(sent) == 1

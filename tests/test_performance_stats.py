@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from src.performance_stats import (
     analyze_file, calculate_statistics, evaluate_promotion, load_trades,
-    paired_session_bootstrap, session_block_bootstrap,
+    _daily_report_sessions, paired_session_bootstrap, session_block_bootstrap,
 )
 
 def sample_trades():
@@ -247,3 +247,41 @@ def test_paired_session_bootstrap_zero_fills_no_trade_days_from_shared_calendar(
     assert result["challenger_zero_trade_sessions"] == 1
     assert result["champion_zero_trade_sessions"] == 0
     assert result["mean_difference_inr_per_session"] < 0
+
+
+def test_daily_report_calendar_is_extracted_from_date_stamped_filenames(tmp_path):
+    paths = [
+        tmp_path / "paper_daily_2026-11-05_trades.csv",
+        tmp_path / "paper_daily_2026-11-06_trades.csv",
+    ]
+    assert _daily_report_sessions(paths) == ["2026-11-05", "2026-11-06"]
+
+
+def test_paired_analysis_rejects_different_daily_report_calendars(tmp_path):
+    challenger = sample_trades()
+    challenger["track"] = "CHALLENGER"
+    challenger["strategy_version"] = "challenger_test_v1"
+    champion = sample_trades()
+    champion["track"] = "CHAMPION"
+    champion["strategy_version"] = "nse_champion_v2_foundation_candidate"
+    challenger_path = tmp_path / "paper_daily_2026-02-01_trades.csv"
+    champion_path = tmp_path / "paper_daily_2026-02-02_trades.csv"
+    challenger.to_csv(challenger_path, index=False)
+    champion.to_csv(champion_path, index=False)
+    promotion_path = tmp_path / "promotion.yaml"
+    promotion_path.write_text(
+        "thresholds:\\n  minimum_trades: 100\\n  minimum_sessions: 20\\n"
+        "  minimum_profit_factor: 1.0\\n  maximum_symbol_or_session_profit_share: 0.30\\n"
+        "paired_comparison:\\n  minimum_common_sessions: 20\\n  familywise_alpha: 0.05\\n"
+        "  family_size: 3\\n  adjustment: bonferroni\\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="same evaluation-session calendar"):
+        analyze_file(
+            challenger_path, output_stem=tmp_path / "calendar-mismatch",
+            promotion_config=promotion_path, results_doc=tmp_path / "RESULTS.md",
+            track="CHALLENGER", strategy_version="challenger_test_v1",
+            champion_input_path=champion_path, profile="research",
+            champion_profile="research",
+        )

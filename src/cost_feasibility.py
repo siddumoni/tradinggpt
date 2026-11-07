@@ -65,8 +65,10 @@ def audit_candidates(
         symbol = str(raw.get("symbol", "")).strip().upper()
         strategy = str(raw.get("strategy") or "UNSPECIFIED").strip()
         strategy_version = str(raw.get("strategy_version") or "UNVERSIONED_SIGNAL_JOURNAL").strip()
-        stamp_value = raw.get("signal_time", raw.get("date"))
-        if stamp_value is None or pd.isna(stamp_value):
+        stamp_value = raw.get("signal_time")
+        if stamp_value is None or pd.isna(stamp_value) or not str(stamp_value).strip():
+            stamp_value = raw.get("date")
+        if stamp_value is None or pd.isna(stamp_value) or not str(stamp_value).strip():
             raise ValueError("candidate date or signal_time is required")
         stamp = pd.Timestamp(stamp_value)
         if pd.isna(stamp):

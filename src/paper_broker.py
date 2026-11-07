@@ -469,6 +469,10 @@ class PaperBroker:
                     eligible.append(item)
 
             ranked = rank_paper_candidates(eligible, snapshots)
+            if before_entry_callback is not None:
+                # Commit scan/allocation metadata before network delivery so a
+                # slow Telegram API call does not hold SQLite's write lock.
+                db.commit()
             for ranked_item in ranked:
                 item = ranked_item["candidate"]
                 symbol = ranked_item["symbol"]
@@ -495,6 +499,8 @@ class PaperBroker:
                 except _RejectedSignal as exc:
                     rejected += 1
                     self._record_rejection(db, item, as_of, str(exc))
+                if before_entry_callback is not None:
+                    db.commit()
         conditional_count = action_counts.get("CONDITIONAL_BUY", 0) + action_counts.get(
             "CONDITIONAL_SHORT", 0
         )

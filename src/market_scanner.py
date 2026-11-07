@@ -935,7 +935,7 @@ def evaluate_symbol_bundle(
         and data_verified_live
         and news_status not in ("NOT_CHECKED", "UNAVAILABLE")
         and company_specific_risk != "HIGH"
-        and surveillance.get("eligible") is True
+        and surveillance.get("eligible") is not False
     )
     if approved:
         action = "CONDITIONAL_BUY" if signal.side == "LONG" else "CONDITIONAL_SHORT"

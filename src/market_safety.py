@@ -23,6 +23,7 @@ class MarketSafetySettings:
     relative_volume_minimum_valid_sessions: int = 10
     relative_volume_minimum_ratio: float = 1.0
     relative_volume_lookback_calendar_days: int = 45
+    previous_day_level_buffer_atr: float = 0.3
 
 
 def load_market_safety_settings(path: Path = DEFAULT_SAFETY_PATH) -> MarketSafetySettings:
@@ -34,14 +35,16 @@ def load_market_safety_settings(path: Path = DEFAULT_SAFETY_PATH) -> MarketSafet
         raise ValueError("Market-safety settings must be a YAML mapping")
     circuit = raw.get("circuit_limits", {})
     relative = raw.get("relative_volume", {})
-    if not isinstance(circuit, dict) or not isinstance(relative, dict):
-        raise ValueError("circuit_limits and relative_volume settings must be mappings")
+    previous_levels = raw.get("previous_day_levels", {})
+    if not isinstance(circuit, dict) or not isinstance(relative, dict) or not isinstance(previous_levels, dict):
+        raise ValueError("circuit_limits, relative_volume and previous_day_levels settings must be mappings")
     try:
         buffer_pct = float(circuit.get("near_band_buffer_pct", 0.5))
         lookback = int(relative.get("lookback_sessions", 20))
         minimum_sessions = int(relative.get("minimum_valid_sessions", 10))
         minimum_ratio = float(relative.get("minimum_ratio", 1.0))
         calendar_days = int(relative.get("lookback_calendar_days", 45))
+        level_buffer_atr = float(previous_levels.get("proximity_buffer_atr", 0.3))
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("Market-safety thresholds must be numeric") from exc
     if not isfinite(buffer_pct) or buffer_pct < 0:
@@ -52,12 +55,15 @@ def load_market_safety_settings(path: Path = DEFAULT_SAFETY_PATH) -> MarketSafet
         raise ValueError("relative-volume minimum ratio must be finite and positive")
     if calendar_days < lookback:
         raise ValueError("relative-volume calendar lookback must be at least the session lookback")
+    if not isfinite(level_buffer_atr) or level_buffer_atr <= 0:
+        raise ValueError("previous-day level ATR buffer must be finite and positive")
     return MarketSafetySettings(
         circuit_near_band_buffer_pct=buffer_pct,
         relative_volume_lookback_sessions=lookback,
         relative_volume_minimum_valid_sessions=minimum_sessions,
         relative_volume_minimum_ratio=minimum_ratio,
         relative_volume_lookback_calendar_days=calendar_days,
+        previous_day_level_buffer_atr=level_buffer_atr,
     )
 
 
@@ -125,6 +131,73 @@ def inspect_circuit_limits(quote: Any, *, buffer_pct: float = 0.5) -> dict[str, 
         "distance_to_upper_pct": round(upper_distance, 4),
         "distance_to_lower_pct": round(lower_distance, 4),
         "reason": "",
+    }
+
+
+def inspect_directional_level_proximity(
+    side: str,
+    *,
+    entry_price: float,
+    atr: float,
+    previous_levels: dict[str, Any],
+    buffer_atr: float = 0.3,
+) -> dict[str, Any]:
+    """Block a setup when a previous-session reference is too close ahead.
+
+    LONG checks only prior high and pivot levels above the entry. SHORT checks
+    only prior low and pivot levels below the entry. Levels behind the trade
+    are not resistance/support in the direction of travel and are ignored.
+    """
+    direction = str(side).strip().upper()
+    if direction not in {"LONG", "SHORT"}:
+        raise ValueError("side must be LONG or SHORT")
+    numbers = (entry_price, atr, buffer_atr)
+    if not all(isfinite(float(value)) for value in numbers):
+        raise ValueError("entry_price, ATR and buffer_atr must be finite")
+    if entry_price <= 0 or atr <= 0 or buffer_atr <= 0:
+        raise ValueError("entry_price, ATR and buffer_atr must be positive")
+    if not isinstance(previous_levels, dict):
+        raise ValueError("previous_levels must be a mapping")
+    keys = ("previous_high", "pivot") if direction == "LONG" else ("previous_low", "pivot")
+    ahead: list[tuple[str, float, float]] = []
+    for key in keys:
+        raw = previous_levels.get(key)
+        if raw is None:
+            continue
+        try:
+            level = float(raw)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Previous-session level {key} is invalid") from exc
+        if not isfinite(level) or level <= 0:
+            raise ValueError(f"Previous-session level {key} must be finite and positive")
+        distance = (level - entry_price) / atr if direction == "LONG" else (entry_price - level) / atr
+        if distance >= 0:
+            ahead.append((key, level, distance))
+    if not ahead:
+        return {
+            "eligible": True,
+            "status": "NO_PREVIOUS_LEVEL_AHEAD",
+            "side": direction,
+            "buffer_atr": buffer_atr,
+            "nearest_level": None,
+            "distance_atr": None,
+            "reason": "",
+        }
+    key, level, distance = min(ahead, key=lambda item: item[2])
+    blocked = distance <= buffer_atr
+    return {
+        "eligible": not blocked,
+        "status": "BLOCKED_NEAR_PREVIOUS_LEVEL" if blocked else "CLEAR",
+        "side": direction,
+        "buffer_atr": buffer_atr,
+        "nearest_level_name": key,
+        "nearest_level": level,
+        "distance_atr": round(distance, 6),
+        "reason": (
+            f"{direction} entry is {distance:.2f} ATR from previous-session {key} "
+            f"(₹{level:.2f}); minimum clearance is {buffer_atr:.2f} ATR."
+            if blocked else ""
+        ),
     }
 
 

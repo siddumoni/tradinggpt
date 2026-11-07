@@ -226,3 +226,24 @@ def test_performance_analysis_rejects_capital_outside_selected_profile(tmp_path)
             promotion_config=promotion_path, results_doc=tmp_path / "RESULTS.md",
             profile="research", initial_capital=100_000.0,
         )
+
+
+def test_paired_session_bootstrap_zero_fills_no_trade_days_from_shared_calendar():
+    day_one, day_two, day_three = "2026-02-01", "2026-02-02", "2026-02-03"
+    challenger = paired_sample([day_one, day_three], 20.0)
+    champion = pd.concat([
+        paired_sample([day_one], 0.0),
+        paired_sample([day_two], 60.0),
+        paired_sample([day_three], 0.0),
+    ], ignore_index=True)
+
+    result = paired_session_bootstrap(
+        challenger, champion,
+        session_calendar=[day_one, day_two, day_three],
+        resamples=1000, seed=7,
+    )
+
+    assert result["common_sessions"] == 3
+    assert result["challenger_zero_trade_sessions"] == 1
+    assert result["champion_zero_trade_sessions"] == 0
+    assert result["mean_difference_inr_per_session"] < 0

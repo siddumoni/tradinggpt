@@ -86,12 +86,19 @@ class TelegramEventNotifier:
         self._clock = clock or time.time
         self._now_provider = now_provider or (lambda: datetime.now(IST))
         self._trade_state = self._read_trade_plan_state()
-        self._sent_signal_ids = set(self._trade_state.get("sent_signal_ids", []))
-        self._digest_dates = set(self._trade_state.get("digest_dates", []))
+        sent_ids = self._trade_state.get("sent_signal_ids", [])
+        digest_dates = self._trade_state.get("digest_dates", [])
+        sent_timestamps = self._trade_state.get("sent_timestamps", [])
+        self._sent_signal_ids = {
+            value for value in sent_ids if isinstance(value, str)
+        } if isinstance(sent_ids, list) else set()
+        self._digest_dates = {
+            value for value in digest_dates if isinstance(value, str)
+        } if isinstance(digest_dates, list) else set()
         self._sent_timestamps = [
-            float(value) for value in self._trade_state.get("sent_timestamps", [])
+            float(value) for value in sent_timestamps
             if _finite_timestamp(value)
-        ]
+        ] if isinstance(sent_timestamps, list) else []
         self._alert_lock = threading.Lock()
         self._cursor: int | None = self._read_cursor()
         self._stop = threading.Event()

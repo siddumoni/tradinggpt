@@ -522,9 +522,46 @@ def test_directional_kite_candidate_passes_quote_margin_risk_and_news_gates(monk
     assert candidate["entry_validation"]["status"] == "REVALIDATED"
     assert candidate["entry_validation"]["entry_price_source"] == "best_ask"
     assert candidate["entry_validation"]["risk_breakdown"]["costs_at_stop"] is not None
+    assert candidate["entry_validation"]["previous_day_levels"]["executable_proximity"]["eligible"] is True
     assert report["news"]["company_news_checked"] == ["INFY"]
     assert report["advisory_only"] is True
     assert report["orders_placed_or_modified"] is False
+
+
+def test_executable_quote_rechecks_previous_session_level_clearance(monkeypatch, tmp_path):
+    observed = {}
+
+    def block_executable_entry(
+        side, *, entry_price, atr, previous_levels, buffer_atr,
+    ):
+        observed.update({
+            "side": side,
+            "entry_price": entry_price,
+            "atr": atr,
+            "previous_levels": previous_levels,
+            "buffer_atr": buffer_atr,
+        })
+        return {
+            "eligible": False,
+            "status": "BLOCKED_NEAR_PREVIOUS_LEVEL",
+            "distance_atr": 0.2,
+            "buffer_atr": buffer_atr,
+            "reason": "Executable entry is only 0.20 ATR from previous-session high.",
+        }
+
+    monkeypatch.setattr(advisory_engine, "inspect_directional_level_proximity", block_executable_entry)
+    report, _calls = _run_directional_kite_scan(monkeypatch, tmp_path, margin_result=15.0)
+    candidate = report["candidates"][0]
+
+    assert observed["side"] == "LONG"
+    assert observed["entry_price"] == pytest.approx(candidate["entry_validation"]["executable_entry_price"])
+    assert observed["entry_price"] == pytest.approx(14.01)
+    assert observed["atr"] > 0
+    assert observed["buffer_atr"] == pytest.approx(0.3)
+    assert candidate["action"] == "WATCH_CANDIDATE"
+    assert candidate["quantity"] == 0
+    assert candidate["entry_validation"]["status"] == "REJECTED_PREVIOUS_DAY_LEVEL_AT_EXECUTABLE_ENTRY"
+    assert candidate["entry_validation"]["previous_day_levels"]["executable_proximity"]["eligible"] is False
 
 
 def test_directional_candidate_is_demoted_when_live_ask_destroys_net_rr(monkeypatch, tmp_path):

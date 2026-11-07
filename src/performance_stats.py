@@ -203,12 +203,84 @@ def calculate_statistics(trades: pd.DataFrame, *, initial_capital: float = 20_00
         ],
     }
 
-def evaluate_promotion(stats: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def paired_session_bootstrap(
+    challenger_trades: pd.DataFrame,
+    champion_trades: pd.DataFrame,
+    *,
+    slippage_bps: float = 8.0,
+    resamples: int = 10_000,
+    seed: int = 42,
+    family_size: int = 3,
+    familywise_alpha: float = 0.05,
+) -> dict[str, Any]:
+    """Paired session-level challenger-minus-champion bootstrap with Bonferroni control."""
+    if family_size < 1:
+        raise ValueError("family_size must be at least one")
+    if not 0 < familywise_alpha < 1:
+        raise ValueError("familywise_alpha must be between zero and one")
+    if resamples < 1_000:
+        raise ValueError("at least 1,000 bootstrap resamples are required")
+    challenger = _prepare_trades(challenger_trades, slippage_bps=slippage_bps)
+    champion = _prepare_trades(champion_trades, slippage_bps=slippage_bps)
+    challenger_daily = challenger.groupby("session").net_pnl_8bps.sum()
+    champion_daily = champion.groupby("session").net_pnl_8bps.sum()
+    common = sorted(set(challenger_daily.index).intersection(champion_daily.index))
+    alpha = familywise_alpha / family_size
+    if len(common) < 2:
+        return {
+            "status": "not_estimable_insufficient_common_sessions",
+            "common_sessions": len(common),
+            "first_common_session": common[0] if common else None,
+            "last_common_session": common[-1] if common else None,
+            "mean_difference_inr_per_session": None,
+            "adjusted_lower_bound_inr_per_session": None,
+            "adjusted_upper_bound_inr_per_session": None,
+            "family_size": family_size,
+            "familywise_alpha": familywise_alpha,
+            "per_comparison_alpha": alpha,
+            "method": "paired session-block bootstrap with Bonferroni adjustment",
+        }
+    differences = (
+        challenger_daily.loc[common].to_numpy(dtype=float)
+        - champion_daily.loc[common].to_numpy(dtype=float)
+    )
+    rng = np.random.default_rng(seed)
+    draws = np.empty(resamples, dtype=float)
+    count = len(differences)
+    for index in range(resamples):
+        sample = rng.integers(0, count, size=count)
+        draws[index] = float(differences[sample].mean())
+    return {
+        "status": "estimated",
+        "common_sessions": count,
+        "first_common_session": common[0],
+        "last_common_session": common[-1],
+        "mean_difference_inr_per_session": float(differences.mean()),
+        "adjusted_lower_bound_inr_per_session": float(np.quantile(draws, alpha)),
+        "adjusted_upper_bound_inr_per_session": float(np.quantile(draws, 1 - alpha)),
+        "family_size": family_size,
+        "familywise_alpha": familywise_alpha,
+        "per_comparison_alpha": alpha,
+        "method": "paired session-block percentile bootstrap with Bonferroni adjustment",
+        "resamples": resamples,
+        "seed": seed,
+    }
+
+
+def evaluate_promotion(
+    stats: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    paired_comparison: dict[str, Any] | None = None,
+    require_paired_comparison: bool = False,
+) -> dict[str, Any]:
     thresholds = config.get("thresholds", {})
     required_trades = int(thresholds.get("minimum_trades", 100))
     required_sessions = int(thresholds.get("minimum_sessions", 20))
     minimum_pf = float(thresholds.get("minimum_profit_factor", 1.0))
     max_concentration = float(thresholds.get("maximum_symbol_or_session_profit_share", 0.30))
+    paired_config = config.get("paired_comparison", {})
+    minimum_common_sessions = int(paired_config.get("minimum_common_sessions", required_sessions))
     checks = {
         "minimum_trades": stats["sample"]["trades"] >= required_trades,
         "minimum_sessions": stats["sample"]["sessions"] >= required_sessions,
@@ -216,8 +288,20 @@ def evaluate_promotion(stats: dict[str, Any], config: dict[str, Any]) -> dict[st
         "minimum_profit_factor_at_8bps": stats["profit_factor_status"] == "infinite_no_losses" or (stats["profit_factor"] is not None and stats["profit_factor"] >= minimum_pf),
         "maximum_symbol_or_session_profit_concentration": max(stats["profit_concentration"]["max_symbol_share"], stats["profit_concentration"]["max_session_share"]) <= max_concentration,
     }
+    if require_paired_comparison:
+        checks["minimum_common_paired_sessions"] = paired_comparison is not None and paired_comparison.get("common_sessions", 0) >= minimum_common_sessions
+        checks["positive_paired_challenger_minus_champion_mean_at_8bps"] = paired_comparison is not None and paired_comparison.get("mean_difference_inr_per_session") is not None and paired_comparison["mean_difference_inr_per_session"] > 0
+        checks["positive_multiplicity_adjusted_paired_lower_bound_at_8bps"] = paired_comparison is not None and paired_comparison.get("adjusted_lower_bound_inr_per_session") is not None and paired_comparison["adjusted_lower_bound_inr_per_session"] > 0
     failures = [key for key, passed in checks.items() if not passed]
-    return {"decision": "PROMOTE" if not failures else "INCONCLUSIVE", "promotion_scope": "next research-validation stage only; never live trading authorization", "checks": checks, "failed_checks": failures, "thresholds": thresholds}
+    return {
+        "decision": "PROMOTE" if not failures else "INCONCLUSIVE",
+        "promotion_scope": "next research-validation stage only; never live trading authorization",
+        "checks": checks,
+        "failed_checks": failures,
+        "thresholds": thresholds,
+        "paired_comparison": paired_comparison,
+        "paired_comparison_required": require_paired_comparison,
+    }
 
 def load_promotion_config(path: Path) -> dict[str, Any]:
     try:
@@ -264,22 +348,75 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
     lines += ["", "No actual fills or future returns are implied. This report is a historical research diagnostic.", ""]
     return "\n".join(lines)
 
-def analyze_file(input_path: Path | list[Path], *, output_stem: Path, promotion_config: Path, results_doc: Path, initial_capital: float=20_000.0, slippage_bps: float=8.0, bootstrap_resamples: int=10_000, seed: int=42, track: str | None=None, strategy_version: str | None=None) -> tuple[dict[str,Any],dict[str,Any]]:
-    trades=load_trades(input_path,track=track,strategy_version=strategy_version)
-    stats=calculate_statistics(trades,initial_capital=initial_capital,slippage_bps=slippage_bps,bootstrap_resamples=bootstrap_resamples,seed=seed)
-    promotion=evaluate_promotion(stats,load_promotion_config(promotion_config))
-    output_stem.parent.mkdir(parents=True,exist_ok=True)
-    payload={"statistics":stats,"promotion":promotion,"source_files":[p.name for p in ([input_path] if isinstance(input_path,Path) else input_path)],"selected_track":trades.attrs.get("selected_track"),"selected_strategy_version":trades.attrs.get("selected_strategy_version")}
-    output_stem.with_suffix(".json").write_text(json.dumps(payload,indent=2,allow_nan=False),encoding="utf-8")
-    markdown=render_markdown(stats,promotion)
-    output_stem.with_suffix(".md").write_text(markdown,encoding="utf-8")
-    results_doc.parent.mkdir(parents=True,exist_ok=True)
-    results_doc.write_text(markdown,encoding="utf-8")
+def analyze_file(
+    input_path: Path | list[Path],
+    *,
+    output_stem: Path,
+    promotion_config: Path,
+    results_doc: Path,
+    initial_capital: float = 20_000.0,
+    slippage_bps: float = 8.0,
+    bootstrap_resamples: int = 10_000,
+    seed: int = 42,
+    track: str | None = None,
+    strategy_version: str | None = None,
+    champion_input_path: Path | list[Path] | None = None,
+    champion_strategy_version: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    trades = load_trades(input_path, track=track, strategy_version=strategy_version)
+    stats = calculate_statistics(
+        trades, initial_capital=initial_capital, slippage_bps=slippage_bps,
+        bootstrap_resamples=bootstrap_resamples, seed=seed,
+    )
+    selected_track = str(trades.attrs.get("selected_track") or "").upper()
+    selected_version = str(trades.attrs.get("selected_strategy_version") or "").lower()
+    require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
+    paired = None
+    if champion_input_path is not None:
+        champion_trades = load_trades(
+            champion_input_path, track="CHAMPION",
+            strategy_version=champion_strategy_version,
+        )
+        paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})
+        paired = paired_session_bootstrap(
+            trades, champion_trades, slippage_bps=slippage_bps,
+            resamples=bootstrap_resamples, seed=seed,
+            family_size=int(paired_cfg.get("family_size", 3)),
+            familywise_alpha=float(paired_cfg.get("familywise_alpha", 0.05)),
+        )
+    config = load_promotion_config(promotion_config)
+    promotion = evaluate_promotion(
+        stats, config, paired_comparison=paired,
+        require_paired_comparison=require_paired,
+    )
+    output_stem.parent.mkdir(parents=True, exist_ok=True)
+    source_paths = [input_path] if isinstance(input_path, Path) else input_path
+    payload = {
+        "statistics": stats,
+        "promotion": promotion,
+        "source_files": [path.name for path in source_paths],
+        "selected_track": trades.attrs.get("selected_track"),
+        "selected_strategy_version": trades.attrs.get("selected_strategy_version"),
+        "paired_champion_source_files": (
+            [path.name for path in ([champion_input_path] if isinstance(champion_input_path, Path) else champion_input_path)]
+            if champion_input_path is not None else []
+        ),
+    }
+    output_stem.with_suffix(".json").write_text(
+        json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    markdown = render_markdown(stats, promotion)
+    output_stem.with_suffix(".md").write_text(markdown, encoding="utf-8")
+    if promotion["decision"] == "PROMOTE":
+        results_doc.parent.mkdir(parents=True, exist_ok=True)
+        results_doc.write_text(markdown, encoding="utf-8")
+        print(f"Sanitized results document updated: {results_doc}")
+    else:
+        print(f"Sanitized results document unchanged; evidence gate is INCONCLUSIVE: {results_doc}")
     print(f"Performance JSON: {output_stem.with_suffix('.json')}")
     print(f"Performance Markdown: {output_stem.with_suffix('.md')}")
-    print(f"Sanitized results document: {results_doc}")
     print(f"Promotion decision: {promotion['decision']}")
-    return stats,promotion
+    return stats, promotion
 
 def main() -> None:
     parser=argparse.ArgumentParser(description=__doc__)
@@ -293,9 +430,11 @@ def main() -> None:
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--track",type=str,default=None,help="Required when a daily paper-report CSV contains multiple tracks (e.g. CHAMPION).")
     parser.add_argument("--strategy-version",type=str,default=None,help="Required when the selected track contains multiple strategy versions.")
+    parser.add_argument("--champion-trades",type=Path,nargs="+",default=None,help="Champion daily trade exports used for paired challenger-minus-champion comparison.")
+    parser.add_argument("--champion-strategy-version",type=str,default=None,help="Required if the selected Champion files contain multiple strategy versions.")
     args=parser.parse_args()
     try:
-        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version)
+        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version,champion_input_path=args.champion_trades,champion_strategy_version=args.champion_strategy_version)
     except (ValueError,OSError) as exc:
         parser.error(str(exc))
 if __name__=="__main__": main()

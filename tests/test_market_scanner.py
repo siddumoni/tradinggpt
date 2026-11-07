@@ -31,11 +31,32 @@ def test_indicators_are_computed_without_external_ta_package():
     assert frame["atr_14"].dropna().gt(0).any()
 
 
+def test_scanner_indicators_seed_at_next_session_open_without_overnight_gap():
+    prior = sample_candles(14, start="2026-10-15 09:15:00")
+    current = sample_candles(1, start="2026-10-16 09:15:00")
+    frame = add_scanner_indicators(candles_to_frame(prior + current))
+    current_open = pd.Timestamp("2026-10-16 09:15:00", tz=IST)
+    assert frame.loc[current_open, "atr_14"] == pytest.approx(0.6)
+
+
 def test_completed_candles_excludes_current_forming_bar():
     now = datetime(2026, 10, 16, 9, 42, tzinfo=IST)
     frame = candles_to_frame(sample_candles(6, start="2026-10-16 09:15:00"))
     done = completed_candles(frame, 5, now)
     assert done.index.max().strftime("%H:%M") == "09:35"
+
+
+def test_live_scanner_atr_uses_prior_session_seed_before_intraday_warmup():
+    now = datetime(2026, 10, 16, 9, 30, tzinfo=IST)
+    bundle = {
+        "provider": "test",
+        "candles_5m": sample_candles(3, start="2026-10-16 09:15:00"),
+        "candles_15m": sample_candles(1, start="2026-10-16 09:15:00"),
+        "candles_5m_history": sample_candles(72, start="2026-10-15 09:15:00"),
+    }
+    result = evaluate_symbol_bundle("TEST", bundle, now=now)
+    assert result.action == "NO_TRADE"
+    assert any("ATR seeded from the complete previous session" in reason for reason in result.reasons), result.reasons
 
 
 def test_weekend_fails_closed_without_signal():
@@ -321,3 +342,36 @@ def test_no_trade_factory_always_returns_zero_quantity_and_preserves_gate_contex
     assert result.quantity == 0
     assert result.margin_verified is False
     assert result.entry_validation["status"] == "REJECTED_CIRCUIT_LIMIT"
+
+
+
+def test_prior_session_atr_unlocks_opening_range_candidate_before_old_warmup():
+    from src.execution_model import session_aware_atr
+    from src.strategies.opening_range import opening_range_signal
+
+    prior = candles_to_frame(sample_candles(14, start="2026-10-15 09:15:00"))
+    rows = [
+        (100.0, 100.4, 99.8, 100.2, 1000),
+        (100.2, 100.6, 100.0, 100.4, 1000),
+        (100.4, 100.8, 100.2, 100.6, 1000),
+        (100.7, 101.1, 100.6, 101.0, 1000),
+        (101.0, 101.4, 100.9, 101.3, 1000),
+        (101.3, 101.6, 101.2, 101.5, 1000),
+        (101.5, 101.8, 101.4, 101.7, 1000),
+        (101.7, 102.0, 101.6, 101.9, 1000),
+        (101.9, 102.3, 101.8, 102.2, 2000),
+    ]
+    index = pd.date_range("2026-10-16 09:15", periods=9, freq="5min", tz=IST)
+    current = pd.DataFrame(
+        rows, columns=["open", "high", "low", "close", "volume"], index=index
+    )
+    seeded = session_aware_atr(pd.concat([prior, current])).reindex(index)
+    unseeded = session_aware_atr(current)
+    assert seeded.iloc[-1] > 0
+    assert unseeded.isna().all()
+
+    indicators = add_scanner_indicators(current)
+    indicators["atr_14"] = seeded
+    signal = opening_range_signal("TEST", indicators, market_regime="UNKNOWN")
+    assert signal is not None
+    assert signal.side == "LONG"

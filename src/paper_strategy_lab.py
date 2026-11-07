@@ -20,7 +20,12 @@ MIN_NET_RR=1.5
 SLIPPAGE_BPS=5.0
 ENTRY_CUTOFF=dtime(14,45)
 EXIT_POLICY=load_exit_policy()
-DEFINITIONS={"challenger_ema_9_21_v1":"EMA 9/21 crossover with VWAP and MACD confirmation","challenger_vwap_momentum_v1":"VWAP crossover with EMA and MACD confirmation","challenger_ema_pullback_v1":"Trend-aligned EMA21 pullback with ATR-scaled levels"}
+DEFINITIONS={"challenger_ema_9_21_atr_seed_v2":"EMA 9/21 crossover with VWAP and MACD confirmation (plain 1 ATR stop control)","challenger_vwap_momentum_atr_seed_v2":"VWAP crossover with EMA and MACD confirmation (plain 1 ATR stop control)","challenger_ema_pullback_atr_seed_v2":"Trend-aligned EMA21 pullback with ATR-scaled levels (plain 1 ATR stop control)"}
+VERSION_FAMILY={
+ "challenger_ema_9_21_atr_seed_v2":("challenger_ema_9_21_v1","challenger_ema_9_21_atr_seed_v2"),
+ "challenger_vwap_momentum_atr_seed_v2":("challenger_vwap_momentum_v1","challenger_vwap_momentum_atr_seed_v2"),
+ "challenger_ema_pullback_atr_seed_v2":("challenger_ema_pullback_v1","challenger_ema_pullback_atr_seed_v2"),
+}
 def _signal_id(version:str,symbol:str,side:str,stamp:str)->str:
  return hashlib.sha256("|".join((version,symbol.upper(),side.upper(),stamp)).encode()).hexdigest()[:32]
 def _valid(row:pd.Series,names:list[str])->bool:
@@ -40,22 +45,22 @@ def generate_challenger_signals(symbol:str,candles:pd.DataFrame)->list[dict[str,
  prev_atr=float(prev["atr_14"])
  if not math.isfinite(atr) or atr<=0 or not math.isfinite(prev_atr) or prev_atr<=0:return []
  setups=[]
- if pe9<=pe21 and ema9>ema21 and close>vwap and hist>0: setups.append(("challenger_ema_9_21_v1","EMA 9 crossed above EMA 21; close above VWAP and MACD positive","LONG"))
- elif pe9>=pe21 and ema9<ema21 and close<vwap and hist<0: setups.append(("challenger_ema_9_21_v1","EMA 9 crossed below EMA 21; close below VWAP and MACD negative","SHORT"))
- if prevclose<=pvwap and close>vwap and ema9>ema21 and hist>0: setups.append(("challenger_vwap_momentum_v1","Price crossed above VWAP with bullish EMA and MACD alignment","LONG"))
- elif prevclose>=pvwap and close<vwap and ema9<ema21 and hist<0: setups.append(("challenger_vwap_momentum_v1","Price crossed below VWAP with bearish EMA and MACD alignment","SHORT"))
+ if pe9<=pe21 and ema9>ema21 and close>vwap and hist>0: setups.append(("challenger_ema_9_21_atr_seed_v2","EMA 9 crossed above EMA 21; close above VWAP and MACD positive","LONG"))
+ elif pe9>=pe21 and ema9<ema21 and close<vwap and hist<0: setups.append(("challenger_ema_9_21_atr_seed_v2","EMA 9 crossed below EMA 21; close below VWAP and MACD negative","SHORT"))
+ if prevclose<=pvwap and close>vwap and ema9>ema21 and hist>0: setups.append(("challenger_vwap_momentum_atr_seed_v2","Price crossed above VWAP with bullish EMA and MACD alignment","LONG"))
+ elif prevclose>=pvwap and close<vwap and ema9<ema21 and hist<0: setups.append(("challenger_vwap_momentum_atr_seed_v2","Price crossed below VWAP with bearish EMA and MACD alignment","SHORT"))
  tol=.15*atr
  lnow=float(cur["low"])<=ema21+tol and close>ema21 and ema9>ema21 and hist>0
  lprev=float(prev["low"])<=pe21+.15*prev_atr and prevclose>pe21 and pe9>pe21 and phist>0
  snow=float(cur["high"])>=ema21-tol and close<ema21 and ema9<ema21 and hist<0
  sprev=float(prev["high"])>=pe21-.15*prev_atr and prevclose<pe21 and pe9<pe21 and phist<0
- if lnow and not lprev:setups.append(("challenger_ema_pullback_v1","Bullish EMA trend with fresh EMA21 pullback and positive MACD","LONG"))
- elif snow and not sprev:setups.append(("challenger_ema_pullback_v1","Bearish EMA trend with fresh EMA21 pullback and negative MACD","SHORT"))
+ if lnow and not lprev:setups.append(("challenger_ema_pullback_atr_seed_v2","Bullish EMA trend with fresh EMA21 pullback and positive MACD","LONG"))
+ elif snow and not sprev:setups.append(("challenger_ema_pullback_atr_seed_v2","Bearish EMA trend with fresh EMA21 pullback and negative MACD","SHORT"))
  stamp=frame.index[-1].isoformat();out=[]
  for version,reason,side in setups:
   try:levels=plan_policy_levels(side,entry=close,atr=atr,policy=EXIT_POLICY)
   except (ValueError,TypeError):continue
-  out.append({"signal_id":_signal_id(version,symbol,side,stamp),"strategy_version":version,"strategy_name":DEFINITIONS[version],"symbol":symbol.upper(),"side":side,"signal_time":stamp,"signal_close":close,"stop_loss":float(levels.stop_loss),"target_1":float(levels.target_1),"target_2":float(levels.target_2),"reason":reason})
+  out.append({"signal_id":_signal_id(version,symbol,side,stamp),"strategy_version":version,"strategy_name":DEFINITIONS[version],"symbol":symbol.upper(),"side":side,"signal_time":stamp,"signal_close":close,"stop_loss":float(levels.stop_loss),"target_1":float(levels.target_1),"target_2":float(levels.target_2),"reason":reason+" Plain 1 ATR stop control."})
  return out
 def ensure_shadow_schema(db:sqlite3.Connection)->None:
  db.execute("""CREATE TABLE IF NOT EXISTS shadow_signals(
@@ -126,7 +131,9 @@ def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->Non
   return
  if db.execute("SELECT 1 FROM shadow_signals WHERE strategy_version=? AND symbol=? AND status='OPEN'",(row["strategy_version"],row["symbol"])).fetchone():
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Same-symbol shadow position already open for this strategy.",row["signal_id"]));return
- n=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE strategy_version=? AND status='OPEN'",(row["strategy_version"],)).fetchone()["n"]
+ family_versions=VERSION_FAMILY.get(row["strategy_version"],(row["strategy_version"],))
+ placeholders=",".join("?" for _ in family_versions)
+ n=db.execute(f"SELECT COUNT(*) n FROM shadow_signals WHERE strategy_version IN ({placeholders}) AND status='OPEN'",family_versions).fetchone()["n"]
  if int(n)>=MAX_OPEN_PER_STRATEGY:
   db.execute("UPDATE shadow_signals SET status='ENTRY_REJECTED',reason=? WHERE signal_id=?",("Shadow book position limit reached.",row["signal_id"]));return
  entry_ref=float(frame.iloc[idx]["open"]);side=str(row["side"])

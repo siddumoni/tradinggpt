@@ -44,13 +44,14 @@ SESSION_START = dtime(9, 15)
 LAST_BAR_END = dtime.fromisoformat(EXIT_POLICY.time_exit_ist)
 LAST_BAR_START = (datetime.combine(datetime.min.date(), LAST_BAR_END) - timedelta(minutes=BAR_MINUTES)).time()
 DEFAULT_CANDIDATES = "HDFCBANK:vwap_trend,INFY:vwap_pullback"
+STRATEGY_VERSION = "nse_champion_v2_foundation_candidate"
 DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
 FORWARD_CAPITAL_INR = 20_000.0
 FORWARD_RISK_PER_TRADE_INR = 500.0
 MINIMUM_NET_RR = 1.5
 MINIMUM_COMPLETED_FOR_REVIEW = 30
 JOURNAL_FIELDS = [
-    "signal_id", "recorded_at", "signal_time", "symbol", "strategy", "side",
+    "signal_id", "recorded_at", "signal_time", "symbol", "strategy", "strategy_version", "side",
     "reference_entry", "stop_loss", "target_1", "target_2", "confidence",
     "market_regime", "reason", "provider", "data_verified_live", "paper_status",
 ]
@@ -265,6 +266,7 @@ def _make_candidate(
         "signal_time": stamp.isoformat(),
         "symbol": symbol,
         "strategy": strategy,
+        "strategy_version": STRATEGY_VERSION,
         "side": signal["side"],
         "reference_entry": close,
         "stop_loss": float(signal["stop_loss"]),
@@ -382,8 +384,8 @@ def _outcome_metrics(outcomes: pd.DataFrame) -> list[dict[str, Any]]:
         "COMPLETED_RESEARCH_ONLY_GATE_BYPASSED",
     }
     metrics: list[dict[str, Any]] = []
-    for (symbol, strategy, slippage), group in outcomes.groupby(
-        ["symbol", "strategy", "slippage_bps_per_side"], dropna=False, sort=True
+    for (version, symbol, strategy, slippage), group in outcomes.groupby(
+        ["strategy_version", "symbol", "strategy", "slippage_bps_per_side"], dropna=False, sort=True
     ):
         completed = group.loc[
             group["outcome_status"].isin(completed_statuses)
@@ -403,6 +405,7 @@ def _outcome_metrics(outcomes: pd.DataFrame) -> list[dict[str, Any]]:
         expectancy = float(pnl.mean()) if len(pnl) else None
         n = int(len(pnl))
         metrics.append({
+            "strategy_version": str(version),
             "symbol": str(symbol),
             "strategy": str(strategy),
             "slippage_bps_per_side": float(slippage),
@@ -479,7 +482,8 @@ def refresh_outcomes(
                 simulate_net_rr_rejections=True,
             )
             outcome.update({
-                "candidate": f"{symbol}:{str(source['strategy']).lower()}",
+                "strategy_version": str(source.get("strategy_version") or "LEGACY_UNVERSIONED"),
+                "candidate": f"{source.get('strategy_version', 'LEGACY_UNVERSIONED')}:{symbol}:{str(source['strategy']).lower()}",
                 "slippage_bps_per_side": float(slippage),
                 "minimum_net_reward_risk_gate": MINIMUM_NET_RR,
                 "gate_decision": (
@@ -497,7 +501,7 @@ def refresh_outcomes(
     outcomes = pd.DataFrame(rows)
     if outcomes.empty:
         outcomes = pd.DataFrame(columns=[
-            "signal_id", "symbol", "strategy", "candidate", "slippage_bps_per_side",
+            "signal_id", "strategy_version", "symbol", "strategy", "candidate", "slippage_bps_per_side",
             "outcome_status", "net_pnl", "entry_gate_accepted",
             "entry_gate_rejection_reason", "gate_decision",
             "signal_level_outcome_not_portfolio", "research_only",
@@ -506,6 +510,7 @@ def refresh_outcomes(
     outcomes.to_csv(output_path, index=False)
     summary = {
         "generated_at": now_ist().isoformat(),
+        "strategy_version": STRATEGY_VERSION,
         "signal_journal": str(journal_path),
         "candles_directory": str(candles_dir),
         "outcomes_csv": str(output_path),
@@ -541,7 +546,7 @@ def refresh_outcomes(
             ),
         },
         "method": (
-            "Frozen vwap_trend/vwap_pullback callbacks from src.strategy_backtest; only newly appended "
+            "Foundation candidate v2 callbacks from src.strategy_backtest; structural stops and prior-session ATR seed; only newly appended "
             "Kite candles; no pre-start signal backfill; completed signal close followed by next-bar-open "
             "entry; 1 ATR stop, 2 ATR target 1 and 2.5 ATR target 2; stop-first same-bar handling; "
             "conservative stop-gap fills; target 2 full exit; session square-off; no scoring through data gaps. "
@@ -583,9 +588,9 @@ def run_once(
     else:
         recorded_at = recorded_at.tz_convert(IST)
 
-    signal_path = output_dir / "prospective_strategy_signals.csv"
-    audit_path = output_dir / "prospective_strategy_audit.csv"
-    outcome_path = output_dir / "prospective_strategy_outcomes.csv"
+    signal_path = output_dir / f"prospective_strategy_signals_{STRATEGY_VERSION}.csv"
+    audit_path = output_dir / f"prospective_strategy_audit_{STRATEGY_VERSION}.csv"
+    outcome_path = output_dir / f"prospective_strategy_outcomes_{STRATEGY_VERSION}.csv"
     _ensure_csv(signal_path, JOURNAL_FIELDS)
     _ensure_csv(audit_path, AUDIT_FIELDS)
 

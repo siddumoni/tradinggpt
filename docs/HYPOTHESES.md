@@ -30,6 +30,7 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
 
 - **Identifier:** `challenger_atr_1x_stop_v1`
 - **Status:** `DORMANT_CAPACITY_BLOCKED`; not an active challenger.
+- **Clarification:** The three existing challenger signal tracks still use the plain 1.0 ATR stop control. This dormant item is a separate stop-only paired experiment, not a claim that the current challenger lab has no 1 ATR track.
 - **Hypothesis:** A plain 1 ATR stop may produce a different stop-out rate and
   average stop distance from the structural-stop model, with a measurable effect
   on net R:R at T2 after costs.
@@ -55,3 +56,43 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
 - Data-error sessions are excluded and logged, not repaired synthetically.
 - Do not publish performance claims or update `RESULTS.md` until the configured
   sample and promotion gates are independently satisfied.
+
+
+## Prior-session ATR warm-up
+
+- **Identifier:** `nse_atr_prior_session_seed_v1`
+- **Status:** Foundation implementation; not a promoted strategy version.
+- **Hypothesis:** Seeding the current session's Wilder ATR from the previous
+  session's final valid ATR, while using high-minus-low for the first bar, will
+  make the ATR input valid from the 09:20 close when prior-session history is
+  available. This should expose otherwise-hidden early-session setups without
+  allowing the overnight price gap to inflate true range.
+- **Single change:** ATR initialization only. EMA, RSI, MACD, VWAP, entry filters,
+  structural-stop selection, target distances, costs, and exit rules are not
+  changed by this hypothesis.
+- **Measurements:** Count sessions with a valid prior-session seed; count 5-minute
+  bars and strategy signals that were previously ATR-unavailable but become
+  evaluable; split by symbol and session. Report actual accepted/approved setups
+  separately from merely ATR-eligible bars.
+- **Data rule:** Use only the immediately previous normal NSE session's final
+  valid ATR and completed current-session candles. The live scanner requires a
+  complete prior 09:15–15:10 candle grid; a missing intervening trading session,
+  special session, or incomplete prior session disables the seed. If unavailable,
+  retain the original 14-bar warm-up; never synthesize a seed or repair candles.
+- **Version boundary:** Results using this initialization must be labelled
+  separately from older ATR-reset evidence. The eventual `nse_champion_v2`
+  freeze remains deferred until A, B, and E are all complete.
+
+- **Audit command:** `python scripts/audit_atr_warmup.py --candles-dir data/paper_candles_kite`.
+  The report compares the previous 14-bar session reset with the new seeded ATR,
+  and counts opening-range signals that also pass the completed 15-minute stock
+  trend filter in the five potentially affected scan slots (10:00–10:20 IST).
+  It deliberately labels these as technical opportunities, not approved trades.
+
+- **Version labels:** The paper baseline during foundation work is
+  `nse_champion_v2_foundation_candidate`; it is not the final frozen
+  `nse_champion_v2`. The three existing challenger signal tracks are versioned
+  as `*_atr_seed_v2`, with their plain 1.0 ATR stop control unchanged. Their
+  pre-seed `*_v1` observations remain archived and are not pooled. The separate
+  stop-only challenger remains dormant because the three challenger slots are
+  occupied.

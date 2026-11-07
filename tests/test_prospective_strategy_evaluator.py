@@ -67,9 +67,9 @@ def test_bootstrap_seeds_existing_archive_head_without_backfilling(tmp_path):
     assert result["bootstrapped"] is True
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["last_processed"]["HDFCBANK"] == frame.index[-1].isoformat()
-    journal = pd.read_csv(output_dir / "prospective_strategy_signals.csv")
+    journal = pd.read_csv(output_dir / f"prospective_strategy_signals_{evaluator.STRATEGY_VERSION}.csv")
     assert journal.empty
-    audit = pd.read_csv(output_dir / "prospective_strategy_audit.csv")
+    audit = pd.read_csv(output_dir / f"prospective_strategy_audit_{evaluator.STRATEGY_VERSION}.csv")
     assert "ARCHIVE_FIRST_SEEN_SEEDED" not in set(audit.get("status", []))
 
 
@@ -127,11 +127,12 @@ def test_only_new_candle_generates_candidate_using_causal_history(tmp_path, monk
         state_path=state_path, now=now,
     )
 
-    journal = pd.read_csv(output_dir / "prospective_strategy_signals.csv")
+    journal = pd.read_csv(output_dir / f"prospective_strategy_signals_{evaluator.STRATEGY_VERSION}.csv")
     assert result["signals_added"] == 1
     assert len(journal) == 1
     assert journal.iloc[0]["signal_time"] == next_stamp.isoformat()
     assert journal.iloc[0]["strategy"] == "vwap_trend"
+    assert journal.iloc[0]["strategy_version"] == "nse_champion_v2_foundation_candidate"
     assert journal.iloc[0]["provider"] == "Kite Connect candle archive"
     assert journal.iloc[0]["paper_status"] == "RESEARCH_ONLY_NO_ORDER"
     assert max(seen_lengths) == len(extended)
@@ -174,9 +175,9 @@ def test_late_bar_is_audited_but_never_backfilled(tmp_path, monkeypatch):
         max_late_seconds=120,
     )
     assert result["signals_added"] == 0
-    audit = pd.read_csv(output_dir / "prospective_strategy_audit.csv")
+    audit = pd.read_csv(output_dir / f"prospective_strategy_audit_{evaluator.STRATEGY_VERSION}.csv")
     assert "LATE_CANDLE_SKIPPED" in set(audit["status"])
-    journal = pd.read_csv(output_dir / "prospective_strategy_signals.csv")
+    journal = pd.read_csv(output_dir / f"prospective_strategy_signals_{evaluator.STRATEGY_VERSION}.csv")
     assert journal.empty
 
 def test_summary_documents_final_modeled_candle_and_kite_provenance(tmp_path):

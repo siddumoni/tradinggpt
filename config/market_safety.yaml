@@ -6,3 +6,6 @@ relative_volume:
   minimum_valid_sessions: 10
   minimum_ratio: 1.0
   lookback_calendar_days: 45
+
+previous_day_levels:
+  proximity_buffer_atr: 0.3

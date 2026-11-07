@@ -117,3 +117,48 @@ def test_daily_report_includes_independent_candidate_outcomes_without_portfolio_
     markdown = report_path.with_suffix(".md").read_text(encoding="utf-8")
     assert "## Independent candidate outcome tracker" in markdown
     assert "do not sum their P&L as a portfolio result" in markdown
+
+
+def test_daily_report_separates_new_champion_from_archived_foundation_candidate(tmp_path):
+    from src.paper_broker import PAPER_BASELINE_VERSION, PaperBroker
+
+    db_path = tmp_path / "paper.sqlite3"
+    PaperBroker(db_path)
+    now = datetime(2026, 11, 6, 16, 0, tzinfo=IST)
+    entry_time = datetime(2026, 11, 6, 10, 0, tzinfo=IST).isoformat()
+    with sqlite3.connect(db_path) as db:
+        for signal_id, symbol, version in (
+            ("active-v2", "TCS", PAPER_BASELINE_VERSION),
+            ("archived-foundation", "INFY", "nse_champion_v2_foundation_candidate"),
+        ):
+            db.execute(
+                """INSERT INTO trades(
+                    signal_id,strategy,strategy_version,symbol,side,status,signal_time,entry_time,
+                    signal_reference_entry,entry_reference_price,entry_fill_price,stop_loss,target_1,target_2,
+                    quantity,risk_budget_inr,position_value_inr,planned_net_risk_inr,market_regime,
+                    entry_reason,created_at
+                ) VALUES(?,?,?,?,?,'OPEN',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    signal_id, "vwap_trend", version, symbol, "LONG",
+                    entry_time, entry_time, 100.0, 100.0, 100.05,
+                    98.0, 104.0, 108.0, 10, 500.0, 1000.5, 200.0,
+                    "BULLISH", "version-isolation test", entry_time,
+                ),
+            )
+
+    output_dir = tmp_path / "reports"
+    generate_daily_report(db_path, output_dir, now)
+    report_base = output_dir / "paper_daily_2026-11-06"
+    payload = json.loads(report_base.with_suffix(".json").read_text(encoding="utf-8"))
+
+    assert payload["champion"]["strategy_version"] == "nse_champion_v2"
+    assert payload["champion_archive"]["performance_must_not_be_pooled_with_nse_champion_v2"] is True
+    assert payload["champion"]["closed_trades_today"] == 0
+    assert payload["champion_archive"]["closed_trades_today"] == 0
+    with (output_dir / "paper_daily_2026-11-06_trades.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    tracks = {row["symbol"]: row["track"] for row in rows}
+    assert tracks["TCS"] == "CHAMPION"
+    assert tracks["INFY"] == "CHAMPION_ARCHIVE"

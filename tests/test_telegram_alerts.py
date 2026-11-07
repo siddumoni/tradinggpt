@@ -31,6 +31,7 @@ def test_new_paper_entry_is_sent_once_and_cursor_persisted(tmp_path):
     notifier = TelegramEventNotifier(
         lambda: {"events": events}, state_path=tmp_path / "cursor.json",
         enabled=True, token="token", chat_id="chat", sender=lambda msg: sent.append(msg) or True,
+        now_provider=lambda: datetime(2026, 11, 6, 12, 0, tzinfo=IST),
     )
     notifier._cursor = 1
     assert notifier.poll_once() == 1
@@ -49,6 +50,7 @@ def test_failed_delivery_does_not_advance_cursor_and_is_retried(tmp_path):
         lambda: {"events": events}, state_path=tmp_path / "cursor.json",
         enabled=True, token="token", chat_id="chat",
         sender=lambda msg: (attempts.append(msg), len(attempts) > 1)[1],
+        now_provider=lambda: datetime(2026, 11, 6, 12, 0, tzinfo=IST),
     )
     notifier._cursor = 4
     assert notifier.poll_once() == 0
@@ -97,6 +99,7 @@ def test_empty_startup_does_not_skip_the_first_future_event(tmp_path):
     notifier = TelegramEventNotifier(
         lambda: {"events": events}, state_path=tmp_path / "cursor.json",
         enabled=True, token="token", chat_id="chat", sender=lambda msg: sent.append(msg) or True,
+        now_provider=lambda: datetime(2026, 11, 6, 12, 0, tzinfo=IST),
     )
     assert notifier.poll_once() == 0
     assert notifier._cursor == 0

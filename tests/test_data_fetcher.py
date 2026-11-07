@@ -65,7 +65,7 @@ def test_instrument_cache_refreshes_on_new_day(tmp_path: Path):
     client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0))
     cache = tmp_path / "instruments.json"
     client.instruments(cache, datetime(2026, 10, 19, 10, 0, tzinfo=IST))
-    client.instruments(cache, datetime(2026, 10, 20, 10, 0, tzinfo=IST))
+    client.instruments(cache, datetime(2026, 10, 21, 10, 0, tzinfo=IST))
     assert kite.instrument_calls == 2
 
 
@@ -309,3 +309,118 @@ def test_fetch_symbol_bundle_reuses_bulk_quote_and_can_skip_daily_history():
     assert [call[3] for call in kite.historical_calls] == ["5minute", "15minute", "5minute"]
     assert bundle["candles_5m_history"]
     assert bundle["candles_daily_60d"] == []
+
+
+
+def test_relative_volume_history_is_cached_per_symbol_and_ist_date(tmp_path):
+    kite = FakeKite()
+    client = KiteMarketData(
+        kite,
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+        relative_volume_cache_dir=tmp_path / "relative-volume",
+    )
+    instrument = {
+        "tradingsymbol": "RELIANCE", "instrument_token": 1,
+        "exchange": "NSE", "segment": "NSE", "instrument_type": "EQ",
+    }
+    first_now = datetime(2026, 10, 19, 10, 0, tzinfo=IST)
+    first = client.fetch_symbol_bundle(instrument, now=first_now, include_daily_candles=False)
+    second = client.fetch_symbol_bundle(
+        instrument, now=first_now + timedelta(minutes=5), include_daily_candles=False,
+    )
+
+    history_calls = [
+        call for call in kite.historical_calls
+        if call[3] == "5minute" and call[1].date() < first_now.date()
+    ]
+    assert len(history_calls) == 1
+    assert first["relative_volume_cache"]["status"] == "REFRESHED"
+    assert second["relative_volume_cache"]["status"] == "HIT"
+    assert second["candles_5m_history"] == first["candles_5m_history"]
+
+    next_day = datetime(2026, 10, 21, 10, 0, tzinfo=IST)
+    third = client.fetch_symbol_bundle(instrument, now=next_day, include_daily_candles=False)
+    history_calls = [
+        call for call in kite.historical_calls
+        if call[3] == "5minute" and call[1].date() < call[2].date()
+    ]
+    assert len(history_calls) == 2
+    assert third["relative_volume_cache"]["status"] == "REFRESHED"
+
+
+def test_relative_volume_cache_refreshes_when_instrument_token_changes(tmp_path):
+    kite = FakeKite()
+    client = KiteMarketData(
+        kite,
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+        relative_volume_cache_dir=tmp_path / "relative-volume",
+    )
+    now = datetime(2026, 10, 19, 10, 0, tzinfo=IST)
+    base = {
+        "tradingsymbol": "RELIANCE", "exchange": "NSE",
+        "segment": "NSE", "instrument_type": "EQ",
+    }
+    client.fetch_symbol_bundle({**base, "instrument_token": 1}, now=now, include_daily_candles=False)
+    result = client.fetch_symbol_bundle({**base, "instrument_token": 2}, now=now, include_daily_candles=False)
+
+    assert result["relative_volume_cache"]["status"] == "REFRESHED"
+    assert result["instrument_metadata"]["tradingsymbol"] == "RELIANCE"
+
+
+def test_daily_ohlc_history_is_cached_per_symbol_and_ist_date(tmp_path):
+    kite = FakeKite()
+    client = KiteMarketData(
+        kite,
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+        daily_cache_dir=tmp_path / "daily",
+        relative_volume_cache_dir=tmp_path / "relative",
+    )
+    instrument = {
+        "tradingsymbol": "RELIANCE", "instrument_token": 1,
+        "exchange": "NSE", "segment": "NSE", "instrument_type": "EQ",
+    }
+    now = datetime(2026, 10, 19, 10, 0, tzinfo=IST)
+    first = client.fetch_symbol_bundle(instrument, now=now, include_relative_volume_history=False)
+    second = client.fetch_symbol_bundle(
+        instrument, now=now + timedelta(minutes=5), include_relative_volume_history=False,
+    )
+
+    daily_calls = [call for call in kite.historical_calls if call[3] == "day"]
+    assert len(daily_calls) == 1
+    assert first["daily_candles_cache"]["status"] == "REFRESHED"
+    assert second["daily_candles_cache"]["status"] == "HIT"
+
+    next_day = datetime(2026, 10, 21, 10, 0, tzinfo=IST)
+    third = client.fetch_symbol_bundle(
+        instrument, now=next_day, include_relative_volume_history=False,
+    )
+    daily_calls = [call for call in kite.historical_calls if call[3] == "day"]
+    assert len(daily_calls) == 2
+    assert third["daily_candles_cache"]["status"] == "REFRESHED"
+
+
+def test_daily_ohlc_cache_refreshes_when_instrument_token_changes(tmp_path):
+    kite = FakeKite()
+    client = KiteMarketData(
+        kite,
+        DataClientConfig(retries=1, retry_delay_seconds=0, historical_min_interval_seconds=0),
+        daily_cache_dir=tmp_path / "daily",
+        relative_volume_cache_dir=tmp_path / "relative",
+    )
+    now = datetime(2026, 10, 19, 10, 0, tzinfo=IST)
+    base = {
+        "tradingsymbol": "RELIANCE", "exchange": "NSE",
+        "segment": "NSE", "instrument_type": "EQ",
+    }
+    first = client.fetch_symbol_bundle(
+        {**base, "instrument_token": 1}, now=now,
+        include_relative_volume_history=False,
+    )
+    second = client.fetch_symbol_bundle(
+        {**base, "instrument_token": 2}, now=now,
+        include_relative_volume_history=False,
+    )
+
+    assert first["daily_candles_cache"]["status"] == "REFRESHED"
+    assert second["daily_candles_cache"]["status"] == "REFRESHED"
+    assert len([call for call in kite.historical_calls if call[3] == "day"]) == 2

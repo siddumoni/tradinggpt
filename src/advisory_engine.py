@@ -25,8 +25,14 @@ from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_ledger, append_scan_report
 from src.candle_archive import append_completed_candles
 from src.live_entry_validation import inspect_executable_quote, revalidate_candidate_at_quote
-from src.market_calendar import market_day_status, market_session_message
-from src.market_safety import inspect_circuit_limits, load_market_safety_settings
+from src.market_calendar import calendar_maintenance_status, market_day_status, market_session_message
+from src.market_safety import (
+    inspect_circuit_limits,
+    load_market_safety_settings,
+    load_surveillance_snapshot,
+    surveillance_status_for_symbol,
+    inspect_directional_level_proximity,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -150,6 +156,9 @@ def run_scan(
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
+    calendar_maintenance = calendar_maintenance_status(current.date())
+    if calendar_maintenance["warning"]:
+        LOGGER.warning("NSE calendar maintenance: %s", calendar_maintenance["message"])
     session_message = market_session_message(current)
     if session_message:
         return {
@@ -158,6 +167,7 @@ def run_scan(
             "account_profile": account_profile,
             "message": session_message,
             "market_calendar": market_day_status(current.date()),
+            "calendar_maintenance": calendar_maintenance,
             "candidates": [],
             "news": {"items": [], "errors": []},
             "advisory_only": True,
@@ -165,6 +175,9 @@ def run_scan(
         }
 
     market_safety_settings = load_market_safety_settings()
+    surveillance_snapshot = load_surveillance_snapshot(as_of=current)
+    if surveillance_snapshot["status"] != "VALID":
+        LOGGER.warning("NSE surveillance status is %s: %s", surveillance_snapshot["status"], surveillance_snapshot["reason"])
     provider_name = str(data_provider).strip().lower()
     if provider_name not in {"yahoo", "kite"}:
         raise ValueError("data_provider must be 'yahoo' or 'kite'")
@@ -297,7 +310,7 @@ def run_scan(
                         instrument,
                         now=current,
                         quote_data=universe_quotes.get(symbol),
-                        include_daily_candles=False,
+                        include_daily_candles=True,
                         relative_volume_lookback_days=market_safety_settings.relative_volume_lookback_calendar_days,
                     )
                 else:
@@ -325,6 +338,14 @@ def run_scan(
         except Exception as exc:
             fetch_errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
             LOGGER.warning("Skipping %s after data error: %s", symbol, exc)
+
+    for symbol, bundle in bundles.items():
+        bundle["surveillance"] = surveillance_status_for_symbol(symbol, surveillance_snapshot)
+        bundle.setdefault("mis_eligibility", {
+            "status": "NOT_CHECKED",
+            "eligible": None,
+            "interpretation": "No MIS margin calculation has been attempted.",
+        })
 
     archive_results: list[dict[str, Any]] = []
     archive_errors: list[str] = []
@@ -417,9 +438,20 @@ def run_scan(
                         "Kite MIS margin estimate must be a finite positive number."
                     )
                 margin_per_share_by_symbol[candidate.symbol] = margin_value
+                mis_status = {
+                    "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
+                    "eligible": True,
+                    "verified": True,
+                    "product": "MIS",
+                    "margin_per_share_inr": round(margin_value, 4),
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                    "interpretation": "Kite returned a positive MIS margin estimate; this is not a guarantee of eventual order acceptance.",
+                }
+                quote_bundle["mis_eligibility"] = mis_status
                 margin_checks.append({
                     "symbol": candidate.symbol,
                     "side": candidate.side,
+                    "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
                     "verified": True,
                     "margin_per_share_inr": round(margin_value, 4),
                     "entry_price_used": round(margin_entry_price, 4),
@@ -427,8 +459,18 @@ def run_scan(
                 })
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
+                mis_status = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED",
+                    "eligible": None,
+                    "verified": False,
+                    "product": "MIS",
+                    "reason": message,
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                }
+                quote_bundle["mis_eligibility"] = mis_status
                 margin_checks.append({
                     "symbol": candidate.symbol, "side": candidate.side,
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED",
                     "verified": False, "reason": message,
                 })
                 LOGGER.warning("MIS margin estimate unavailable for %s: %s", candidate.symbol, message)
@@ -504,6 +546,10 @@ def run_scan(
                 bundle["quote"] = None
                 bundle["verified_live_data"] = False
                 bundle["data_quality_warning"] = "Final executable quote refresh returned no quote."
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": "Final executable quote refresh returned no quote.",
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 entry_quote_refresh_checks.append({"symbol": candidate.symbol, "verified": False,
                     "reason": "Final executable quote refresh returned no quote."})
@@ -521,6 +567,10 @@ def run_scan(
                 "reason": quote_warning or "",
             }
             if not quote_verified:
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": quote_warning or "Final executable quote failed verification.",
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 entry_quote_refresh_checks.append(audit)
                 continue
@@ -536,6 +586,10 @@ def run_scan(
                     "Final quote failed the circuit-limit safety gate: "
                     + str(circuit_check.get("reason") or circuit_check.get("status"))
                 )
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": bundle["data_quality_warning"],
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["verified"] = False
                 audit["reason"] = bundle["data_quality_warning"]
@@ -549,6 +603,10 @@ def run_scan(
             audit.update({"bid": executable.get("bid"), "ask": executable.get("ask"),
                           "executable_quote_valid": executable.get("valid") is True})
             if not executable.get("valid"):
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": executable.get("reason") or "Executable quote validation failed.",
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["reason"] = executable.get("reason")
                 entry_quote_refresh_checks.append(audit)
@@ -568,6 +626,10 @@ def run_scan(
                     "Executable bid/ask is at or near an exchange circuit band: "
                     + str(executable_side_circuit.get("reason") or executable_side_circuit.get("status"))
                 )
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": bundle["data_quality_warning"],
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["verified"] = False
                 audit["reason"] = bundle["data_quality_warning"]
@@ -581,18 +643,38 @@ def run_scan(
                 if not isfinite(margin_value) or margin_value <= 0:
                     raise ValueError("Kite returned a non-positive or non-finite MIS margin estimate.")
                 margin_per_share_by_symbol[candidate.symbol] = margin_value
-                audit.update({"margin_verified": True, "margin_per_share_inr": round(margin_value, 4),
+                mis_status = {
+                    "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
+                    "eligible": True,
+                    "verified": True,
+                    "product": "MIS",
+                    "margin_per_share_inr": round(margin_value, 4),
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                    "interpretation": "Kite returned a positive MIS margin estimate; this is not a guarantee of eventual order acceptance.",
+                }
+                bundle["mis_eligibility"] = mis_status
+                audit.update({"margin_verified": True, "mis_eligibility": mis_status, "margin_per_share_inr": round(margin_value, 4),
                               "entry_price_used": round(float(executable["executable_entry_price"]), 4)})
             except Exception as exc:
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
-                audit.update({"margin_verified": False,
-                              "reason": f"MIS margin refresh failed: {type(exc).__name__}: {exc}"})
+                mis_status = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED",
+                    "eligible": None,
+                    "verified": False,
+                    "product": "MIS",
+                    "reason": f"MIS margin refresh failed: {type(exc).__name__}: {exc}",
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                }
+                bundle["mis_eligibility"] = mis_status
+                audit.update({"margin_verified": False, "mis_eligibility": mis_status,
+                              "reason": mis_status["reason"]})
             entry_quote_refresh_checks.append(audit)
 
         # Timestamp the final validation after quote and margin refresh.
         entry_validation_time = datetime.now(IST) if now is None else current
-        candidates = [
-            revalidate_candidate_at_quote(
+        revalidated_candidates = []
+        for candidate in candidates:
+            refreshed = revalidate_candidate_at_quote(
                 candidate,
                 bundles.get(candidate.symbol, {}).get("quote"),
                 margin_per_share=margin_per_share_by_symbol.get(candidate.symbol),
@@ -607,6 +689,107 @@ def run_scan(
                 ),
                 now=entry_validation_time,
                 max_quote_age_minutes=paper_entry_max_quote_age_minutes,
+            )
+            if refreshed.action in {"CONDITIONAL_BUY", "CONDITIONAL_SHORT"}:
+                validation = dict(refreshed.entry_validation or {})
+                previous_levels = validation.get("previous_day_levels")
+                executable_entry = validation.get("executable_entry_price")
+                try:
+                    if not isinstance(previous_levels, dict) or executable_entry is None:
+                        raise ValueError("Previous-session levels or executable entry price are unavailable")
+                    original_proximity = previous_levels.get("proximity")
+                    if not isinstance(original_proximity, dict):
+                        raise ValueError("Original previous-session clearance evidence is unavailable")
+                    executable_side = refreshed.side
+                    if executable_side not in {"LONG", "SHORT"}:
+                        raise ValueError("Directional side is unavailable for executable-entry clearance")
+                    executable_proximity = inspect_directional_level_proximity(
+                        executable_side,
+                        entry_price=float(executable_entry),
+                        atr=float(previous_levels["atr"]),
+                        previous_levels=previous_levels,
+                        buffer_atr=float(original_proximity["buffer_atr"]),
+                    )
+                except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                    reason = (
+                        "Previous-session level clearance could not be revalidated at the executable entry; "
+                        f"setup remains watch-only ({type(exc).__name__}: {exc})."
+                    )
+                    validation.update({
+                        "status": "REJECTED_PREVIOUS_DAY_LEVEL_RECHECK",
+                        "reason": reason,
+                    })
+                    risk_breakdown = validation.get("risk_breakdown")
+                    if isinstance(risk_breakdown, dict):
+                        validation["risk_breakdown"] = {
+                            **risk_breakdown,
+                            "approved_quantity": 0,
+                            "executable_level_clearance_passed": False,
+                        }
+                    refreshed = replace(
+                        refreshed,
+                        action="WATCH_CANDIDATE",
+                        quantity=0,
+                        estimated_net_risk_inr=None,
+                        estimated_net_reward_t1_inr=None,
+                        estimated_net_reward_t2_inr=None,
+                        net_rr_t1=None,
+                        net_rr_t2=None,
+                        reasons=[*refreshed.reasons, reason],
+                        entry_validation=validation,
+                    )
+                else:
+                    previous_levels = {
+                        **previous_levels,
+                        "executable_proximity": executable_proximity,
+                    }
+                    validation["previous_day_levels"] = previous_levels
+                    if not executable_proximity["eligible"]:
+                        reason = (
+                            "Executable entry failed previous-session level clearance: "
+                            + str(executable_proximity.get("reason") or executable_proximity.get("status"))
+                            + "."
+                        )
+                        validation.update({
+                            "status": "REJECTED_PREVIOUS_DAY_LEVEL_AT_EXECUTABLE_ENTRY",
+                            "reason": reason,
+                        })
+                        risk_breakdown = validation.get("risk_breakdown")
+                        if isinstance(risk_breakdown, dict):
+                            validation["risk_breakdown"] = {
+                                **risk_breakdown,
+                                "approved_quantity": 0,
+                                "executable_level_clearance_passed": False,
+                            }
+                        refreshed = replace(
+                            refreshed,
+                            action="WATCH_CANDIDATE",
+                            quantity=0,
+                            estimated_net_risk_inr=None,
+                            estimated_net_reward_t1_inr=None,
+                            estimated_net_reward_t2_inr=None,
+                            net_rr_t1=None,
+                            net_rr_t2=None,
+                            reasons=[*refreshed.reasons, reason],
+                            entry_validation=validation,
+                        )
+                    else:
+                        risk_breakdown = validation.get("risk_breakdown")
+                        if isinstance(risk_breakdown, dict):
+                            validation["risk_breakdown"] = {
+                                **risk_breakdown,
+                                "executable_level_clearance_passed": True,
+                            }
+                        refreshed = replace(refreshed, entry_validation=validation)
+            revalidated_candidates.append(refreshed)
+        candidates = revalidated_candidates
+        candidates = [
+            replace(
+                candidate,
+                entry_validation={
+                    **dict(candidate.entry_validation or {}),
+                    "mis_eligibility": bundles.get(candidate.symbol, {}).get("mis_eligibility"),
+                },
             )
             for candidate in candidates
         ]
@@ -652,6 +835,16 @@ def run_scan(
         "universe_selection": universe_selection,
         "account_profile": account_profile,
         "market_calendar": market_day_status(current.date()),
+        "calendar_maintenance": calendar_maintenance,
+        "surveillance_snapshot": {
+            "status": surveillance_snapshot.get("status"),
+            "source": surveillance_snapshot.get("source"),
+            "source_url": surveillance_snapshot.get("source_url"),
+            "as_of": surveillance_snapshot.get("as_of"),
+            "reason": surveillance_snapshot.get("reason"),
+            "max_age_calendar_days": 3,
+            "not_instrument_dump": True,
+        },
         "market_safety_settings": asdict(market_safety_settings),
         "symbols_requested": selected,
         "entry_quote_refresh": entry_quote_refresh_checks,
@@ -662,6 +855,13 @@ def run_scan(
         "news": news_result,
         "candidates": [item.to_dict() for item in ranked],
         "market_snapshots": ({symbol: _paper_market_snapshot(bundle) for symbol, bundle in bundles.items() if _paper_market_snapshot(bundle)} if provider_name == "kite" else {}),
+        "market_data_cache": {
+            symbol: {
+                "daily_ohlc": bundle.get("daily_candles_cache", {"status": "NOT_AVAILABLE"}),
+                "relative_volume_history": bundle.get("relative_volume_cache", {"status": "NOT_AVAILABLE"}),
+            }
+            for symbol, bundle in bundles.items()
+        },
         "limitations": [
             ("Yahoo Finance stock data is unofficial and may be delayed or incomplete; it is not verified for live decisions."
              if provider_name == "yahoo" else

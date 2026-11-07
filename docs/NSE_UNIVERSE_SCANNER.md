@@ -62,7 +62,7 @@ The turnover calculation is a screening proxy only. It is not the exchange's off
 
 ## Technical analysis and risk checks
 
-For each selected symbol, the scanner reuses the quote snapshot from the bulk request and fetches the current session's 5-minute and 15-minute candles. It skips the separate 60-calendar-day daily history request in this intraday scan mode.
+For each selected symbol, the scanner reuses the quote snapshot from the bulk request and fetches the current session's 5-minute and 15-minute candles. It also supplies daily OHLC history cached once per symbol, instrument token and IST date for previous-session levels, plus a 45-calendar-day 5-minute history cache for relative volume. Cache hit/refresh metadata is included in the scan report; both derived caches live below .local/ and are ignored by Git.
 
 The existing technical indicators, strategy callbacks, market-regime context, news triage, quote-freshness validation, hypothetical one-share margin estimate, transaction-cost estimates, sizing, entry cutoff and after-cost net R:R gates remain in force. A missing/stale/invalid quote or failed data request is not converted into a directional signal.
 
@@ -117,12 +117,19 @@ Only one instance of a broad scan should be launched at a time using the same Ki
 
 The intraday scanner uses `config/nse_equity_calendar.yaml` for the published 2026 NSE cash-equity holidays. The file records its source and verified coverage dates. Normal-session scans and the direct Kite bundle fetch both refuse weekends, listed holidays, unsupported special sessions, and dates outside the calendar's verified range. The current calendar is valid only from **2026-01-01 through 2026-12-31**; it deliberately fails closed beyond that date until the next official calendar is reviewed and added. Muhurat Trading is not enabled because its special timing is outside the normal 09:15–15:30 session model.
 
-Update the calendar only from the official NSE equity-segment holiday circular/page. Do not assume a date is open simply because it is a weekday.
+Update the calendar only from the official NSE equity-segment holiday circular/page. Do not assume a date is open simply because it is a weekday. The scanner also reports a maintenance warning when fewer than 30 calendar days remain in verified coverage and an expired status beyond the last verified date. It fails closed until a published calendar update is reviewed and added; see [Market Safety](MARKET_SAFETY.md) for the 2027 coverage note.
 
 ### Circuit-limit protection
 
 Kite full quotes must include positive `lower_circuit_limit` and `upper_circuit_limit` values with a valid last price inside the band. Missing or invalid band data is rejected. A stock is blocked when its last price is within **0.5%** of either band. During final executable-entry refresh, the same check is repeated against the actual best ask for LONG or best bid for SHORT, not just LTP. This is a conservative paper/advisory filter; it does not guarantee an order could execute or that the band will remain unchanged.
 
+### Previous-session level proximity
+
+A directional signal is checked against the last completed daily candle strictly before the current IST session. LONG entries are blocked if the previous-session high or pivot lies ahead within 0.3 ATR. SHORT entries are blocked if the previous-session low or pivot lies ahead within 0.3 ATR. Levels behind the trade direction are ignored. If verified-live daily OHLC is missing or invalid, the scanner returns NO_TRADE rather than constructing levels from incomplete data. See [Market Safety](MARKET_SAFETY.md) for exact distance calculations and tests.
+
+### NSE surveillance snapshot
+
+Kite's instrument dump does not provide an authoritative ASM/GSM/ESM surveillance classification. The optional local file .local/nse_surveillance.json must be manually refreshed from NSE's official surveillance files and explicitly marked complete. A listed symbol is blocked. A missing, stale, incomplete or invalid snapshot is reported as unavailable/unverified and is not described as clear; it does not independently change the existing entry decision. The input schema, supported measures and freshness rules are in [Market Safety](MARKET_SAFETY.md).
 ### Time-of-day relative volume
 
 Live Kite candidates must pass a same-clock-time cumulative-volume check before strategy/risk approval. Current-session 5-minute volume from 09:15 through the latest completed candle is compared with the **median** cumulative volume over up to the previous **20 complete sessions**, using exactly the same 5-minute time prefix. At least **10 valid prior sessions** and a minimum ratio of **1.0x** are required by default. Missing bars are never imputed; incomplete current sessions, insufficient historical sessions, malformed volume, or a below-threshold ratio fail closed.
@@ -131,4 +138,4 @@ The Kite adapter fetches a 45-calendar-day historical 5-minute window ending on 
 
 ### MIS margin check
 
-The existing MIS margin validation remains a read-only hypothetical one-share margin calculation through Kite's margin estimator. Missing or invalid estimates continue to fail closed. It does not place an order and is not a guarantee of broker eligibility or execution.
+The MIS margin status distinguishes MIS_MARGIN_ESTIMATE_AVAILABLE from MIS_ELIGIBILITY_UNVERIFIED. A positive value is a read-only hypothetical one-share MIS LIMIT margin estimate, not a guarantee of exchange eligibility, eventual order acceptance or execution. Missing or invalid estimates continue to fail closed. No order is submitted.

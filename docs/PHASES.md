@@ -19,10 +19,10 @@ This document is the current phase index. Historical phase notes are retained un
 | A | Shared structural-stop selection and replay parity | Complete; PR #40 merged |
 | B | Prior-session ATR seed with strict session completeness | Complete; PR #41 merged |
 | C | Validated pre-entry Telegram trade plans and EOD digest | Complete; PR #42 merged |
-| D | Signal-journal cost feasibility, profile-aware forward sizing, paired challenger comparison and results gate | In progress |
-| E | Prior-day level proximity filter, MIS eligibility/surveillance checks, 45-day relative-volume cache and calendar rollover warning | Pending |
+| D | Signal-journal cost feasibility, profile-aware forward sizing, paired challenger comparison and results gate | Complete; PR #43 merged as `6b6d607`; Ubuntu and Windows Python 3.13 CI passed |
+| E | Prior-day level proximity filter, MIS eligibility/surveillance checks, 45-day relative-volume cache and calendar rollover warning | Implementation and tests in progress on `foundation/phase-e-market-eligibility-cache-filters` |
 
-All foundation steps preserve the advisory-only boundary. The `nse_champion_v2` freeze remains deferred until A, B and E are complete and the full version boundary is recorded; foundation-candidate results are not pooled with `champion_v1`.
+All foundation steps preserve the advisory-only boundary. On merge of Phase E, new paper entries use the frozen `nse_champion_v2` version on the first supported normal NSE cash session. The earlier `nse_champion_v2_foundation_candidate` and `champion_v1` remain frozen archives; their trade rows and daily reports are explicitly labelled `CHAMPION_ARCHIVE` and must not be pooled with v2. See [Market Safety](MARKET_SAFETY.md) for the Phase E operational contract.
 
 ## Phase 6 status and evidence gate
 

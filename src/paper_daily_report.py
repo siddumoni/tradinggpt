@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from src.paper_broker import DEFAULT_DB, PaperBroker
+from src.paper_broker import DEFAULT_DB, PAPER_BASELINE_VERSION, PaperBroker
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.candidate_outcome_tracker import CandidateOutcomeTracker
 
@@ -62,7 +62,15 @@ def generate_daily_report(
 
     champion_closed = [
         row for row in trades
-        if row["status"] == "CLOSED" and str(row.get("exit_time") or "").startswith(day)
+        if row["status"] == "CLOSED"
+        and row.get("strategy_version") == PAPER_BASELINE_VERSION
+        and str(row.get("exit_time") or "").startswith(day)
+    ]
+    champion_archive_closed = [
+        row for row in trades
+        if row["status"] == "CLOSED"
+        and row.get("strategy_version") != PAPER_BASELINE_VERSION
+        and str(row.get("exit_time") or "").startswith(day)
     ]
     challenger_closed = [
         row for row in shadows
@@ -92,12 +100,20 @@ def generate_daily_report(
         })
 
     champion = {
+        "strategy_version": PAPER_BASELINE_VERSION,
         "starting_capital": champion_account["starting_capital"],
         "closed_trades_today": len(champion_closed),
         "net_pnl_today": pnl(champion_closed),
         "all_time_realized_net_pnl": champion_account["realized_pnl"],
         "open_positions": champion_account["open_positions"],
         "closed_trades": champion_closed,
+    }
+    champion_archive = {
+        "closed_trades_today": len(champion_archive_closed),
+        "net_pnl_today": pnl(champion_archive_closed),
+        "closed_trades": champion_archive_closed,
+        "research_only": True,
+        "performance_must_not_be_pooled_with_nse_champion_v2": True,
     }
     challengers = {
         "closed_trades_today": len(challenger_closed),
@@ -123,6 +139,7 @@ def generate_daily_report(
     risk_overruns = []
     for track, rows in (
         ("CHAMPION", champion_closed),
+        ("CHAMPION_ARCHIVE", champion_archive_closed),
         ("CHALLENGER", challenger_closed),
         ("WATCH_SHADOW", watch_closed),
         ("CANDIDATE_OUTCOME", [row for row in candidate_outcomes["observations"] if row.get("status") == "CLOSED"]),
@@ -158,6 +175,10 @@ def generate_daily_report(
                 "net_pnl": champion["net_pnl_today"],
                 "open_positions": champion["open_positions"],
             },
+            "champion_archive": {
+                "closed_trades": champion_archive["closed_trades_today"],
+                "net_pnl": champion_archive["net_pnl_today"],
+            },
             "challengers": {
                 "closed_trades": challengers["closed_trades_today"],
                 "net_pnl": challengers["net_pnl_today"],
@@ -182,14 +203,15 @@ def generate_daily_report(
             "risk_overrun_count": len(risk_overruns),
         },
         "champion": champion,
+        "champion_archive": champion_archive,
         "challengers": challengers,
         "watch_shadow": watch_shadow,
         "candidate_outcomes": candidate_outcomes,
         "risk_overruns": risk_overruns,
         "events": events,
         "warning": (
-            "Fills, transaction costs and P&L are hypothetical estimates. Champion, challenger, "
-            "watch-shadow and candidate-outcome results are separate; candidate outcomes overlap and are not portfolio P&L."
+            "Fills, transaction costs and P&L are hypothetical estimates. nse_champion_v2, archived champion versions, "
+            "challengers, watch-shadow and candidate-outcome results are separate; candidate outcomes overlap and are not portfolio P&L."
         ),
     }
     json_path.write_text(
@@ -209,7 +231,11 @@ def generate_daily_report(
     rows = []
     for row in trades:
         rows.append({
-            "track": "CHAMPION", "strategy": row.get("strategy"),
+            "track": (
+                "CHAMPION"
+                if row.get("strategy_version") == PAPER_BASELINE_VERSION
+                else "CHAMPION_ARCHIVE"
+            ), "strategy": row.get("strategy"),
             "strategy_version": row.get("strategy_version"), "symbol": row.get("symbol"),
             "side": row.get("side"), "status": row.get("status"), "signal_time": row.get("signal_time"),
             "entry_time": row.get("entry_time"), "entry_fill_price": row.get("entry_fill_price"),

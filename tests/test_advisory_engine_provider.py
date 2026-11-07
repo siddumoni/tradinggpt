@@ -523,6 +523,7 @@ def test_directional_kite_candidate_passes_quote_margin_risk_and_news_gates(monk
     assert candidate["entry_validation"]["entry_price_source"] == "best_ask"
     assert candidate["entry_validation"]["risk_breakdown"]["costs_at_stop"] is not None
     assert candidate["entry_validation"]["previous_day_levels"]["executable_proximity"]["eligible"] is True
+    assert candidate["entry_validation"]["risk_breakdown"]["executable_level_clearance_passed"] is True
     assert report["news"]["company_news_checked"] == ["INFY"]
     assert report["advisory_only"] is True
     assert report["orders_placed_or_modified"] is False
@@ -562,6 +563,8 @@ def test_executable_quote_rechecks_previous_session_level_clearance(monkeypatch,
     assert candidate["quantity"] == 0
     assert candidate["entry_validation"]["status"] == "REJECTED_PREVIOUS_DAY_LEVEL_AT_EXECUTABLE_ENTRY"
     assert candidate["entry_validation"]["previous_day_levels"]["executable_proximity"]["eligible"] is False
+    assert candidate["entry_validation"]["risk_breakdown"]["approved_quantity"] == 0
+    assert candidate["entry_validation"]["risk_breakdown"]["executable_level_clearance_passed"] is False
 
 
 def test_directional_candidate_is_demoted_when_live_ask_destroys_net_rr(monkeypatch, tmp_path):

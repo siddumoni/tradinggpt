@@ -643,7 +643,15 @@ def evaluate_symbol_bundle(
                 periods=72,
                 freq="5min",
             )
-            if previous_session.index.equals(expected_previous):
+            is_complete_previous = (
+                len(previous_session) == 72
+                and previous_session.index[0] == expected_previous[0]
+                and previous_session.index[-1] == expected_previous[-1]
+                and previous_session.index.to_series().diff().dropna().eq(
+                    pd.Timedelta(minutes=5)
+                ).all()
+            )
+            if is_complete_previous:
                 prior_sessions_5m = previous_session
 
     atr_source_5m = pd.concat([prior_sessions_5m, c5]).sort_index()

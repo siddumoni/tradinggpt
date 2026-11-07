@@ -623,7 +623,6 @@ class KiteMarketData:
         quote_key = f"NSE:{symbol}"
         resolved_quote = quote_data if quote_data is not None else self.quotes([symbol]).get(quote_key)
         start_today = datetime.combine(current.date(), dtime(9, 15), tzinfo=IST)
-        daily_start = datetime.combine(current.date() - timedelta(days=60), dtime(0, 0), tzinfo=IST)
         candles_5m = (
             self.historical_candles(int(token), start_today, current, "5minute")
             if current.time() >= dtime(9, 15) else []

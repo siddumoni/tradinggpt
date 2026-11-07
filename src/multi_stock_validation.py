@@ -210,8 +210,8 @@ def run_validation(
         raise ValueError("minimum_net_risk_reward must be finite and positive")
     if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
         raise ValueError("target_atr_multiple must be finite, > 1.0 and <= 10.0")
-    if any(not math.isfinite(bps) or bps < 0 or bps > 100 for bps in slippage_values):
-        raise ValueError("slippage values must be finite and between 0 and 100 bps per side")
+    if any(not math.isfinite(bps) or bps < 5 or bps > 100 for bps in slippage_values):
+        raise ValueError("slippage values must be finite and between 5 and 100 bps per side")
 
     out = Path(output_dir)
     cache_dir = out / "candle_cache"

@@ -516,7 +516,7 @@ def main() -> None:
     parser.add_argument("--output",type=Path,default=Path("reports/performance/validation"))
     parser.add_argument("--results-doc",type=Path,default=Path("docs/RESULTS.md"))
     parser.add_argument("--promotion-config",type=Path,default=Path("config/promotion.yaml"))
-    parser.add_argument("--initial-capital",type=float,default=None,help="Optional capital override; otherwise uses the selected account profile.")
+    parser.add_argument("--initial-capital",type=float,default=None,help="Optional assertion of capital; it must equal the selected account profile capital.")
     parser.add_argument("--profile",choices=("research","paper","live-advisory"),default="research",help="Sizing/capital profile for the challenger or selected trade stream.")
     parser.add_argument("--champion-profile",choices=("research","paper","live-advisory"),default=None,help="Required with --champion-trades; must match --profile.")
     parser.add_argument("--slippage-bps",type=float,default=8.0)

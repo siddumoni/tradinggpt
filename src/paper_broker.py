@@ -626,7 +626,7 @@ class PaperBroker:
                 (
                     signal_id,
                     strategy,
-                    "champion_v1",
+                    PAPER_BASELINE_VERSION,
                     symbol,
                     side,
                     signal_time,

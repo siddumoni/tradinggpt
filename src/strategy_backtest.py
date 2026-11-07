@@ -349,6 +349,7 @@ def backtest_strategy(
         "strategy": strategy_name,
         "target_atr_multiple": policy.target_2_atr_multiple,
         "exit_policy_version": policy.version,
+        "stop_model": "nearest_valid_structural_level_with_configured_distance_floor",
         "reject_nontrending_regimes": reject_nontrending_regimes,
         "slippage_bps_per_side": (
             float(config.slippage_bps_per_side) if config is not None else 5.0

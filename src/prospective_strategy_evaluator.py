@@ -239,10 +239,12 @@ def _make_candidate(
     recorded_at: pd.Timestamp,
 ) -> dict[str, Any] | None:
     """Generate one signal from the exact callback used by the baseline backtester."""
+    risk_settings, _ = load_phase2_settings()
     callback = make_signal_callback(
         symbol,
         strategy,
         reject_nontrending_regimes=False,
+        minimum_stop_distance_pct=risk_settings.minimum_stop_distance_pct,
     )
     signal = callback(indicators, len(indicators) - 1)
     if signal is None:
@@ -253,7 +255,8 @@ def _make_candidate(
     atr = float(last["atr_14"])
     policy = load_exit_policy()
     levels = plan_policy_levels(signal["side"], entry=close, atr=atr, policy=policy)
-    # The baseline callback also plans its single historical target at 2.5 ATR.
+    # Target levels remain ATR-policy based; stop selection comes from the same
+    # structural-stop callback used by the historical backtester and live scanner.
     if not math.isclose(float(signal["target"]), levels.target_2, rel_tol=1e-9, abs_tol=0.02):
         raise ValueError(f"{symbol}:{strategy}: target level differs from the baseline callback")
     return {
@@ -264,7 +267,7 @@ def _make_candidate(
         "strategy": strategy,
         "side": signal["side"],
         "reference_entry": close,
-        "stop_loss": levels.stop_loss,
+        "stop_loss": float(signal["stop_loss"]),
         "target_1": levels.target_1,
         "target_2": levels.target_2,
         "confidence": signal.get("confidence", ""),

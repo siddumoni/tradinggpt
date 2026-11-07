@@ -24,6 +24,7 @@ from src.strategies.levels import previous_session_levels  # noqa: F401
 from src.strategies.market_regime import classify_market_regime
 from src.strategies.opening_range import opening_range_signal
 from src.exit_policy import ExitPolicy, load_exit_policy
+from src.execution_model import build_structural_stop, session_aware_atr
 from src.strategies.signal_planner import plan_atr_levels
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
@@ -192,6 +193,34 @@ def filter_incomplete_sessions(
     }
     return filtered, diagnostics
 
+def _structural_stop_for_history(
+    history: pd.DataFrame, *, side: str, entry: float, atr: float,
+    minimum_distance_pct: float = 0.25,
+):
+    """Use only completed 5m/15m history to select the shared structural stop."""
+    required = {"open", "high", "low", "close", "volume", "vwap"}
+    if not required.issubset(history.columns):
+        raise ValueError(f"Structural stop history is missing: {sorted(required - set(history.columns))}")
+    candles_5m = history[["open", "high", "low", "close", "volume", "vwap"]].copy()
+    candles_5m = candles_5m.sort_index()
+    # A 15m aggregate is usable only after its final constituent 5m candle closes.
+    ohlcv = history[["open", "high", "low", "close", "volume"]].resample(
+        "15min", origin="start_day", offset="15min", label="left", closed="left"
+    ).agg({
+        "open": "first", "high": "max", "low": "min",
+        "close": "last", "volume": "sum",
+    }).dropna()
+    last_5m_close = history.index[-1] + pd.Timedelta(minutes=5)
+    ohlcv = ohlcv.loc[ohlcv.index + pd.Timedelta(minutes=15) <= last_5m_close].copy()
+    if not ohlcv.empty:
+        ohlcv["atr_session_14"] = session_aware_atr(ohlcv, 14)
+    return build_structural_stop(
+        side=side, entry=entry, candles_5m=candles_5m,
+        candles_15m=ohlcv, atr=atr,
+        minimum_distance_pct=minimum_distance_pct,
+    )
+
+
 def make_signal_callback(
     symbol: str,
     strategy_name: str,
@@ -200,6 +229,7 @@ def make_signal_callback(
     target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
     exit_policy: ExitPolicy | None = None,
+    minimum_stop_distance_pct: float = 0.25,
 ) -> Callable[[pd.DataFrame, int], dict | None]:
     """Create the callback expected by backtest_fixed_levels.
 
@@ -253,13 +283,23 @@ def make_signal_callback(
             target_1_atr_multiple=policy.target_1_atr_multiple,
             target_2_atr_multiple=policy.target_2_atr_multiple,
         )
+        try:
+            stop_plan = _structural_stop_for_history(
+                history, side=signal.side, entry=close, atr=atr,
+                minimum_distance_pct=minimum_stop_distance_pct,
+            )
+        except (ValueError, TypeError):
+            # Match the live scanner's fail-closed structural-stop behaviour.
+            return None
         return {
             "side": signal.side,
-            "stop_loss": levels.stop_loss,
+            "stop_loss": stop_plan.stop_loss,
             "target": levels.target_2,
             "strategy": signal.strategy,
             "confidence": signal.confidence,
-            "reason": signal.reason,
+            "reason": f"{signal.reason} Structural stop: {stop_plan.reference}.",
+            "stop_reference": stop_plan.reference,
+            "stop_distance_pct": stop_plan.distance_pct,
         }
 
     return callback
@@ -296,9 +336,11 @@ def backtest_strategy(
     effective_config = config or BacktestConfig(exit_policy=policy)
     if effective_config.exit_policy != policy:
         effective_config = replace(effective_config, exit_policy=policy)
+    risk_settings, _ = load_phase2_settings()
     callback = make_signal_callback(
         symbol, strategy_name, index_indicators=index_indicators,
         reject_nontrending_regimes=reject_nontrending_regimes, exit_policy=policy,
+        minimum_stop_distance_pct=risk_settings.minimum_stop_distance_pct,
     )
     trades, summary = backtest_fixed_levels(symbol, indicators, callback, effective_config)
     summary = dict(summary)
@@ -307,6 +349,7 @@ def backtest_strategy(
         "strategy": strategy_name,
         "target_atr_multiple": policy.target_2_atr_multiple,
         "exit_policy_version": policy.version,
+        "stop_model": "nearest_valid_structural_level_with_configured_distance_floor",
         "reject_nontrending_regimes": reject_nontrending_regimes,
         "slippage_bps_per_side": (
             float(config.slippage_bps_per_side) if config is not None else 5.0

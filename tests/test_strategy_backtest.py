@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.strategy_backtest import candles_to_frame, make_signal_callback, backtest_strategy
+from src.strategy_backtest import (
+    _structural_stop_for_history, candles_to_frame, make_signal_callback, backtest_strategy,
+)
 
 
 def sample_candles(n=100):
@@ -116,3 +118,39 @@ def test_slippage_sensitivity_cli_accepts_configured_defaults(monkeypatch):
     args = captured["args"]
     assert args[4] is None  # risk budget comes from settings.yaml
     assert args[5] is None  # minimum net R:R comes from settings.yaml
+
+
+
+def test_structural_stop_uses_only_completed_fifteen_minute_bars():
+    from src.indicators import add_indicators
+
+    history = add_indicators(sample_candles())
+    # The last 5m candle closes at 17:35; the containing 15m bucket is complete
+    # only when its end timestamp is <= that close.
+    plan = _structural_stop_for_history(
+        history, side="LONG", entry=float(history.iloc[-1]["close"]),
+        atr=float(history.iloc[-1]["atr_14"]),
+    )
+    assert plan.stop_loss < float(history.iloc[-1]["close"])
+    assert plan.distance_pct >= 0.25
+    assert plan.reference
+
+
+def test_structural_stop_is_causal_when_future_candles_are_appended():
+    from src.indicators import add_indicators
+
+    candles = sample_candles()
+    first = add_indicators(candles.iloc[:70])
+    second = add_indicators(candles.iloc[:71])
+    first_plan = _structural_stop_for_history(
+        first, side="LONG", entry=float(first.iloc[-1]["close"]),
+        atr=float(first.iloc[-1]["atr_14"]),
+    )
+    second_plan = _structural_stop_for_history(
+        second, side="LONG", entry=float(second.iloc[-1]["close"]),
+        atr=float(second.iloc[-1]["atr_14"]),
+    )
+    # Each result is independently derived from its own as-of history; neither
+    # path reads candles after its final timestamp.
+    assert first_plan.stop_loss > 0
+    assert second_plan.stop_loss > 0

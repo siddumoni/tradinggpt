@@ -1,10 +1,10 @@
 """Persistent virtual broker for read-only, research-only NSE paper trading."""
 
 from __future__ import annotations
-import hashlib, json, math, sqlite3
+import hashlib, json, logging, math, sqlite3
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 from src.cost_calculator import estimate_intraday_round_trip_cost
 from src.paper_allocator import rank_paper_candidates
@@ -16,6 +16,7 @@ from src.risk_engine import (
 )
 from src.exit_policy import ExitPolicy, evaluate_ohlc_exit, load_exit_policy
 
+LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_DB = Path("data/paper_trading.sqlite3")
 DEFAULT_CAPITAL_INR = 100_000.0
@@ -362,7 +363,11 @@ class PaperBroker:
             event_key=key,
         )
 
-    def process_scan_report(self, report_path: Path) -> dict[str, Any]:
+    def process_scan_report(
+        self,
+        report_path: Path,
+        before_entry_callback: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> dict[str, Any]:
         path = Path(report_path)
         try:
             report = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -464,6 +469,10 @@ class PaperBroker:
                     eligible.append(item)
 
             ranked = rank_paper_candidates(eligible, snapshots)
+            if before_entry_callback is not None:
+                # Commit scan/allocation metadata before network delivery so a
+                # slow Telegram API call does not hold SQLite's write lock.
+                db.commit()
             for ranked_item in ranked:
                 item = ranked_item["candidate"]
                 symbol = ranked_item["symbol"]
@@ -479,11 +488,19 @@ class PaperBroker:
                     at=scan_time,
                 )
                 try:
-                    self._open_candidate(db, item, snapshots.get(symbol), allocation=ranked_item)
+                    self._open_candidate(
+                        db,
+                        item,
+                        snapshots.get(symbol),
+                        allocation=ranked_item,
+                        before_entry_callback=before_entry_callback,
+                    )
                     opened += 1
                 except _RejectedSignal as exc:
                     rejected += 1
                     self._record_rejection(db, item, as_of, str(exc))
+                if before_entry_callback is not None:
+                    db.commit()
         conditional_count = action_counts.get("CONDITIONAL_BUY", 0) + action_counts.get(
             "CONDITIONAL_SHORT", 0
         )
@@ -510,7 +527,15 @@ class PaperBroker:
             "universe_mode": universe_mode,
         }
 
-    def _open_candidate(self, db, candidate, snapshot, *, allocation: dict[str, Any] | None = None):
+    def _open_candidate(
+        self,
+        db,
+        candidate,
+        snapshot,
+        *,
+        allocation: dict[str, Any] | None = None,
+        before_entry_callback: Callable[[dict[str, Any]], bool] | None = None,
+    ):
         symbol = str(candidate.get("symbol") or "").strip().upper()
         side = str(candidate.get("side") or "").upper()
         strategy = str(candidate.get("strategy") or "").strip()
@@ -628,6 +653,55 @@ class PaperBroker:
         entry_reason = (
             " ".join(str(x) for x in reasons) if isinstance(reasons, list) else str(reasons)
         )
+        if before_entry_callback is not None:
+            trade_plan = {
+                "signal_id": signal_id,
+                "action": str(candidate.get("action") or "").upper(),
+                "symbol": symbol,
+                "side": side,
+                "strategy": strategy,
+                "strategy_version": PAPER_BASELINE_VERSION,
+                "signal_time": signal_time,
+                "reference_entry": reference_entry,
+                "entry_reference_price": entry_reference,
+                "entry_fill_price": entry_fill,
+                "stop_loss": stop,
+                "target_1": t1,
+                "target_2": t2,
+                "quantity": int(assessment.quantity),
+                "risk_budget_inr": allocated_risk_budget,
+                "net_risk_inr": assessment.net_risk_inr,
+                "net_reward_t1_inr": assessment.net_reward_t1_inr,
+                "net_reward_t2_inr": assessment.net_reward_t2_inr,
+                "net_rr_t1": assessment.net_rr_t1,
+                "net_rr_t2": assessment.net_rr_t2,
+                "estimated_margin_inr": assessment.estimated_margin_inr,
+                "quote_age_seconds": age,
+                "market_regime": str(candidate.get("market_regime") or "UNKNOWN"),
+                "reasons": reasons if isinstance(reasons, list) else [entry_reason],
+                "data_verified_live": candidate.get("data_verified_live"),
+                "margin_verified": candidate.get("margin_verified"),
+                "company_specific_risk": candidate.get("company_specific_risk"),
+                "stop_reference": candidate.get("stop_reference"),
+                "stop_distance_pct": candidate.get("stop_distance_pct"),
+            }
+            try:
+                alert_delivered = before_entry_callback(trade_plan)
+            except Exception:
+                LOGGER.exception(
+                    "Pre-entry trade-plan alert callback failed; paper entry withheld."
+                )
+                alert_delivered = False
+            if alert_delivered is not True:
+                raise _RejectedSignal(
+                    "Pre-entry Telegram trade-plan alert was not delivered; paper entry withheld."
+                )
+            post_alert_age = (datetime.now(IST) - to_ist(qtime)).total_seconds()
+            if post_alert_age < -2 or post_alert_age > self.max_entry_quote_age_seconds:
+                raise _RejectedSignal(
+                    f"Entry quote became stale during Telegram alert delivery ({post_alert_age:.1f}s old)."
+                )
+            now = datetime.now(IST)
         try:
             db.execute(
                 """INSERT INTO trades(

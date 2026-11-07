@@ -138,6 +138,7 @@ def run_scanner_process(
     candle_archive_dir: Path,
     timeout_seconds: int,
     paper_broker: Any | None = None,
+    before_entry_callback: Callable[[dict[str, Any]], bool] | None = None,
     after_report: Callable[[Path], None] | None = None,
     account_capital: float = 100_000.0,
     risk_per_trade: float = 500.0,
@@ -216,7 +217,12 @@ def run_scanner_process(
         else:
             if paper_broker is not None:
                 try:
-                    result = paper_broker.process_scan_report(report_path)
+                    if before_entry_callback is None:
+                        result = paper_broker.process_scan_report(report_path)
+                    else:
+                        result = paper_broker.process_scan_report(
+                            report_path, before_entry_callback=before_entry_callback
+                        )
                     LOGGER.info(
                         "Virtual broker: universe=%s selected=%s; conditional=%s ranked=%s opened=%s "
                         "rejected=%s watch=%s no_trade=%s (all candidates=%s). No real orders were sent.",

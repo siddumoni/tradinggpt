@@ -297,7 +297,7 @@ def run_scan(
                         instrument,
                         now=current,
                         quote_data=universe_quotes.get(symbol),
-                        include_daily_candles=False,
+                        include_daily_candles=True,
                         relative_volume_lookback_days=market_safety_settings.relative_volume_lookback_calendar_days,
                     )
                 else:

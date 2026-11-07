@@ -12,15 +12,62 @@ class StopPlan:
     minimum_distance_applied: bool
 
 def session_aware_atr(candles: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Wilder ATR reset each session; first bar TR excludes prior-session gaps."""
-    if not {"high","low","close"}.issubset(candles.columns): raise ValueError("Missing OHLC columns")
-    if period < 1 or not isinstance(candles.index,pd.DatetimeIndex): raise ValueError("positive period and DatetimeIndex required")
-    if candles.index.has_duplicates or not candles.index.is_monotonic_increasing: raise ValueError("timestamps must be unique and increasing")
-    f=candles[["high","low","close"]].apply(pd.to_numeric,errors="coerce")
-    if f.isna().any().any() or not f.map(lambda x:isfinite(float(x))).all().all() or (f<=0).any().any(): raise ValueError("OHLC data must be finite and positive")
-    keys=pd.Index(f.index.date); prev=f.close.groupby(keys).shift(1)
-    tr=pd.concat([f.high-f.low,(f.high-prev).abs(),(f.low-prev).abs()],axis=1).max(axis=1)
-    return tr.groupby(keys).transform(lambda x:x.ewm(alpha=1/period,adjust=False,min_periods=period).mean()).rename(f"atr_session_{period}")
+    """Wilder ATR seeded from the prior session, without carrying overnight gaps.
+
+    The first available session needs the configured number of bars to establish
+    its seed. Once a session has a valid final ATR, the next session starts from
+    that value and updates on its first completed candle. With 5-minute candles,
+    ATR is therefore available at 09:20 while the first bar's true range remains
+    strictly high-minus-low.
+    """
+    if not {"high", "low", "close"}.issubset(candles.columns):
+        raise ValueError("Missing OHLC columns")
+    if period < 1 or not isinstance(candles.index, pd.DatetimeIndex):
+        raise ValueError("positive period and DatetimeIndex required")
+    if candles.index.has_duplicates or not candles.index.is_monotonic_increasing:
+        raise ValueError("timestamps must be unique and increasing")
+    f = candles[["high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
+    if (
+        f.isna().any().any()
+        or not f.map(lambda x: isfinite(float(x))).all().all()
+        or (f <= 0).any().any()
+    ):
+        raise ValueError("OHLC data must be finite and positive")
+
+    session_keys = pd.Index(f.index.date)
+    previous_close = f["close"].groupby(session_keys).shift(1)
+    true_range = pd.concat(
+        [
+            f["high"] - f["low"],
+            (f["high"] - previous_close).abs(),
+            (f["low"] - previous_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+
+    result = pd.Series(float("nan"), index=f.index, dtype=float)
+    previous_session_atr: float | None = None
+    for session_date in session_keys.unique():
+        session_mask = session_keys == session_date
+        session_true_range = true_range.loc[session_mask]
+        if previous_session_atr is None:
+            session_atr = session_true_range.ewm(
+                alpha=1 / period, adjust=False, min_periods=period
+            ).mean()
+            result.loc[session_atr.index] = session_atr
+        else:
+            state = previous_session_atr
+            values: list[float] = []
+            for value in session_true_range:
+                state = ((period - 1) * state + float(value)) / period
+                values.append(state)
+            result.loc[session_true_range.index] = values
+
+        valid = result.loc[session_true_range.index].dropna()
+        if not valid.empty:
+            previous_session_atr = float(valid.iloc[-1])
+
+    return result.rename(f"atr_session_{period}")
 
 def build_structural_stop(*,side:str,entry:float,candles_5m:pd.DataFrame,candles_15m:pd.DataFrame,atr:float,minimum_distance_pct:float=0.25,swing_lookback:int=6)->StopPlan:
     """Choose nearest valid OR edge/VWAP/swing/15m ATR level, then enforce distance floor."""

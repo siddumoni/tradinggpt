@@ -6,6 +6,7 @@ from datetime import date, datetime, time as dtime
 from math import isfinite
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -134,10 +135,6 @@ def inspect_circuit_limits(quote: Any, *, buffer_pct: float = 0.5) -> dict[str, 
     }
 
 
-from pathlib import Path
-from urllib.parse import urlparse
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SURVEILLANCE_SNAPSHOT = PROJECT_ROOT / ".local" / "nse_surveillance.json"
 SURVEILLANCE_MAX_AGE_DAYS = 3
 SUPPORTED_SURVEILLANCE_MEASURES = {

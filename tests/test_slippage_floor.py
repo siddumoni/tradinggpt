@@ -3,7 +3,8 @@ import pytest
 from src.backtest import BacktestConfig
 from src.multi_stock_validation import run_validation
 from src.risk_engine import RiskSettings, assess_trade, calculate_net_reward_risk
-from src.strategy_backtest import run_slippage_sensitivity
+from src.strategy_backtest import run_slippage_sensitivity, run_yahoo_backtest
+from src.paper_broker import PaperBroker
 
 
 def test_backtest_config_rejects_slippage_below_floor():
@@ -72,3 +73,14 @@ def test_single_strategy_sensitivity_rejects_net_rr_below_one_point_five():
         run_slippage_sensitivity(
             "TEST", "vwap_trend", minimum_net_risk_reward=1.49,
         )
+
+
+
+def test_single_yahoo_backtest_rejects_slippage_below_floor():
+    with pytest.raises(ValueError, match="between 5 and 100"):
+        run_yahoo_backtest("TEST", "vwap_trend", slippage_bps_per_side=2.0)
+
+
+def test_paper_broker_rejects_slippage_below_floor(tmp_path):
+    with pytest.raises(ValueError, match="between 5 and 100"):
+        PaperBroker(db_path=tmp_path / "paper.sqlite3", slippage_bps=4.99)

@@ -421,8 +421,8 @@ def format_daily_digest(snapshot: dict[str, Any], report_date: str) -> str:
     account = snapshot.get("account", {}) if isinstance(snapshot, dict) else {}
     lines = [
         f"<b>📊 EOD PAPER DIGEST · {_safe(report_date)}</b>",
-        f"Today's realized net P&amp;L: ₹{_price(account.get('today_net_pnl', 0))}",
-        f"Cumulative realized P&amp;L: ₹{_price(account.get('realized_pnl', 0))}",
+        f"Account total today net P&amp;L (all versions): ₹{_price(account.get('today_net_pnl', 0))}",
+        f"Account cumulative realized P&amp;L (all versions): ₹{_price(account.get('realized_pnl', 0))}",
         f"Unrealized net P&amp;L: ₹{_price(account.get('unrealized_net_pnl', 0))}",
         f"Open positions: {_safe(account.get('open_positions', 0))}/{_safe(account.get('max_open_positions', 0))}",
         f"Open planned risk: ₹{_price(account.get('open_planned_risk_inr', 0))}",

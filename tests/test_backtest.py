@@ -165,8 +165,8 @@ def test_short_trade_pnl_is_calculated_correctly():
 
     config = BacktestConfig(
         risk_per_trade=200,
-        slippage_bps_per_side=0,
-        minimum_net_risk_reward=1.0,
+        slippage_bps_per_side=5,
+        minimum_net_risk_reward=1.5,
     )
     trades, _ = backtest_fixed_levels("TEST", df, short_signal, config)
 

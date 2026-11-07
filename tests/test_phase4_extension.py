@@ -19,7 +19,10 @@ def test_previous_session_levels_and_pivots():
 
 
 def test_previous_session_requires_two_days():
-    df = pd.DataFrame({"high":[100], "low":[90], "close":[95]})
+    df = pd.DataFrame(
+        {"high": [100], "low": [90], "close": [95]},
+        index=pd.to_datetime(["2026-10-15"]),
+    )
     with pytest.raises(ValueError, match="two daily candles"):
         previous_session_levels(df)
 

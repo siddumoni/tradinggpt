@@ -48,7 +48,7 @@ def audit_candidates(
         raise ValueError("slippage floor must be between 5 and 100 bps per side")
     if frame.empty:
         return pd.DataFrame(columns=[
-            "date", "symbol", "side", "status", "quantity", "stop_distance_pct",
+            "date", "symbol", "strategy", "strategy_version", "side", "status", "quantity", "stop_distance_pct",
             "round_trip_cost_pct", "net_rr_t2", "net_rr_t2_8bps",
             "passes_1_5_net_rr", "passes_1_5_net_rr_8bps",
         ])
@@ -63,6 +63,8 @@ def audit_candidates(
         target_1 = _number(target_1_value, "target_1")
         side = str(raw.get("side", "")).strip().upper()
         symbol = str(raw.get("symbol", "")).strip().upper()
+        strategy = str(raw.get("strategy") or "UNSPECIFIED").strip()
+        strategy_version = str(raw.get("strategy_version") or "UNVERSIONED_SIGNAL_JOURNAL").strip()
         stamp_value = raw.get("signal_time", raw.get("date"))
         if stamp_value is None or pd.isna(stamp_value):
             raise ValueError("candidate date or signal_time is required")
@@ -87,7 +89,8 @@ def audit_candidates(
             quantity_float = 0.0
         if not pd.notna(quantity_float) or quantity_float <= 0 or not quantity_float.is_integer():
             rows.append({
-                "date": date, "symbol": symbol, "side": side,
+                "date": date, "symbol": symbol, "strategy": strategy,
+                "strategy_version": strategy_version, "side": side,
                 "status": "UNSCORABLE_NONPOSITIVE_OR_INVALID_QUANTITY",
                 "quantity": quantity_value, "stop_distance_pct": abs(entry - stop) / entry * 100,
                 "round_trip_cost_pct": None, "round_trip_cost_pct_8bps": None,
@@ -117,7 +120,8 @@ def audit_candidates(
             slippage_bps_per_side=slip_8, charge_rates=rates,
         )
         rows.append({
-            "date": date, "symbol": symbol, "side": side, "status": "AUDITABLE",
+            "date": date, "symbol": symbol, "strategy": strategy,
+            "strategy_version": strategy_version, "side": side, "status": "AUDITABLE",
             "quantity": quantity,
             "stop_distance_pct": abs(entry - stop) / entry * 100,
             "round_trip_cost_pct": (metrics_5["net_risk_inr"] - metrics_5["gross_risk_inr"]) / (entry * quantity) * 100,
@@ -136,19 +140,21 @@ def summarize_gate_rates(audit: pd.DataFrame) -> pd.DataFrame:
     """Summarize 1.5 net T2 R:R pass rates by signal date and symbol."""
     if audit.empty:
         return pd.DataFrame(columns=[
-            "date", "symbol", "candidate_count", "unscorable_count",
+            "date", "symbol", "strategy", "strategy_version", "candidate_count", "unscorable_count",
             "passes_1_5_net_rr", "pass_rate_5bps",
             "passes_1_5_net_rr_8bps", "pass_rate_8bps",
         ])
     rows = []
-    for (date, symbol), group in audit.groupby(["date", "symbol"], dropna=False, sort=True):
+    for (date, symbol, strategy, strategy_version), group in audit.groupby(
+        ["date", "symbol", "strategy", "strategy_version"], dropna=False, sort=True
+    ):
         valid = group.loc[group["status"] == "AUDITABLE"]
         count = len(valid)
         pass_5 = int(valid["passes_1_5_net_rr"].sum()) if count else 0
         pass_8 = int(valid["passes_1_5_net_rr_8bps"].sum()) if count else 0
         rows.append({
-            "date": str(date), "symbol": str(symbol),
-            "candidate_count": count,
+            "date": str(date), "symbol": str(symbol), "strategy": str(strategy),
+            "strategy_version": str(strategy_version), "candidate_count": count,
             "unscorable_count": int(len(group) - count),
             "passes_1_5_net_rr": pass_5,
             "pass_rate_5bps": pass_5 / count if count else None,

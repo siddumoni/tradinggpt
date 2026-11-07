@@ -35,3 +35,12 @@ def test_structural_stop_enforces_minimum_distance():
 def test_no_adverse_structure_fails_closed():
  f=frame("2026-11-02 09:15",2); f[["open","high","low","close","vwap"]]=[103.5,104,103,103.7,103.6]
  with pytest.raises(ValueError,match="No valid structural stop"): build_structural_stop(side="LONG",entry=100,candles_5m=f,candles_15m=pd.DataFrame(),atr=200)
+
+
+
+def test_atr_does_not_reuse_seed_across_missing_trading_session():
+    first = frame("2026-11-02 09:15", 15)
+    after_missing_session = frame("2026-11-04 09:15", 14, 50)
+    result = session_aware_atr(pd.concat([first, after_missing_session]))
+    assert result.loc[after_missing_session.index].iloc[:13].isna().all()
+    assert result.loc[after_missing_session.index].iloc[-1] == pytest.approx(0.8)

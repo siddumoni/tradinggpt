@@ -79,3 +79,9 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
 - **Version boundary:** Results using this initialization must be labelled
   separately from older ATR-reset evidence. The eventual `nse_champion_v2`
   freeze remains deferred until A, B, and E are all complete.
+
+- **Audit command:** `python scripts/audit_atr_warmup.py --candles-dir data/paper_candles_kite`.
+  The report compares the previous 14-bar session reset with the new seeded ATR,
+  and counts opening-range signals that also pass the completed 15-minute stock
+  trend filter in the five potentially affected scan slots (10:00–10:20 IST).
+  It deliberately labels these as technical opportunities, not approved trades.

@@ -105,7 +105,7 @@ def test_non_finite_risk_settings_raise_clear_error():
 
 def test_slippage_above_supported_range_is_rejected():
     settings = RiskSettings(slippage_bps_per_side=101)
-    with pytest.raises(ValueError, match="between 0 and 100"):
+    with pytest.raises(ValueError, match="between 5 and 100"):
         assess_trade(
             side="LONG", entry_price=100, stop_loss=99,
             target_1=102, target_2=103, settings=settings,

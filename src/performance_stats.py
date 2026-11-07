@@ -393,6 +393,8 @@ def analyze_file(
     require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
     paired = None
     if champion_input_path is not None:
+        if initial_capital is not None:
+            raise ValueError("paired comparison must use the selected profile capital; remove --initial-capital override")
         if champion_profile is None or champion_profile != profile:
             raise ValueError("paired comparison requires matching explicit profile and champion-profile declarations")
         paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})

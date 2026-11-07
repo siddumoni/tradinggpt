@@ -510,6 +510,7 @@ def test_directional_kite_candidate_passes_quote_margin_risk_and_news_gates(monk
     assert report["margin_checks"] == [{
         "symbol": "INFY",
         "side": "LONG",
+        "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
         "verified": True,
         "margin_per_share_inr": 15.0,
         "entry_price_used": 14.01,

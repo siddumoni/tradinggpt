@@ -77,5 +77,5 @@ def test_missing_quantity_is_not_defaulted_to_one_share():
 
     result = audit_candidates(journal)
 
-    assert result.loc[0, "quantity"] is None
+    assert pd.isna(result.loc[0, "quantity"])
     assert result.loc[0, "status"] == "UNSCORABLE_NONPOSITIVE_OR_INVALID_QUANTITY"

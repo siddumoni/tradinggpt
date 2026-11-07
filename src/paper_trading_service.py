@@ -26,6 +26,7 @@ from src.paper_scan_scheduler import (
 )
 from src.telegram_alerts import TelegramEventNotifier
 from src.risk_engine import load_account_profile, load_phase2_settings
+from src.market_calendar import market_day_status
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("paper_trading_service")
@@ -290,7 +291,7 @@ def _finalize_reports(
     now = datetime.now(IST)
     shadow_update: dict = {}
     try:
-        finalize_session = now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 15)
+        finalize_session = market_day_status(now.date())["status"] == "OPEN" and now.time().replace(tzinfo=None) >= dtime(15, 15)
         shadow_update = process_archive(
             archive, db_path, now=now, finalize_session=finalize_session
         )
@@ -721,7 +722,7 @@ def main(argv=None) -> int:
                     LOGGER.info(
                         "Square-off closed %s watch-shadow virtual position(s)", shadow_closed
                     )
-                if now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 20):
+                if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(tzinfo=None) >= dtime(15, 20):
                     date_key = now.date().isoformat()
                     if date_key not in reported_dates:
                         _finalize_reports(
@@ -738,7 +739,7 @@ def main(argv=None) -> int:
                             reason="market close daily summary",
                         )
                         reported_dates.add(date_key)
-                if now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 45):
+                if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(tzinfo=None) >= dtime(15, 45):
                     date_key = now.date().isoformat()
                     if date_key not in digest_sent_dates:
                         try:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 import numpy as np
@@ -205,6 +206,23 @@ def calculate_statistics(trades: pd.DataFrame, *, initial_capital: float = 20_00
         ],
     }
 
+def _daily_report_sessions(paths: Path | list[Path]) -> list[str]:
+    """Extract the full evaluated session calendar from date-stamped daily exports."""
+    selected_paths = [paths] if isinstance(paths, Path) else list(paths)
+    sessions: set[str] = set()
+    for path in selected_paths:
+        match = re.search(r"(20\\d{2}-\\d{2}-\\d{2})", path.name)
+        if match is None:
+            raise ValueError(
+                f"Paired comparison requires date-stamped daily report filenames; "
+                f"cannot determine the session for {path.name!r}"
+            )
+        sessions.add(pd.Timestamp(match.group(1)).date().isoformat())
+    if not sessions:
+        raise ValueError("Paired comparison requires at least one dated daily report")
+    return sorted(sessions)
+
+
 def paired_session_bootstrap(
     challenger_trades: pd.DataFrame,
     champion_trades: pd.DataFrame,
@@ -214,6 +232,7 @@ def paired_session_bootstrap(
     seed: int = 42,
     family_size: int = 3,
     familywise_alpha: float = 0.05,
+    session_calendar: list[str] | None = None,
 ) -> dict[str, Any]:
     """Paired session-level challenger-minus-champion bootstrap with Bonferroni control."""
     if family_size < 3:
@@ -228,25 +247,36 @@ def paired_session_bootstrap(
     champion = _prepare_trades(champion_trades, slippage_bps=slippage_bps)
     challenger_daily = challenger.groupby("session").net_pnl_8bps.sum()
     champion_daily = champion.groupby("session").net_pnl_8bps.sum()
-    common = sorted(set(challenger_daily.index).intersection(champion_daily.index))
+    if session_calendar is None:
+        calendar = sorted(set(challenger_daily.index).union(champion_daily.index))
+    else:
+        calendar = sorted({pd.Timestamp(day).date().isoformat() for day in session_calendar})
+    if not set(challenger_daily.index).issubset(calendar) or not set(champion_daily.index).issubset(calendar):
+        raise ValueError("paired trade sessions fall outside the declared evaluation calendar")
+    challenger_zero_trade_sessions = int((challenger_daily.reindex(calendar, fill_value=0.0) == 0).sum())
+    champion_zero_trade_sessions = int((champion_daily.reindex(calendar, fill_value=0.0) == 0).sum())
+    challenger_aligned = challenger_daily.reindex(calendar, fill_value=0.0)
+    champion_aligned = champion_daily.reindex(calendar, fill_value=0.0)
     alpha = familywise_alpha / family_size
-    if len(common) < 2:
+    if len(calendar) < 2:
         return {
             "status": "not_estimable_insufficient_common_sessions",
-            "common_sessions": len(common),
-            "first_common_session": common[0] if common else None,
-            "last_common_session": common[-1] if common else None,
+            "common_sessions": len(calendar),
+            "first_common_session": calendar[0] if calendar else None,
+            "last_common_session": calendar[-1] if calendar else None,
+            "challenger_zero_trade_sessions": challenger_zero_trade_sessions,
+            "champion_zero_trade_sessions": champion_zero_trade_sessions,
             "mean_difference_inr_per_session": None,
             "adjusted_lower_bound_inr_per_session": None,
             "adjusted_upper_bound_inr_per_session": None,
             "family_size": family_size,
             "familywise_alpha": familywise_alpha,
             "per_comparison_alpha": alpha,
-            "method": "paired session-block bootstrap with Bonferroni adjustment",
+            "method": "paired evaluation-session bootstrap with zero-P&L sessions retained and Bonferroni adjustment",
         }
     differences = (
-        challenger_daily.loc[common].to_numpy(dtype=float)
-        - champion_daily.loc[common].to_numpy(dtype=float)
+        challenger_aligned.to_numpy(dtype=float)
+        - champion_aligned.to_numpy(dtype=float)
     )
     rng = np.random.default_rng(seed)
     draws = np.empty(resamples, dtype=float)
@@ -257,15 +287,17 @@ def paired_session_bootstrap(
     return {
         "status": "estimated",
         "common_sessions": count,
-        "first_common_session": common[0],
-        "last_common_session": common[-1],
+        "first_common_session": calendar[0],
+        "last_common_session": calendar[-1],
+        "challenger_zero_trade_sessions": challenger_zero_trade_sessions,
+        "champion_zero_trade_sessions": champion_zero_trade_sessions,
         "mean_difference_inr_per_session": float(differences.mean()),
         "adjusted_lower_bound_inr_per_session": float(np.quantile(draws, alpha)),
         "adjusted_upper_bound_inr_per_session": float(np.quantile(draws, 1 - alpha)),
         "family_size": family_size,
         "familywise_alpha": familywise_alpha,
         "per_comparison_alpha": alpha,
-        "method": "paired session-block percentile bootstrap with Bonferroni adjustment",
+        "method": "paired evaluation-session percentile bootstrap with zero-P&L sessions retained and Bonferroni adjustment",
         "resamples": resamples,
         "seed": seed,
     }
@@ -398,10 +430,18 @@ def analyze_file(
     require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
     paired = None
     if champion_input_path is not None:
+        if not require_paired:
+            raise ValueError("--champion-trades is only valid when analyzing a CHALLENGER track")
         if initial_capital is not None:
             raise ValueError("paired comparison must use the selected profile capital; remove --initial-capital override")
         if champion_profile is None or champion_profile != profile:
             raise ValueError("paired comparison requires matching explicit profile and champion-profile declarations")
+        challenger_paths = [input_path] if isinstance(input_path, Path) else input_path
+        champion_paths = [champion_input_path] if isinstance(champion_input_path, Path) else champion_input_path
+        challenger_calendar = _daily_report_sessions(challenger_paths)
+        champion_calendar = _daily_report_sessions(champion_paths)
+        if challenger_calendar != champion_calendar:
+            raise ValueError("paired challenger and Champion exports must cover the same evaluation-session calendar")
         paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})
         if str(paired_cfg.get("adjustment", "bonferroni")).lower() != "bonferroni":
             raise ValueError("paired promotion comparison requires Bonferroni multiple-testing adjustment")
@@ -414,7 +454,10 @@ def analyze_file(
             resamples=bootstrap_resamples, seed=seed,
             family_size=int(paired_cfg.get("family_size", 3)),
             familywise_alpha=float(paired_cfg.get("familywise_alpha", 0.05)),
+            session_calendar=challenger_calendar,
         )
+    elif require_paired:
+        paired = None
     config = load_promotion_config(promotion_config)
     promotion = evaluate_promotion(
         stats, config, paired_comparison=paired,

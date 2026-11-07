@@ -1247,6 +1247,26 @@ class PaperBroker:
                 item["win_rate_pct"] = (
                     100.0 * item["wins"] / item["trades"] if item["trades"] else 0.0
                 )
+                if item["track"] == "CHAMPION":
+                    # Reporting-only counters: these values never feed entry or risk decisions.
+                    today = datetime.now(IST).date().isoformat()
+                    accepted_today = int(
+                        db.execute(
+                            "SELECT COUNT(*) trades FROM trades WHERE strategy_version=? AND substr(entry_time,1,10)=?",
+                            (item["strategy_version"], today),
+                        ).fetchone()["trades"]
+                    )
+                    rejected_today = int(
+                        db.execute(
+                            "SELECT COUNT(*) attempts FROM events WHERE event_type='SIGNAL_REJECTED' AND substr(event_time,1,10)=?",
+                            (today,),
+                        ).fetchone()["attempts"]
+                    )
+                    attempts_today = accepted_today + rejected_today
+                    item["trades_today"] = accepted_today
+                    item["accept_rate_pct"] = (
+                        100.0 * accepted_today / attempts_today if attempts_today else 0.0
+                    )
                 strategies.append(item)
             shadow_open = []
             shadow_closed = []

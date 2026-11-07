@@ -194,7 +194,8 @@ def filter_incomplete_sessions(
     return filtered, diagnostics
 
 def _structural_stop_for_history(
-    history: pd.DataFrame, *, side: str, entry: float, atr: float
+    history: pd.DataFrame, *, side: str, entry: float, atr: float,
+    minimum_distance_pct: float = 0.25,
 ):
     """Use only completed 5m/15m history to select the shared structural stop."""
     required = {"open", "high", "low", "close", "volume", "vwap"}
@@ -216,6 +217,7 @@ def _structural_stop_for_history(
     return build_structural_stop(
         side=side, entry=entry, candles_5m=candles_5m,
         candles_15m=ohlcv, atr=atr,
+        minimum_distance_pct=minimum_distance_pct,
     )
 
 
@@ -227,6 +229,7 @@ def make_signal_callback(
     target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
     exit_policy: ExitPolicy | None = None,
+    minimum_stop_distance_pct: float = 0.25,
 ) -> Callable[[pd.DataFrame, int], dict | None]:
     """Create the callback expected by backtest_fixed_levels.
 
@@ -282,7 +285,8 @@ def make_signal_callback(
         )
         try:
             stop_plan = _structural_stop_for_history(
-                history, side=signal.side, entry=close, atr=atr
+                history, side=signal.side, entry=close, atr=atr,
+                minimum_distance_pct=minimum_stop_distance_pct,
             )
         except (ValueError, TypeError):
             # Match the live scanner's fail-closed structural-stop behaviour.
@@ -332,9 +336,11 @@ def backtest_strategy(
     effective_config = config or BacktestConfig(exit_policy=policy)
     if effective_config.exit_policy != policy:
         effective_config = replace(effective_config, exit_policy=policy)
+    risk_settings, _ = load_phase2_settings()
     callback = make_signal_callback(
         symbol, strategy_name, index_indicators=index_indicators,
         reject_nontrending_regimes=reject_nontrending_regimes, exit_policy=policy,
+        minimum_stop_distance_pct=risk_settings.minimum_stop_distance_pct,
     )
     trades, summary = backtest_fixed_levels(symbol, indicators, callback, effective_config)
     summary = dict(summary)

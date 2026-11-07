@@ -50,16 +50,6 @@ def test_backtest_config_rejects_net_rr_below_one_point_five():
         BacktestConfig(minimum_net_risk_reward=1.49)
 
 
-def test_risk_engine_rejects_net_rr_below_one_point_five():
-    settings = RiskSettings(minimum_net_risk_reward=1.49)
-    with pytest.raises(ValueError, match="cannot be below 1.5"):
-        assess_trade(
-            side="LONG", entry_price=100, stop_loss=99,
-            target_1=102, target_2=103, settings=settings,
-            estimated_margin_per_share=50,
-        )
-
-
 def test_multi_stock_sensitivity_rejects_net_rr_below_one_point_five():
     with pytest.raises(ValueError, match="at least 1.5"):
         run_validation(

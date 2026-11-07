@@ -36,7 +36,7 @@ See [the Phase 6 readiness guide](PHASE6_READINESS.md) for data handling, per-tr
 
 - The repository remains advisory-only. No real broker order placement, modification or cancellation is in scope.
 - Fail-closed data, quote, circuit, margin, risk and cost gates remain mandatory.
-- The minimum after-cost net reward/risk gate remains 1.5 unless a research-only CLI override is explicitly supplied; the paper profile defaults to 1.5.
+- The minimum after-cost net reward/risk gate is a hard 1.5 across scanner, paper, backtest and research paths; lower CLI/config overrides are rejected. The per-side slippage floor is hard 5 bps, and performance promotion is evaluated at 8 bps.
 - Historical or paper results do not establish a repeatable edge. Do not promote a strategy solely because of a small-sample backtest.
 - The 2026 NSE holiday calendar currently fails closed outside its verified coverage ending 2026-12-31.
 

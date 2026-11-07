@@ -270,10 +270,10 @@ def test_paired_analysis_rejects_different_daily_report_calendars(tmp_path):
     champion.to_csv(champion_path, index=False)
     promotion_path = tmp_path / "promotion.yaml"
     promotion_path.write_text(
-        "thresholds:\\n  minimum_trades: 100\\n  minimum_sessions: 20\\n"
-        "  minimum_profit_factor: 1.0\\n  maximum_symbol_or_session_profit_share: 0.30\\n"
-        "paired_comparison:\\n  minimum_common_sessions: 20\\n  familywise_alpha: 0.05\\n"
-        "  family_size: 3\\n  adjustment: bonferroni\\n",
+        "thresholds:\n  minimum_trades: 100\n  minimum_sessions: 20\n"
+        "  minimum_profit_factor: 1.0\n  maximum_symbol_or_session_profit_share: 0.30\n"
+        "paired_comparison:\n  minimum_common_sessions: 20\n  familywise_alpha: 0.05\n"
+        "  family_size: 3\n  adjustment: bonferroni\n",
         encoding="utf-8",
     )
 
@@ -296,8 +296,8 @@ def test_shadow_track_cannot_overwrite_public_results_even_with_small_test_thres
     trades.to_csv(trades_path, index=False)
     promotion_path = tmp_path / "promotion.yaml"
     promotion_path.write_text(
-        "thresholds:\\n  minimum_trades: 1\\n  minimum_sessions: 1\\n"
-        "  minimum_profit_factor: 0.0\\n  maximum_symbol_or_session_profit_share: 1.0\\n",
+        "thresholds:\n  minimum_trades: 1\n  minimum_sessions: 1\n"
+        "  minimum_profit_factor: 0.0\n  maximum_symbol_or_session_profit_share: 1.0\n",
         encoding="utf-8",
     )
     results_path = tmp_path / "RESULTS.md"

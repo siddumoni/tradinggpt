@@ -624,23 +624,36 @@ def evaluate_symbol_bundle(
     ind15 = add_scanner_indicators(c15)
     # Seed the current session from the last valid prior-session ATR. Restrict
     # history to dates before today so no current/future candle is reused.
-    if isinstance(historical_5m.index, pd.DatetimeIndex):
-        prior_sessions_5m = historical_5m.loc[
-            historical_5m.index.date < c5.index[0].date()
-        ].copy()
-    else:
-        prior_sessions_5m = pd.DataFrame(
-            columns=OHLCV, index=pd.DatetimeIndex([], tz=IST)
+    prior_sessions_5m = pd.DataFrame(
+        columns=OHLCV, index=pd.DatetimeIndex([], tz=IST)
+    )
+    if isinstance(historical_5m.index, pd.DatetimeIndex) and not historical_5m.empty:
+        history_dates = sorted(
+            set(day for day in historical_5m.index.date if day < c5.index[0].date())
         )
+        if history_dates:
+            previous_day = history_dates[-1]
+            previous_session = historical_5m.loc[
+                (historical_5m.index.date == previous_day)
+                & (historical_5m.index.time <= dtime(15, 10))
+            ].copy()
+            expected_previous = pd.date_range(
+                datetime.combine(previous_day, dtime(9, 15), tzinfo=IST),
+                periods=72,
+                freq="5min",
+            )
+            if previous_session.index.equals(expected_previous):
+                prior_sessions_5m = previous_session
+
     atr_source_5m = pd.concat([prior_sessions_5m, c5]).sort_index()
     atr_values_5m = session_aware_atr(atr_source_5m, 14).reindex(ind5.index)
     ind5["atr_14"] = atr_values_5m
     ind5["atr_session_14"] = atr_values_5m
     ind15["atr_session_14"] = session_aware_atr(ind15, 14)
-    if not session_aware_atr(prior_sessions_5m, 14).dropna().empty:
-        reasons.append("ATR seeded from the previous session; overnight gap excluded.")
+    if not atr_values_5m.empty and pd.notna(atr_values_5m.iloc[0]):
+        reasons.append("ATR seeded from the complete previous session; overnight gap excluded.")
     else:
-        reasons.append("Previous-session ATR seed unavailable; current-session warm-up is required.")
+        reasons.append("Complete previous-session ATR seed unavailable; current-session warm-up is required.")
     index_indicators = add_scanner_indicators(idx) if not idx.empty else pd.DataFrame()
     regime = classify_market_regime(index_indicators) if not index_indicators.empty else "UNKNOWN"
     stock_regime = _stock_15m_regime(ind15)

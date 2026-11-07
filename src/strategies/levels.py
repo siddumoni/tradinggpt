@@ -31,9 +31,9 @@ def previous_session_levels(
 ) -> dict[str, float | str]:
     """Return the exact previous normal session OHLC and classic pivots.
 
-    With session_date, the latest prior daily row must match the previous
-    normal NSE session from the verified calendar. The current/forming daily
-    candle is excluded and missing prior-session data fails closed. Without
+    With session_date, the exact previous normal NSE session is resolved
+    from the verified calendar; rows dated on holidays or other non-session
+    days are ignored. Missing prior-session data fails closed. Without
     session_date, the legacy penultimate-row contract is retained.
     """
     required = {"high", "low", "close"}

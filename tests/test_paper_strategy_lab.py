@@ -173,3 +173,14 @@ def test_challenger_rejects_reference_price_outside_levels_without_raising(tmp_p
   status,reason=db.execute("SELECT status,reason FROM shadow_signals WHERE signal_id='pending-test'").fetchone()
  assert status=="ENTRY_REJECTED"
  assert "Reference next-bar open" in reason
+
+
+
+def test_atr_seed_challenger_versions_keep_plain_one_atr_stop_control():
+ from src.paper_strategy_lab import DEFINITIONS,EXIT_POLICY
+ assert set(DEFINITIONS)=={
+  "challenger_ema_9_21_atr_seed_v2",
+  "challenger_vwap_momentum_atr_seed_v2",
+  "challenger_ema_pullback_atr_seed_v2",
+ }
+ assert EXIT_POLICY.stop_atr_multiple==pytest.approx(1.0)

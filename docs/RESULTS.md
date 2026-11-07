@@ -2,7 +2,7 @@
 
 **Status: INSUFFICIENT PROSPECTIVE EVIDENCE — NOT YET EVALUATED.**
 
-As of 2026-11-06, the archived daily paper reports available for review cover 2026-11-03 through 2026-11-05 only. That is at most three independent sessions per track, below the configured minimum of 20 sessions and 100 accepted, completed trades. No validated shared-capital trade-detail report has been processed by `src.performance_stats` for a qualifying sample.
+As of 2026-11-07, the private research archive contains daily paper reports for 2026-11-03 through 2026-11-06: four independent sessions. The archived `champion_v1` track has 16 closed trades across four sessions. Challenger strategy versions remain separate and each is below the configured minimum of 20 sessions and 100 accepted, completed trades. The frozen `nse_champion_v2` baseline has no prospective session in this archive because Phase E merged after the November 6 session. The 193 `CANDIDATE_OUTCOME` closes recorded on November 4 are overlapping single-candidate observations from one session, not shared-capital portfolio trades. No qualifying shared-capital trade-detail report has been processed by `src.performance_stats`.
 
 This is a sample-size limitation, not evidence that a strategy is profitable or unprofitable. Scanner candidates, pending entries, incomplete observations, watch-candidate outcome rows from a single session, and isolated per-symbol backtests must not be presented as portfolio performance.
 

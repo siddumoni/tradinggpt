@@ -285,3 +285,30 @@ def test_paired_analysis_rejects_different_daily_report_calendars(tmp_path):
             champion_input_path=champion_path, profile="research",
             champion_profile="research",
         )
+
+
+
+def test_shadow_track_cannot_overwrite_public_results_even_with_small_test_thresholds(tmp_path):
+    trades = sample_trades()
+    trades["track"] = "WATCH_SHADOW"
+    trades["strategy_version"] = "watch_shadow_v1"
+    trades_path = tmp_path / "watch_shadow.csv"
+    trades.to_csv(trades_path, index=False)
+    promotion_path = tmp_path / "promotion.yaml"
+    promotion_path.write_text(
+        "thresholds:\\n  minimum_trades: 1\\n  minimum_sessions: 1\\n"
+        "  minimum_profit_factor: 0.0\\n  maximum_symbol_or_session_profit_share: 1.0\\n",
+        encoding="utf-8",
+    )
+    results_path = tmp_path / "RESULTS.md"
+    results_path.write_text("CHAMPION RESULTS MUST REMAIN", encoding="utf-8")
+
+    _stats, promotion = analyze_file(
+        trades_path, output_stem=tmp_path / "watch-shadow-analysis",
+        promotion_config=promotion_path, results_doc=results_path,
+        track="WATCH_SHADOW", strategy_version="watch_shadow_v1",
+    )
+
+    assert promotion["checks"]["eligible_strategy_track"] is False
+    assert promotion["decision"] == "INCONCLUSIVE"
+    assert results_path.read_text(encoding="utf-8") == "CHAMPION RESULTS MUST REMAIN"

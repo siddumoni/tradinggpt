@@ -29,7 +29,7 @@ from src.strategy_backtest import (
 )
 
 LOGGER = logging.getLogger(__name__)
-SLIPPAGE_BPS = (2.0, 5.0, 8.0)
+SLIPPAGE_BPS = (5.0, 8.0)
 
 
 

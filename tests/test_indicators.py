@@ -68,7 +68,7 @@ def test_missing_volume_raises():
         add_indicators(df)
 
 
-def test_atr_resets_at_session_boundary_without_overnight_gap():
+def test_atr_seeds_at_session_boundary_without_overnight_gap():
     first_index = pd.date_range("2026-11-02 09:15", periods=15, freq="5min")
     second_index = pd.date_range("2026-11-03 09:15", periods=14, freq="5min")
     def make(index, offset):
@@ -77,4 +77,4 @@ def test_atr_resets_at_session_boundary_without_overnight_gap():
     candles = pd.concat([make(first_index, 0), make(second_index, 50)])
     result = add_indicators(candles)
     assert result.loc[second_index, "atr_14"].iloc[-1] == pytest.approx(0.8)
-    assert pd.isna(result.loc[second_index, "atr_14"].iloc[0])
+    assert result.loc[second_index, "atr_14"].iloc[0] == pytest.approx(0.8)

@@ -18,6 +18,7 @@ def test_virtual_trade_opens_then_closes_with_cost_breakdown(tmp_path):
  r=b.process_scan_report(p); assert r["opened"]==1 and r["rejected"]==0
  s=b.snapshot(); assert s["account"]["starting_capital"]==100000 and s["account"]["open_positions"]==1
  trade=s["open_positions"][0]; assert trade["quantity"]>0 and trade["entry_fill_price"]>trade["entry_reference_price"]
+ assert trade["strategy_version"]==paper_broker_module.PAPER_BASELINE_VERSION
  assert trade["target_1"]==pytest.approx(104.0) and trade["target_2"]==pytest.approx(108.0)
  assert trade["net_rr_t1"]>0 and trade["net_rr_t2"]>trade["net_rr_t1"]
  assert b.update_market_price("INFY",108.1,bid=108.0,ask=108.1,market_time=datetime.now(IST))==1
@@ -240,3 +241,23 @@ def test_paper_broker_reserves_ten_percent_of_risk_budget_for_stop_gaps(tmp_path
     entry = next(event for event in broker.snapshot()["events"] if event["event_type"] == "PAPER_ENTRY")
     assert entry["details"]["stop_gap_risk_reserve_pct"] == pytest.approx(0.10)
     assert entry["details"]["sizing_risk_budget_inr"] == pytest.approx(450.0)
+
+
+
+def test_foundation_candidate_version_is_separate_from_frozen_history(tmp_path):
+ b=PaperBroker(tmp_path/"paper.sqlite3")
+ registry={row["strategy_version"]:row for row in b.snapshot()["strategy_registry"]}
+ assert registry["champion_v1"]["status"]=="FROZEN_VERSION"
+ assert registry[paper_broker_module.PAPER_BASELINE_VERSION]["status"]=="ACTIVE"
+ for version in (
+  "challenger_ema_9_21_v1",
+  "challenger_vwap_momentum_v1",
+  "challenger_ema_pullback_v1",
+ ):
+  assert registry[version]["status"]=="SUPERSEDED_VERSION"
+ for version in (
+  "challenger_ema_9_21_atr_seed_v2",
+  "challenger_vwap_momentum_atr_seed_v2",
+  "challenger_ema_pullback_atr_seed_v2",
+ ):
+  assert registry[version]["status"]=="SHADOW"

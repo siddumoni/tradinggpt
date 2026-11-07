@@ -54,7 +54,7 @@ def test_previous_session_levels_rejects_no_prior_or_invalid_ohlc():
     )
     with pytest.raises(ValueError, match="Invalid previous-session OHLC"):
         previous_session_levels(frame, session_date=date(2026, 11, 7))
-    with pytest.raises(ValueError, match="No completed daily candle"):
+    with pytest.raises(ValueError, match="previous NSE session 2026-11-05 is missing"):
         previous_session_levels(frame, session_date=date(2026, 11, 6))
 
 

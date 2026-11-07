@@ -15,7 +15,10 @@ def quote(**changes):
  x={"last_price":100.0,"bid":99.99,"ask":100.01,"timestamp":stamp(),"verified_live":True}; x.update(changes); return x
 def test_virtual_trade_opens_then_closes_with_cost_breakdown(tmp_path):
  b=PaperBroker(tmp_path/"paper.sqlite3"); p=report_file(tmp_path,[candidate()],{"INFY":quote()})
- r=b.process_scan_report(p); assert r["opened"]==1 and r["rejected"]==0
+ plans=[]
+ r=b.process_scan_report(p,before_entry_callback=lambda plan: plans.append(plan) or True); assert r["opened"]==1 and r["rejected"]==0
+ assert len(plans)==1 and plans[0]["signal_id"]
+ assert plans[0]["net_rr_t1"]>=1.5 and plans[0]["quantity"]>0
  s=b.snapshot(); assert s["account"]["starting_capital"]==100000 and s["account"]["open_positions"]==1
  trade=s["open_positions"][0]; assert trade["quantity"]>0 and trade["entry_fill_price"]>trade["entry_reference_price"]
  assert trade["strategy_version"]==paper_broker_module.PAPER_BASELINE_VERSION
@@ -262,3 +265,15 @@ def test_foundation_candidate_version_is_separate_from_frozen_history(tmp_path):
   "challenger_ema_pullback_atr_seed_v2",
  ):
   assert registry[version]["status"]=="SHADOW"
+
+
+
+def test_failed_pre_entry_alert_withholds_paper_entry(tmp_path):
+ b=PaperBroker(tmp_path/"paper.sqlite3")
+ r=b.process_scan_report(
+  report_file(tmp_path,[candidate()],{"INFY":quote()}),
+  before_entry_callback=lambda plan: False,
+ )
+ assert r["opened"]==0 and r["rejected"]==1
+ assert b.snapshot()["account"]["open_positions"]==0
+ assert any("trade-plan alert was not delivered" in row["message"] for row in b.snapshot()["events"])

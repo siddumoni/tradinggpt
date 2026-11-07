@@ -15,7 +15,9 @@ The statistics engine already exists in `src/performance_stats.py`. It:
 
 ## Current evidence status (2026-11-06)
 
-The available archived daily paper reports cover 2026-11-03 through 2026-11-05, at most three independent sessions per track. This is not enough to satisfy the minimum 20 sessions and 100 accepted, completed trades.
+The private research archive now contains daily reports for 2026-11-03 through 2026-11-06: four independent entry sessions. The current archived Champion version, `champion_v1`, has 16 closed trades across those four sessions. Challenger versions must remain separate: `challenger_ema_pullback_v1` has 32 closed trades across three sessions, `challenger_ema_9_21_v1` has 15 across three sessions, and `challenger_vwap_momentum_v1` has 9 across three sessions. None meets the minimum 20 sessions and 100 accepted, completed trades.
+
+The 193 `CANDIDATE_OUTCOME` closes recorded on 2026-11-04 are overlapping single-candidate observations from one session, not shared-capital portfolio trades; they do not satisfy the evidence gate and must not be pooled with Champion or Challenger. `WATCH_SHADOW` is also a separate research track. Phase E merged on 2026-11-07, after the last archived session, so the frozen `nse_champion_v2` baseline has no prospective session in this archive yet. Keep `champion_v1` and v2 results separate.
 
 A large number of candidate observations from one session does not create additional independent sessions. Do not combine CHAMPION, CHALLENGER, WATCH_SHADOW and CANDIDATE_OUTCOME into one result: they are separate research tracks with different selection and allocation rules. In particular, independent candidate outcomes can overlap and are not portfolio P&L.
 

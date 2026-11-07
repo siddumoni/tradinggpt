@@ -1,10 +1,27 @@
 """Previous-session OHLC levels and classic pivot points."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from math import isfinite
 
 import pandas as pd
+
+from src.market_calendar import IST, market_day_status
+
+
+def _previous_normal_session(day: date) -> date:
+    """Resolve the previous normal NSE session from the verified calendar."""
+    candidate = day - timedelta(days=1)
+    for _ in range(15):
+        status = market_day_status(candidate)
+        if status["status"] == "CALENDAR_OUT_OF_COVERAGE":
+            raise ValueError(
+                f"Cannot verify previous NSE session for {day}: calendar coverage stops before {candidate}"
+            )
+        if status["is_open"] is True:
+            return candidate
+        candidate -= timedelta(days=1)
+    raise ValueError(f"Could not resolve the previous normal NSE session before {day}")
 
 
 def previous_session_levels(
@@ -12,10 +29,12 @@ def previous_session_levels(
     *,
     session_date: date | datetime | None = None,
 ) -> dict[str, float | str]:
-    """Return the last completed daily candle and classic support/resistance pivots.
+    """Return the exact previous normal session OHLC and classic pivots.
 
-    With session_date, only rows dated strictly before the requested session are
-    eligible. Without it, the legacy contract uses the penultimate row.
+    With session_date, the latest prior daily row must match the previous
+    normal NSE session from the verified calendar. The current/forming daily
+    candle is excluded and missing prior-session data fails closed. Without
+    session_date, the legacy penultimate-row contract is retained.
     """
     required = {"high", "low", "close"}
     missing = required.difference(daily_candles.columns)
@@ -26,18 +45,36 @@ def previous_session_levels(
     if daily_candles.index.has_duplicates:
         raise ValueError("Daily candle timestamps must be unique")
     df = daily_candles.sort_index().copy()
+    if df.index.tz is None:
+        df.index = df.index.tz_localize(IST)
+    else:
+        df.index = df.index.tz_convert(IST)
     if session_date is None:
         if len(df) < 2:
             raise ValueError("At least two daily candles are required")
         previous = df.iloc[-2]
         previous_timestamp = df.index[-2]
     else:
-        cutoff = session_date.date() if isinstance(session_date, datetime) else session_date
-        df = df.loc[[stamp.date() < cutoff for stamp in df.index]]
-        if df.empty:
-            raise ValueError("No completed daily candle exists before the requested session date")
-        previous = df.iloc[-1]
-        previous_timestamp = df.index[-1]
+        cutoff = (
+            session_date.astimezone(IST).date()
+            if isinstance(session_date, datetime) and session_date.tzinfo
+            else session_date.date() if isinstance(session_date, datetime)
+            else session_date
+        )
+        expected_date = _previous_normal_session(cutoff)
+        prior = df.loc[[stamp.date() < cutoff for stamp in df.index]]
+        if prior.empty:
+            raise ValueError(
+                f"No completed daily candle exists for previous NSE session {expected_date}"
+            )
+        previous = prior.iloc[-1]
+        previous_timestamp = prior.index[-1]
+        if previous_timestamp.date() != expected_date:
+            raise ValueError(
+                f"Daily candle for previous NSE session {expected_date} is missing; "
+
+                f"latest available prior row is {previous_timestamp.date()}. No older session is substituted."
+            )
     try:
         high, low, close = (float(previous[name]) for name in ("high", "low", "close"))
     except (TypeError, ValueError, OverflowError) as exc:

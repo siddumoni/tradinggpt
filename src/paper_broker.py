@@ -24,6 +24,7 @@ DEFAULT_DAILY_LOSS_LIMIT_INR = 2_000.0
 DEFAULT_MAX_OPEN_POSITIONS = 3
 DEFAULT_SLIPPAGE_BPS = 5.0
 DEFAULT_STOP_GAP_RISK_RESERVE_PCT = 0.10
+PAPER_BASELINE_VERSION = "nse_champion_v2_foundation_candidate"
 MAX_ENTRY_QUOTE_AGE_SECONDS = 120.0
 # The configured time exit is sourced from config/exit_policy.yaml.
 
@@ -173,37 +174,79 @@ class PaperBroker:
             defaults = [
                 (
                     "champion_v1",
-                    "Current scanner baseline",
-                    "CHAMPION",
+                    "Frozen pre-foundation champion",
+                    "CHAMPION_ARCHIVE",
+                    "FROZEN_VERSION",
+                    "Historical evidence is preserved under this version; no new entries are assigned.",
+                ),
+                (
+                    PAPER_BASELINE_VERSION,
+                    "Structural-stop and prior-session ATR foundation candidate",
+                    "CHAMPION_CANDIDATE",
                     "ACTIVE",
-                    "Existing scanner rules remain frozen.",
+                    "Unpromoted research version. Freeze as nse_champion_v2 only after foundation phases A, B, and E are complete.",
                 ),
                 (
                     "challenger_ema_9_21_v1",
-                    "EMA 9/21 momentum",
-                    "CHALLENGER",
-                    "SHADOW",
-                    "Research-only alternative; no champion positions.",
+                    "EMA 9/21 momentum (pre-ATR-seed version)",
+                    "CHALLENGER_ARCHIVE",
+                    "SUPERSEDED_VERSION",
+                    "Historical observations are preserved; do not pool with the ATR-seeded version.",
                 ),
                 (
                     "challenger_vwap_momentum_v1",
-                    "VWAP + MACD momentum",
-                    "CHALLENGER",
-                    "SHADOW",
-                    "Research-only alternative; no champion positions.",
+                    "VWAP + MACD momentum (pre-ATR-seed version)",
+                    "CHALLENGER_ARCHIVE",
+                    "SUPERSEDED_VERSION",
+                    "Historical observations are preserved; do not pool with the ATR-seeded version.",
                 ),
                 (
                     "challenger_ema_pullback_v1",
-                    "EMA trend pullback",
+                    "EMA trend pullback (pre-ATR-seed version)",
+                    "CHALLENGER_ARCHIVE",
+                    "SUPERSEDED_VERSION",
+                    "Historical observations are preserved; do not pool with the ATR-seeded version.",
+                ),
+                (
+                    "challenger_ema_9_21_atr_seed_v2",
+                    "EMA 9/21 momentum with prior-session ATR seed",
                     "CHALLENGER",
                     "SHADOW",
-                    "Research-only alternative; no champion positions.",
+                    "Research-only alternative; plain 1 ATR stop retained; separate version evidence.",
+                ),
+                (
+                    "challenger_vwap_momentum_atr_seed_v2",
+                    "VWAP + MACD momentum with prior-session ATR seed",
+                    "CHALLENGER",
+                    "SHADOW",
+                    "Research-only alternative; plain 1 ATR stop retained; separate version evidence.",
+                ),
+                (
+                    "challenger_ema_pullback_atr_seed_v2",
+                    "EMA trend pullback with prior-session ATR seed",
+                    "CHALLENGER",
+                    "SHADOW",
+                    "Research-only alternative; plain 1 ATR stop retained; separate version evidence.",
                 ),
             ]
             for row in defaults:
                 db.execute(
                     "INSERT OR IGNORE INTO strategy_registry(strategy_version,strategy_name,track,status,description,created_at) VALUES(?,?,?,?,?,?)",
                     (*row, now),
+                )
+            # Version changes supersede old labels; they are not performance-based
+            # retirements and their historical rows remain untouched.
+            db.execute(
+                "UPDATE strategy_registry SET track='CHAMPION_ARCHIVE',status='FROZEN_VERSION',description='Historical evidence is preserved under this version; no new entries are assigned.' WHERE strategy_version='champion_v1'"
+            )
+            for old_version in (
+                "challenger_ema_9_21_v1",
+                "challenger_vwap_momentum_v1",
+                "challenger_ema_pullback_v1",
+            ):
+                db.execute(
+                    "UPDATE strategy_registry SET track='CHALLENGER_ARCHIVE',status='SUPERSEDED_VERSION',description='Historical observations are preserved; do not pool with the ATR-seeded version.' WHERE strategy_version=?",
+                    (old_version,),
                 )
 
     def _event(
@@ -623,7 +666,7 @@ class PaperBroker:
             details={
                 "signal_id": signal_id,
                 "strategy": strategy,
-                "strategy_version": "champion_v1",
+                "strategy_version": PAPER_BASELINE_VERSION,
                 "quantity": int(assessment.quantity),
                 "entry_reference_price": entry_reference,
                 "entry_fill_price": entry_fill,

@@ -36,7 +36,7 @@ def test_forward_evaluator_uses_selected_account_profile_and_minimum_slippage(
 
     def fake_evaluate(_source, _candles, **kwargs):
         settings = kwargs["settings"]
-        captured.append((settings.capital_inr, settings.risk_per_trade_inr, settings.minimum_net_reward_risk))
+        captured.append((settings.capital_inr, settings.risk_per_trade_inr, settings.minimum_net_risk_reward))
         return {
             "signal_id": "signal-1", "symbol": "HDFCBANK", "strategy": "vwap_trend",
             "outcome_status": "PENDING", "net_pnl": None,

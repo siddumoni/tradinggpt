@@ -598,6 +598,7 @@ def main(argv=None) -> int:
     server = None
     server_thread = None
     reported_dates = set()
+    digest_sent_dates = set()
     try:
         server = make_server(broker, a.dashboard_host, a.dashboard_port, watch_shadow=watch_shadow)
         server_thread = threading.Thread(
@@ -693,6 +694,7 @@ def main(argv=None) -> int:
                         candle_archive_dir=archive,
                         timeout_seconds=a.scan_timeout_seconds,
                         paper_broker=broker,
+                        before_entry_callback=telegram_notifier.send_trade_plan,
                         after_report=after_report,
                         archive_symbols=archive_symbols,
                         account_capital=account_capital,
@@ -736,6 +738,15 @@ def main(argv=None) -> int:
                             reason="market close daily summary",
                         )
                         reported_dates.add(date_key)
+                if now.weekday() < 5 and now.time().replace(tzinfo=None) >= dtime(15, 45):
+                    date_key = now.date().isoformat()
+                    if date_key not in digest_sent_dates:
+                        try:
+                            if telegram_notifier.send_daily_digest(broker.snapshot(), date_key):
+                                digest_sent_dates.add(date_key)
+                                LOGGER.info("Telegram EOD paper digest delivered or intentionally disabled for %s.", date_key)
+                        except Exception:
+                            LOGGER.exception("Telegram EOD digest failed; paper service remains available.")
             except Exception:
                 LOGGER.exception("Paper service cycle failed; continuing")
             time.sleep(a.poll_seconds)

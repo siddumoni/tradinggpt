@@ -83,8 +83,8 @@ def _prepare_trades(trades: pd.DataFrame, *, slippage_bps: float) -> pd.DataFram
     missing = REQUIRED.difference(trades.columns)
     if missing:
         raise ValueError(f"Trade details missing required columns: {sorted(missing)}")
-    if not math.isfinite(slippage_bps) or slippage_bps < 8 or slippage_bps > 100:
-        raise ValueError("promotion analysis slippage must be between 8 and 100 bps per side")
+    if not math.isfinite(slippage_bps) or slippage_bps != 8.0:
+        raise ValueError("promotion analysis must use exactly 8 bps per side")
     frame = trades.copy().reset_index(drop=True)
     frame["side"] = frame["side"].astype(str).str.upper()
     if not frame["side"].isin(["LONG", "SHORT"]).all():

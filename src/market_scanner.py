@@ -624,9 +624,14 @@ def evaluate_symbol_bundle(
     ind15 = add_scanner_indicators(c15)
     # Seed the current session from the last valid prior-session ATR. Restrict
     # history to dates before today so no current/future candle is reused.
-    prior_sessions_5m = historical_5m.loc[
-        historical_5m.index.date < c5.index[0].date()
-    ].copy()
+    if isinstance(historical_5m.index, pd.DatetimeIndex):
+        prior_sessions_5m = historical_5m.loc[
+            historical_5m.index.date < c5.index[0].date()
+        ].copy()
+    else:
+        prior_sessions_5m = pd.DataFrame(
+            columns=OHLCV, index=pd.DatetimeIndex([], tz=IST)
+        )
     atr_source_5m = pd.concat([prior_sessions_5m, c5]).sort_index()
     atr_values_5m = session_aware_atr(atr_source_5m, 14).reindex(ind5.index)
     ind5["atr_14"] = atr_values_5m

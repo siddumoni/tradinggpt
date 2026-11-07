@@ -15,14 +15,14 @@ You can pass multiple daily CSVs in one command; their columns are aligned befor
 For example, a challenger comparison must use the exact strategy version and the corresponding Champion export:
 
 ```powershell
-python -m src.performance_stats --trades data/paper_daily_YYYY-MM-DD_trades.csv --track CHALLENGER --strategy-version challenger_ema_9_21_atr_seed_v2 --champion-trades data/paper_daily_YYYY-MM-DD_trades.csv --champion-strategy-version nse_champion_v2_foundation_candidate
+python -m src.performance_stats --trades data/paper_daily_YYYY-MM-DD_trades.csv --track CHALLENGER --strategy-version challenger_ema_9_21_atr_seed_v2 --champion-trades data/paper_daily_YYYY-MM-DD_trades.csv --champion-strategy-version nse_champion_v2_foundation_candidate --profile paper --champion-profile paper
 ```
 
 The example date arguments are placeholders; pass every retained daily report in the same frozen evaluation window. Do not compare non-overlapping date sets or pool versions.
 
 The 95% expectancy interval resamples complete entry sessions with replacement (10,000 draws, fixed seed 42). Metrics include expectancy, win rate, profit factor, realized close-to-close drawdown, maximum losing streak, MAE/MFE in R where the outcome evaluator recorded them, entry-hour buckets, and positive-P&L concentration by symbol and session.
 
-For a `CHALLENGER` track, supply the matching Champion daily trade exports with `--champion-trades` and, if needed, `--champion-strategy-version`. The comparison pairs daily net P&L on common entry sessions at 8 bps/side, then bootstraps the session-level challenger-minus-Champion difference. The lower confidence bound uses Bonferroni adjustment across the configured family of three active challenger tracks (`config/promotion.yaml`). A challenger cannot pass without at least 20 common sessions, a positive paired mean, and a positive multiplicity-adjusted lower bound. If Champion comparison data is absent, the challenger decision remains `INCONCLUSIVE`.
+For a `CHALLENGER` track, supply the matching Champion daily trade exports with `--champion-trades` and, if needed, `--champion-strategy-version`. Also declare both source profiles explicitly with `--profile` and `--champion-profile`; they must match. The profile controls the initial capital used for drawdown percentages and is recorded in the diagnostics. Keep paper and research/live-advisory exports in separate analyses. The comparison pairs daily net P&L on common entry sessions at 8 bps/side, then bootstraps the session-level challenger-minus-Champion difference. The lower confidence bound uses Bonferroni adjustment across the configured family of three active challenger tracks (`config/promotion.yaml`). A challenger cannot pass without at least 20 common sessions, a positive paired mean, and a positive multiplicity-adjusted lower bound. If Champion comparison data is absent, the challenger decision remains `INCONCLUSIVE`.
 
 The analysis always writes its private JSON/Markdown diagnostics. It updates `docs/RESULTS.md` only when every configured promotion check passes; an `INCONCLUSIVE` analysis leaves the existing public results status untouched.
 

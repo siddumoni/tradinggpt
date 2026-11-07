@@ -1152,7 +1152,11 @@ class PaperBroker:
               SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) wins,COALESCE(SUM(net_pnl),0) net_pnl,
               COALESCE(AVG(net_pnl),0) expectancy FROM trades WHERE status='CLOSED' GROUP BY strategy,strategy_version ORDER BY net_pnl DESC"""):
                 item = dict(r)
-                item["track"] = "CHAMPION"
+                item["track"] = (
+                    "CHAMPION_CANDIDATE"
+                    if item["strategy_version"] == PAPER_BASELINE_VERSION
+                    else "CHAMPION_ARCHIVE"
+                )
                 item["win_rate_pct"] = (
                     100.0 * item["wins"] / item["trades"] if item["trades"] else 0.0
                 )

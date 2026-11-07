@@ -132,6 +132,7 @@ def test_only_new_candle_generates_candidate_using_causal_history(tmp_path, monk
     assert len(journal) == 1
     assert journal.iloc[0]["signal_time"] == next_stamp.isoformat()
     assert journal.iloc[0]["strategy"] == "vwap_trend"
+    assert journal.iloc[0]["strategy_version"] == "nse_champion_v2_foundation_candidate"
     assert journal.iloc[0]["provider"] == "Kite Connect candle archive"
     assert journal.iloc[0]["paper_status"] == "RESEARCH_ONLY_NO_ORDER"
     assert max(seen_lengths) == len(extended)

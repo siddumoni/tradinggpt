@@ -568,7 +568,7 @@ class KiteMarketData:
         if start > end:
             history_candles: list[dict[str, Any]] = []
         else:
-            history_candles = self.historical_history_candles(
+            history_candles = self.historical_candles(
                 int(instrument_token), start, end, "5minute"
             )
         payload = {

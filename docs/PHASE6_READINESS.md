@@ -13,7 +13,7 @@ The statistics engine already exists in `src/performance_stats.py`. It:
 - calculates expectancy, a 95% session-block bootstrap interval, win rate, profit factor, realized drawdown, losing streak and concentration; and
 - applies the thresholds in `config/promotion.yaml`.
 
-## Current evidence status (2026-11-06)
+## Current evidence status (2026-11-07)
 
 The private research archive now contains daily reports for 2026-11-03 through 2026-11-06: four independent entry sessions. The current archived Champion version, `champion_v1`, has 16 closed trades across those four sessions. Challenger versions must remain separate: `challenger_ema_pullback_v1` has 32 closed trades across three sessions, `challenger_ema_9_21_v1` has 15 across three sessions, and `challenger_vwap_momentum_v1` has 9 across three sessions. None meets the minimum 20 sessions and 100 accepted, completed trades.
 

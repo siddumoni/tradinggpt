@@ -191,8 +191,8 @@ def main() -> None:
         parser.error("--train-fraction must be between 0.50 and 0.85")
     if not math.isfinite(args.risk_per_trade) or args.risk_per_trade <= 0:
         parser.error("--risk-per-trade must be finite and greater than 0")
-    if not math.isfinite(args.min_net_rr) or args.min_net_rr <= 0:
-        parser.error("--min-net-rr must be finite and positive")
+    if not math.isfinite(args.min_net_rr) or args.min_net_rr < 1.5:
+        parser.error("--min-net-rr must be finite and at least 1.5")
     if args.minimum_test_trades < 1:
         parser.error("--minimum-test-trades must be at least 1")
     candidates = []

@@ -40,10 +40,12 @@ The journal's `data_verified_live` field intentionally remains **false** because
 - Symbols and rules: HDFCBANK VWAP Trend; INFY VWAP Pullback.
 - Indicator/signal callback: the existing baseline callback in `src.strategy_backtest`.
 - Levels: 1 ATR stop, 2 ATR Target 1, 2.5 ATR Target 2.
-- Starting capital for individual signal sizing: ₹20,000.
-- Planned risk budget per signal: ₹500, including estimated stop costs and modeled slippage.
-- Minimum after-cost Target 2 net R:R gate: 1.5, fixed. This matches the historical baseline backtest, whose single 2.5-ATR target is the scored target.
-- Per-side slippage sensitivity: 2, 5, and 8 basis points.
+- Account sizing comes from `config/settings.yaml` via `--profile`; no capital or risk amount is hard-coded in the evaluator:
+  - `research`: ₹20,000 capital / ₹200 risk per signal.
+  - `live-advisory`: ₹20,000 capital / ₹200 risk per signal. This is only a sizing profile here; the candle-only evaluator still does not validate fresh quotes and remains research-only.
+  - `paper`: ₹1,00,000 capital / ₹500 risk per signal.
+- Minimum after-cost Target 2 net R:R gate: at least 1.5, unchanged.
+- Per-side slippage sensitivity: 5 and 8 basis points by default. The evaluator rejects any scenario below the hard 5 bps/side floor.
 - Entry at the next five-minute candle open; target 2 full exit; stop-first rule if stop and target share a candle; adverse stop-gap handling; regular-session square-off; no outcome scoring across missing bars.
 - Costs are estimates from the project's cost calculator. This does not guarantee exact broker fills or current fees.
 

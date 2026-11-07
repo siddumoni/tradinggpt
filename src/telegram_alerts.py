@@ -430,10 +430,16 @@ def format_daily_digest(snapshot: dict[str, Any], report_date: str) -> str:
         "<b>Version-isolated cumulative results</b>",
     ]
     for row in snapshot.get("strategies", []) if isinstance(snapshot, dict) else []:
-        if isinstance(row, dict) and row.get("track") in {"CHAMPION_CANDIDATE", "SHADOW"}:
+        if isinstance(row, dict) and row.get("track") in {"CHAMPION", "SHADOW"}:
+            daily = ""
+            if row.get("track") == "CHAMPION":
+                daily = (
+                    f" · today {_safe(row.get('trades_today', 0))} trades"
+                    f" · accept rate {_price(row.get('accept_rate_pct', 0))}%"
+                )
             lines.append(
                 f"{_safe(row.get('strategy_version'))}: {_safe(row.get('trades', 0))} closed · "
-                f"net ₹{_price(row.get('net_pnl', 0))}"
+                f"net ₹{_price(row.get('net_pnl', 0))}{daily}"
             )
     lines.append("Research only — no broker orders were placed.")
     return "\n".join(lines)

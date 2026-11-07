@@ -25,6 +25,18 @@ DEFAULT_MAX_OPEN_POSITIONS = 3
 DEFAULT_SLIPPAGE_BPS = 5.0
 DEFAULT_STOP_GAP_RISK_RESERVE_PCT = 0.10
 PAPER_BASELINE_VERSION = "nse_champion_v2_foundation_candidate"
+CHALLENGER_VERSION_NAMES = {
+    "challenger_ema_9_21_v1": "EMA 9/21 momentum (pre-ATR-seed)",
+    "challenger_vwap_momentum_v1": "VWAP + MACD momentum (pre-ATR-seed)",
+    "challenger_ema_pullback_v1": "EMA trend pullback (pre-ATR-seed)",
+    "challenger_ema_9_21_atr_seed_v2": "EMA 9/21 momentum (ATR-seeded)",
+    "challenger_vwap_momentum_atr_seed_v2": "VWAP + MACD momentum (ATR-seeded)",
+    "challenger_ema_pullback_atr_seed_v2": "EMA trend pullback (ATR-seeded)",
+}
+CHALLENGER_VERSION_TRACKS = {
+    version: ("CHALLENGER_ARCHIVE" if version.endswith("_v1") else "SHADOW")
+    for version in CHALLENGER_VERSION_NAMES
+}
 MAX_ENTRY_QUOTE_AGE_SECONDS = 120.0
 # The configured time exit is sourced from config/exit_policy.yaml.
 
@@ -1205,13 +1217,9 @@ class PaperBroker:
             ):
                 item = dict(row)
                 item["strategy"] = item["strategy_name"]
-                item["track"] = "SHADOW"
+                item["track"] = CHALLENGER_VERSION_TRACKS.get(item["strategy_version"], "SHADOW")
                 shadow_closed.append(item)
-            for version, name in (
-                ("challenger_ema_9_21_v1", "EMA 9/21 momentum"),
-                ("challenger_vwap_momentum_v1", "VWAP + MACD momentum"),
-                ("challenger_ema_pullback_v1", "EMA trend pullback"),
-            ):
+            for version, name in CHALLENGER_VERSION_NAMES.items():
                 row = db.execute(
                     "SELECT COUNT(*) trades,SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) wins,COALESCE(SUM(net_pnl),0) net_pnl,COALESCE(AVG(net_pnl),0) expectancy FROM shadow_signals WHERE strategy_version=? AND status='CLOSED'",
                     (version,),
@@ -1221,7 +1229,7 @@ class PaperBroker:
                     {
                         "strategy": name,
                         "strategy_version": version,
-                        "track": "SHADOW",
+                        "track": CHALLENGER_VERSION_TRACKS[version],
                         "trades": shadow_count,
                         "wins": int(row["wins"] or 0),
                         "net_pnl": float(row["net_pnl"] or 0),

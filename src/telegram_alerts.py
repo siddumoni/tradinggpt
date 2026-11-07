@@ -157,7 +157,9 @@ class TelegramEventNotifier:
         if not self.configured and self.sender is None:
             LOGGER.error("EOD digest blocked: Telegram is enabled but not configured.")
             return False
-        date_key = report_date or self._now_provider().astimezone(IST).date().isoformat()
+        current_time = self._now_provider()
+        current_time = current_time.replace(tzinfo=IST) if current_time.tzinfo is None else current_time.astimezone(IST)
+        date_key = report_date or current_time.date().isoformat()
         with self._alert_lock:
             if date_key in self._digest_dates:
                 return True
@@ -208,7 +210,7 @@ class TelegramEventNotifier:
         with self._alert_lock:
             now_epoch = self._clock()
             self._sent_timestamps = [
-                stamp for stamp in self._sent_timestamps if now_epoch - stamp < 3600
+                stamp for stamp in self._sent_timestamps if 0 <= now_epoch - stamp < 3600
             ]
             if self._is_quiet_now():
                 LOGGER.info("Telegram notification deferred by configured quiet hours.")

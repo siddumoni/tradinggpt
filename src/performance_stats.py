@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from src.risk_engine import load_phase2_settings
+
 IST = "Asia/Kolkata"
 REQUIRED = {"symbol", "side", "entry_time", "exit_time", "entry", "exit", "quantity", "gross_pnl", "transaction_charges"}
 
@@ -365,7 +367,9 @@ def analyze_file(
     output_stem: Path,
     promotion_config: Path,
     results_doc: Path,
-    initial_capital: float = 20_000.0,
+    initial_capital: float | None = None,
+    profile: str = "research",
+    champion_profile: str | None = None,
     slippage_bps: float = 8.0,
     bootstrap_resamples: int = 10_000,
     seed: int = 42,
@@ -375,8 +379,10 @@ def analyze_file(
     champion_strategy_version: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     trades = load_trades(input_path, track=track, strategy_version=strategy_version)
+    profile_risk, _charge_rates = load_phase2_settings(profile=profile)
+    capital = profile_risk.capital_inr if initial_capital is None else initial_capital
     stats = calculate_statistics(
-        trades, initial_capital=initial_capital, slippage_bps=slippage_bps,
+        trades, initial_capital=capital, slippage_bps=slippage_bps,
         bootstrap_resamples=bootstrap_resamples, seed=seed,
     )
     selected_track = str(trades.attrs.get("selected_track") or "").upper()
@@ -384,6 +390,8 @@ def analyze_file(
     require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
     paired = None
     if champion_input_path is not None:
+        if champion_profile is None or champion_profile != profile:
+            raise ValueError("paired comparison requires matching explicit profile and champion-profile declarations")
         paired_cfg = load_promotion_config(promotion_config).get("paired_comparison", {})
         if str(paired_cfg.get("adjustment", "bonferroni")).lower() != "bonferroni":
             raise ValueError("paired promotion comparison requires Bonferroni multiple-testing adjustment")
@@ -410,6 +418,9 @@ def analyze_file(
         "source_files": [path.name for path in source_paths],
         "selected_track": trades.attrs.get("selected_track"),
         "selected_strategy_version": trades.attrs.get("selected_strategy_version"),
+        "account_profile": profile,
+        "initial_capital_inr": capital,
+        "champion_account_profile": champion_profile,
         "paired_champion_source_files": (
             [path.name for path in ([champion_input_path] if isinstance(champion_input_path, Path) else champion_input_path)]
             if champion_input_path is not None else []
@@ -437,7 +448,9 @@ def main() -> None:
     parser.add_argument("--output",type=Path,default=Path("reports/performance/validation"))
     parser.add_argument("--results-doc",type=Path,default=Path("docs/RESULTS.md"))
     parser.add_argument("--promotion-config",type=Path,default=Path("config/promotion.yaml"))
-    parser.add_argument("--initial-capital",type=float,default=20_000.0)
+    parser.add_argument("--initial-capital",type=float,default=None,help="Optional capital override; otherwise uses the selected account profile.")
+    parser.add_argument("--profile",choices=("research","paper","live-advisory"),default="research",help="Sizing/capital profile for the challenger or selected trade stream.")
+    parser.add_argument("--champion-profile",choices=("research","paper","live-advisory"),default=None,help="Required with --champion-trades; must match --profile.")
     parser.add_argument("--slippage-bps",type=float,default=8.0)
     parser.add_argument("--bootstrap-resamples",type=int,default=10_000)
     parser.add_argument("--seed",type=int,default=42)
@@ -447,7 +460,7 @@ def main() -> None:
     parser.add_argument("--champion-strategy-version",type=str,default=None,help="Required if the selected Champion files contain multiple strategy versions.")
     args=parser.parse_args()
     try:
-        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version,champion_input_path=args.champion_trades,champion_strategy_version=args.champion_strategy_version)
+        analyze_file(args.trades,output_stem=args.output,promotion_config=args.promotion_config,results_doc=args.results_doc,initial_capital=args.initial_capital,profile=args.profile,champion_profile=args.champion_profile,slippage_bps=args.slippage_bps,bootstrap_resamples=args.bootstrap_resamples,seed=args.seed,track=args.track,strategy_version=args.strategy_version,champion_input_path=args.champion_trades,champion_strategy_version=args.champion_strategy_version)
     except (ValueError,OSError) as exc:
         parser.error(str(exc))
 if __name__=="__main__": main()

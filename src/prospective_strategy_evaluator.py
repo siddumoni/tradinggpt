@@ -45,9 +45,7 @@ LAST_BAR_END = dtime.fromisoformat(EXIT_POLICY.time_exit_ist)
 LAST_BAR_START = (datetime.combine(datetime.min.date(), LAST_BAR_END) - timedelta(minutes=BAR_MINUTES)).time()
 DEFAULT_CANDIDATES = "HDFCBANK:vwap_trend,INFY:vwap_pullback"
 STRATEGY_VERSION = "nse_champion_v2_foundation_candidate"
-DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
-FORWARD_CAPITAL_INR = 20_000.0
-FORWARD_RISK_PER_TRADE_INR = 500.0
+DEFAULT_SLIPPAGE_BPS = (5.0, 8.0)
 MINIMUM_NET_RR = 1.5
 MINIMUM_COMPLETED_FOR_REVIEW = 30
 JOURNAL_FIELDS = [
@@ -436,12 +434,13 @@ def refresh_outcomes(
     output_path: Path,
     *,
     slippage_values: tuple[float, ...] = DEFAULT_SLIPPAGE_BPS,
+    profile: str = "research",
 ) -> dict[str, Any]:
-    """Re-score the prospective journal under fixed cost scenarios and write reports."""
-    configured, charge_rates = load_phase2_settings()
+    """Re-score the prospective journal using one named account profile."""
+    configured, charge_rates = load_phase2_settings(profile=profile)
     for value in slippage_values:
-        if not math.isfinite(value) or value < 0 or value > 100:
-            raise ValueError("slippage scenarios must be finite and between 0 and 100 bps per side")
+        if not math.isfinite(value) or value < 5 or value > 100:
+            raise ValueError("slippage scenarios must be finite and between 5 and 100 bps per side")
     if not journal_path.exists() or journal_path.stat().st_size == 0:
         journal = pd.DataFrame(columns=JOURNAL_FIELDS)
     else:
@@ -461,9 +460,9 @@ def refresh_outcomes(
         candles, candle_path = candle_cache.get(symbol, (None, None))
         for slippage in slippage_values:
             settings = configured.__class__(
-                capital_inr=FORWARD_CAPITAL_INR,
-                risk_per_trade_inr=FORWARD_RISK_PER_TRADE_INR,
-                minimum_net_risk_reward=MINIMUM_NET_RR,
+                capital_inr=configured.capital_inr,
+                risk_per_trade_inr=configured.risk_per_trade_inr,
+                minimum_net_risk_reward=max(MINIMUM_NET_RR, configured.minimum_net_risk_reward),
                 minimum_net_rr_target=load_exit_policy().gate_target,
                 require_margin_verification=False,
                 skip_if_margin_unavailable=False,
@@ -485,7 +484,7 @@ def refresh_outcomes(
                 "strategy_version": str(source.get("strategy_version") or "LEGACY_UNVERSIONED"),
                 "candidate": f"{source.get('strategy_version', 'LEGACY_UNVERSIONED')}:{symbol}:{str(source['strategy']).lower()}",
                 "slippage_bps_per_side": float(slippage),
-                "minimum_net_reward_risk_gate": MINIMUM_NET_RR,
+                "minimum_net_reward_risk_gate": max(MINIMUM_NET_RR, configured.minimum_net_risk_reward),
                 "gate_decision": (
                     "ACCEPTED_BY_CONFIGURED_GATE"
                     if str(outcome.get("entry_gate_accepted", "")).casefold() == "true"
@@ -520,8 +519,8 @@ def refresh_outcomes(
         "slippage_bps_per_side": list(slippage_values),
         "minimum_net_reward_risk_gate": MINIMUM_NET_RR,
         "minimum_completed_signals_for_review": MINIMUM_COMPLETED_FOR_REVIEW,
-        "starting_capital_for_individual_signal_sizing_inr": FORWARD_CAPITAL_INR,
-        "risk_budget_per_signal_inr": FORWARD_RISK_PER_TRADE_INR,
+        "starting_capital_for_individual_signal_sizing_inr": configured.capital_inr,
+        "risk_budget_per_signal_inr": configured.risk_per_trade_inr,
         "session_model": {
             "session_open_ist": SESSION_START.strftime("%H:%M"),
             "last_eligible_signal_candle_start_ist": LAST_BAR_START.strftime("%H:%M"),
@@ -580,6 +579,7 @@ def run_once(
     now: pd.Timestamp | None = None,
     max_late_seconds: float = 120.0,
     slippage_values: tuple[float, ...] = DEFAULT_SLIPPAGE_BPS,
+    profile: str = "research",
 ) -> dict[str, Any]:
     """Run one poll cycle; bootstrap skips all already-present archive bars."""
     recorded_at = now if now is not None else now_ist()
@@ -597,7 +597,7 @@ def run_once(
     state = _read_state(state_path)
     if not state.get("initialized", False):
         state = _bootstrap_state(state, candidates, candles_dir, state_path, recorded_at)
-        refresh_outcomes(signal_path, candles_dir, outcome_path, slippage_values=slippage_values)
+        refresh_outcomes(signal_path, candles_dir, outcome_path, slippage_values=slippage_values, profile=profile)
         return {"bootstrapped": True, "signals_added": 0, "candles_processed": 0}
 
     watermarks: dict[str, str | None] = state.setdefault("last_processed", {})
@@ -678,8 +678,10 @@ def main() -> None:
     parser.add_argument("--state", type=Path, default=Path("logs/prospective_strategy_evaluator_state.json"))
     parser.add_argument("--candidates", default=DEFAULT_CANDIDATES,
                         help="Frozen SYMBOL:strategy pairs; default HDFCBANK:vwap_trend,INFY:vwap_pullback.")
-    parser.add_argument("--slippage-bps", default="2,5,8",
-                        help="Comma-separated per-side slippage scenarios; default 2,5,8 bps.")
+    parser.add_argument("--slippage-bps", default="5,8",
+                        help="Comma-separated per-side slippage scenarios; minimum 5 bps, default 5,8.")
+    parser.add_argument("--profile", choices=("research", "paper", "live-advisory"), default="research",
+                        help="Named account profile used for independent signal sizing; use separate output/state paths per profile.")
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--max-late-seconds", type=float, default=120.0,
                         help="Skip signal generation when a candle is this many seconds late after its end.")
@@ -688,8 +690,8 @@ def main() -> None:
     try:
         candidates = parse_candidates(args.candidates)
         slippage_values = tuple(float(item.strip()) for item in args.slippage_bps.split(",") if item.strip())
-        if not slippage_values or any(not math.isfinite(value) or value < 0 or value > 100 for value in slippage_values):
-            raise ValueError("slippage-bps must contain values between 0 and 100")
+        if not slippage_values or any(not math.isfinite(value) or value < 5 or value > 100 for value in slippage_values):
+            raise ValueError("slippage-bps must contain values between 5 and 100")
         if not math.isfinite(args.poll_seconds) or args.poll_seconds < 1:
             raise ValueError("poll-seconds must be at least 1")
         if not math.isfinite(args.max_late_seconds) or args.max_late_seconds < 0:
@@ -708,6 +710,7 @@ def main() -> None:
                     state_path=args.state,
                     max_late_seconds=args.max_late_seconds,
                     slippage_values=slippage_values,
+                    profile=args.profile,
                 )
             except (ValueError, OSError, FileNotFoundError) as exc:
                 LOGGER.exception("Prospective evaluator cycle failed; no orders were sent: %s", exc)

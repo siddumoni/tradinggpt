@@ -92,15 +92,17 @@ def audit_symbol(path: Path) -> list[dict]:
     symbol = path.stem.upper()
     output: list[dict] = []
 
-    ordered_days = sorted(complete)
-    for day_index, day in enumerate(ordered_days):
-        if day_index == 0:
+    observed_days = sorted(set(candles.index.date))
+    for day in sorted(complete):
+        prior_days = [candidate for candidate in observed_days if candidate < day]
+        if not prior_days:
+            continue
+        prior_day = prior_days[-1]
+        # Do not leap over an incomplete intervening session and seed from stale ATR.
+        if prior_day not in complete:
             continue
         session = candles.loc[candles.index.date == day].copy()
         if session.empty:
-            continue
-        prior_day = ordered_days[day_index - 1]
-        if prior_day >= day:
             continue
         if pd.isna(seeded_atr.loc[session.index[0]]):
             continue

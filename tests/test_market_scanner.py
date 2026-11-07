@@ -52,7 +52,7 @@ def test_live_scanner_atr_uses_prior_session_seed_before_intraday_warmup():
         "provider": "test",
         "candles_5m": sample_candles(3, start="2026-10-16 09:15:00"),
         "candles_15m": sample_candles(1, start="2026-10-16 09:15:00"),
-        "candles_5m_history": sample_candles(14, start="2026-10-15 09:15:00"),
+        "candles_5m_history": sample_candles(72, start="2026-10-15 09:15:00"),
     }
     result = evaluate_symbol_bundle("TEST", bundle, now=now)
     assert result.action == "NO_TRADE"

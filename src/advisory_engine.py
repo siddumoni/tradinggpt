@@ -25,8 +25,13 @@ from src.risk_engine import load_phase2_settings
 from src.paper_journal import append_scan_ledger, append_scan_report
 from src.candle_archive import append_completed_candles
 from src.live_entry_validation import inspect_executable_quote, revalidate_candidate_at_quote
-from src.market_calendar import market_day_status, market_session_message
-from src.market_safety import inspect_circuit_limits, load_market_safety_settings
+from src.market_calendar import calendar_maintenance_status, market_day_status, market_session_message
+from src.market_safety import (
+    inspect_circuit_limits,
+    load_market_safety_settings,
+    load_surveillance_snapshot,
+    surveillance_status_for_symbol,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("nse_advisory_assistant")
@@ -150,6 +155,9 @@ def run_scan(
 ) -> dict[str, Any]:
     current = now or datetime.now(IST)
     current = current.astimezone(IST) if current.tzinfo else current.replace(tzinfo=IST)
+    calendar_maintenance = calendar_maintenance_status(current.date())
+    if calendar_maintenance["warning"]:
+        LOGGER.warning("NSE calendar maintenance: %s", calendar_maintenance["message"])
     session_message = market_session_message(current)
     if session_message:
         return {
@@ -158,6 +166,7 @@ def run_scan(
             "account_profile": account_profile,
             "message": session_message,
             "market_calendar": market_day_status(current.date()),
+            "calendar_maintenance": calendar_maintenance,
             "candidates": [],
             "news": {"items": [], "errors": []},
             "advisory_only": True,
@@ -165,6 +174,9 @@ def run_scan(
         }
 
     market_safety_settings = load_market_safety_settings()
+    surveillance_snapshot = load_surveillance_snapshot(as_of=current)
+    if surveillance_snapshot["status"] != "VALID":
+        LOGGER.warning("NSE surveillance status is %s: %s", surveillance_snapshot["status"], surveillance_snapshot["reason"])
     provider_name = str(data_provider).strip().lower()
     if provider_name not in {"yahoo", "kite"}:
         raise ValueError("data_provider must be 'yahoo' or 'kite'")
@@ -326,6 +338,14 @@ def run_scan(
             fetch_errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
             LOGGER.warning("Skipping %s after data error: %s", symbol, exc)
 
+    for symbol, bundle in bundles.items():
+        bundle["surveillance"] = surveillance_status_for_symbol(symbol, surveillance_snapshot)
+        bundle.setdefault("mis_eligibility", {
+            "status": "NOT_CHECKED",
+            "eligible": None,
+            "interpretation": "No MIS margin calculation has been attempted.",
+        })
+
     archive_results: list[dict[str, Any]] = []
     archive_errors: list[str] = []
     if archive_symbols and provider_name != "kite":
@@ -384,6 +404,7 @@ def run_scan(
     # Margin estimation is read-only: this requests a hypothetical one-share
     # MIS limit-order margin calculation and never submits an order.
     margin_per_share_by_symbol: dict[str, float] = {}
+    mis_eligibility_by_symbol: dict[str, dict[str, Any]] = {}
     margin_checks: list[dict[str, Any]] = []
     if provider_name == "kite":
         margin_validation_time = datetime.now(IST) if now is None else current
@@ -417,9 +438,21 @@ def run_scan(
                         "Kite MIS margin estimate must be a finite positive number."
                     )
                 margin_per_share_by_symbol[candidate.symbol] = margin_value
+                mis_status = {
+                    "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
+                    "eligible": True,
+                    "verified": True,
+                    "product": "MIS",
+                    "margin_per_share_inr": round(margin_value, 4),
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                    "interpretation": "Kite returned a positive MIS margin estimate; this is not a guarantee of eventual order acceptance.",
+                }
+                mis_eligibility_by_symbol[candidate.symbol] = mis_status
+                quote_bundle["mis_eligibility"] = mis_status
                 margin_checks.append({
                     "symbol": candidate.symbol,
                     "side": candidate.side,
+                    "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
                     "verified": True,
                     "margin_per_share_inr": round(margin_value, 4),
                     "entry_price_used": round(margin_entry_price, 4),
@@ -427,8 +460,19 @@ def run_scan(
                 })
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
+                mis_status = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED",
+                    "eligible": None,
+                    "verified": False,
+                    "product": "MIS",
+                    "reason": message,
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                }
+                mis_eligibility_by_symbol[candidate.symbol] = mis_status
+                quote_bundle["mis_eligibility"] = mis_status
                 margin_checks.append({
                     "symbol": candidate.symbol, "side": candidate.side,
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED",
                     "verified": False, "reason": message,
                 })
                 LOGGER.warning("MIS margin estimate unavailable for %s: %s", candidate.symbol, message)
@@ -581,12 +625,33 @@ def run_scan(
                 if not isfinite(margin_value) or margin_value <= 0:
                     raise ValueError("Kite returned a non-positive or non-finite MIS margin estimate.")
                 margin_per_share_by_symbol[candidate.symbol] = margin_value
-                audit.update({"margin_verified": True, "margin_per_share_inr": round(margin_value, 4),
+                mis_status = {
+                    "status": "MIS_MARGIN_ESTIMATE_AVAILABLE",
+                    "eligible": True,
+                    "verified": True,
+                    "product": "MIS",
+                    "margin_per_share_inr": round(margin_value, 4),
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                    "interpretation": "Kite returned a positive MIS margin estimate; this is not a guarantee of eventual order acceptance.",
+                }
+                mis_eligibility_by_symbol[candidate.symbol] = mis_status
+                bundle["mis_eligibility"] = mis_status
+                audit.update({"margin_verified": True, "mis_eligibility": mis_status, "margin_per_share_inr": round(margin_value, 4),
                               "entry_price_used": round(float(executable["executable_entry_price"]), 4)})
             except Exception as exc:
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
-                audit.update({"margin_verified": False,
-                              "reason": f"MIS margin refresh failed: {type(exc).__name__}: {exc}"})
+                mis_status = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED",
+                    "eligible": None,
+                    "verified": False,
+                    "product": "MIS",
+                    "reason": f"MIS margin refresh failed: {type(exc).__name__}: {exc}",
+                    "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
+                }
+                mis_eligibility_by_symbol[candidate.symbol] = mis_status
+                bundle["mis_eligibility"] = mis_status
+                audit.update({"margin_verified": False, "mis_eligibility": mis_status,
+                              "reason": mis_status["reason"]})
             entry_quote_refresh_checks.append(audit)
 
         # Timestamp the final validation after quote and margin refresh.
@@ -652,6 +717,16 @@ def run_scan(
         "universe_selection": universe_selection,
         "account_profile": account_profile,
         "market_calendar": market_day_status(current.date()),
+        "calendar_maintenance": calendar_maintenance,
+        "surveillance_snapshot": {
+            "status": surveillance_snapshot.get("status"),
+            "source": surveillance_snapshot.get("source"),
+            "source_url": surveillance_snapshot.get("source_url"),
+            "as_of": surveillance_snapshot.get("as_of"),
+            "reason": surveillance_snapshot.get("reason"),
+            "max_age_calendar_days": 3,
+            "not_instrument_dump": True,
+        },
         "market_safety_settings": asdict(market_safety_settings),
         "symbols_requested": selected,
         "entry_quote_refresh": entry_quote_refresh_checks,

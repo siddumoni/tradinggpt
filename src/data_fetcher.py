@@ -566,9 +566,9 @@ class KiteMarketData:
             tzinfo=IST,
         )
         if start > end:
-            candles: list[dict[str, Any]] = []
+            history_candles: list[dict[str, Any]] = []
         else:
-            candles = self.historical_candles(
+            history_candles = self.historical_history_candles(
                 int(instrument_token), start, end, "5minute"
             )
         payload = {
@@ -580,7 +580,7 @@ class KiteMarketData:
             "from": start.isoformat(),
             "through": end.isoformat(),
             "provider": "Kite Connect",
-            "candles": candles,
+            "history_candles": history_candles,
         }
         self.relative_volume_cache_dir.mkdir(parents=True, exist_ok=True)
         temporary_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
@@ -589,11 +589,11 @@ class KiteMarketData:
             encoding="utf-8",
         )
         temporary_path.replace(cache_path)
-        return candles, {
+        return history_candles, {
             "status": "REFRESHED",
             "cache_date": cache_date,
             "lookback_calendar_days": lookback_calendar_days,
-            "cached_candles": len(candles),
+            "cached_history_candles": len(history_candles),
             "cache_file": cache_path.name,
         }
 

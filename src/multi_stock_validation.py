@@ -30,7 +30,7 @@ LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_SYMBOLS = ("RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY")
 DEFAULT_STRATEGIES = ("vwap_trend", "vwap_pullback")
-DEFAULT_SLIPPAGE_BPS = (2.0, 5.0, 8.0)
+DEFAULT_SLIPPAGE_BPS = (5.0, 8.0)
 
 
 def _load_or_fetch_candles(
@@ -393,7 +393,7 @@ def main() -> None:
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Positive planned loss budget in INR; defaults to config/settings.yaml")
     parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")
     parser.add_argument("--target-atr-multiple", type=float, default=2.5)
-    parser.add_argument("--slippage-bps", default="2,5,8", help="Comma-separated per-side slippage scenarios")
+    parser.add_argument("--slippage-bps", default="5,8", help="Comma-separated per-side slippage scenarios; minimum 5 bps")
     parser.add_argument("--refresh-data", action="store_true", help="Redownload candle data instead of using saved cache")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

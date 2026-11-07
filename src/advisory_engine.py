@@ -700,8 +700,11 @@ def run_scan(
                     original_proximity = previous_levels.get("proximity")
                     if not isinstance(original_proximity, dict):
                         raise ValueError("Original previous-session clearance evidence is unavailable")
+                    executable_side = refreshed.side
+                    if executable_side not in {"LONG", "SHORT"}:
+                        raise ValueError("Directional side is unavailable for executable-entry clearance")
                     executable_proximity = inspect_directional_level_proximity(
-                        refreshed.side,
+                        executable_side,
                         entry_price=float(executable_entry),
                         atr=float(previous_levels["atr"]),
                         previous_levels=previous_levels,

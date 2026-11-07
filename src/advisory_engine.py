@@ -404,7 +404,6 @@ def run_scan(
     # Margin estimation is read-only: this requests a hypothetical one-share
     # MIS limit-order margin calculation and never submits an order.
     margin_per_share_by_symbol: dict[str, float] = {}
-    mis_eligibility_by_symbol: dict[str, dict[str, Any]] = {}
     margin_checks: list[dict[str, Any]] = []
     if provider_name == "kite":
         margin_validation_time = datetime.now(IST) if now is None else current
@@ -447,7 +446,6 @@ def run_scan(
                     "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
                     "interpretation": "Kite returned a positive MIS margin estimate; this is not a guarantee of eventual order acceptance.",
                 }
-                mis_eligibility_by_symbol[candidate.symbol] = mis_status
                 quote_bundle["mis_eligibility"] = mis_status
                 margin_checks.append({
                     "symbol": candidate.symbol,
@@ -468,7 +466,6 @@ def run_scan(
                     "reason": message,
                     "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
                 }
-                mis_eligibility_by_symbol[candidate.symbol] = mis_status
                 quote_bundle["mis_eligibility"] = mis_status
                 margin_checks.append({
                     "symbol": candidate.symbol, "side": candidate.side,

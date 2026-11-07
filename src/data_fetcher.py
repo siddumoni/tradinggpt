@@ -124,6 +124,7 @@ class KiteMarketData:
         config: DataClientConfig | None = None,
         *,
         relative_volume_cache_dir: Path | None = None,
+        daily_cache_dir: Path | None = None,
     ):
         self.kite = kite
         self.config = config or DataClientConfig()
@@ -131,6 +132,11 @@ class KiteMarketData:
             Path(relative_volume_cache_dir)
             if relative_volume_cache_dir is not None
             else PROJECT_ROOT / ".local" / "relative_volume_history"
+        )
+        self.daily_cache_dir = (
+            Path(daily_cache_dir)
+            if daily_cache_dir is not None
+            else PROJECT_ROOT / ".local" / "daily_ohlc_history"
         )
         if self.config.quote_batch_size < 1:
             raise ValueError("quote_batch_size must be positive")
@@ -451,6 +457,64 @@ class KiteMarketData:
             raise DataFetchError(f"Kite returned an unexpected response for {interval} candles")
         return candles
 
+    def _daily_ohlc_history(
+        self,
+        *,
+        symbol: str,
+        instrument_token: int,
+        current: datetime,
+        lookback_calendar_days: int = 60,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Cache daily candles by symbol, instrument token and IST calendar date."""
+        cache_date = current.date().isoformat()
+        safe_symbol = re.sub(r"[^A-Z0-9_-]", "_", symbol.upper())
+        cache_path = self.daily_cache_dir / f"{safe_symbol}_{cache_date}_{lookback_calendar_days}d.json"
+        if cache_path.exists():
+            try:
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                candles = cached.get("candles") if isinstance(cached, dict) else None
+                if (
+                    cached.get("schema_version") == 1
+                    and cached.get("cache_date") == cache_date
+                    and cached.get("symbol") == symbol.upper()
+                    and cached.get("instrument_token") == int(instrument_token)
+                    and cached.get("lookback_calendar_days") == lookback_calendar_days
+                    and isinstance(candles, list)
+                ):
+                    return candles, {
+                        "status": "HIT",
+                        "cache_date": cache_date,
+                        "lookback_calendar_days": lookback_calendar_days,
+                        "cached_candles": len(candles),
+                        "cache_file": cache_path.name,
+                    }
+            except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
+                LOGGER.warning("Daily OHLC cache is invalid for %s on %s; refreshing", symbol, cache_date)
+        start = datetime.combine(current.date() - timedelta(days=lookback_calendar_days), dtime(0, 0), tzinfo=IST)
+        candles = self.historical_candles(int(instrument_token), start, current, "day")
+        payload = {
+            "schema_version": 1,
+            "cache_date": cache_date,
+            "symbol": symbol.upper(),
+            "instrument_token": int(instrument_token),
+            "lookback_calendar_days": lookback_calendar_days,
+            "from": start.isoformat(),
+            "through": current.isoformat(),
+            "provider": "Kite Connect",
+            "candles": candles,
+        }
+        self.daily_cache_dir.mkdir(parents=True, exist_ok=True)
+        temporary_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        temporary_path.write_text(json.dumps(payload, default=str, allow_nan=False), encoding="utf-8")
+        temporary_path.replace(cache_path)
+        return candles, {
+            "status": "REFRESHED",
+            "cache_date": cache_date,
+            "lookback_calendar_days": lookback_calendar_days,
+            "cached_candles": len(candles),
+            "cache_file": cache_path.name,
+        }
+
     def _relative_volume_history(
         self,
         *,
@@ -568,10 +632,14 @@ class KiteMarketData:
             self.historical_candles(int(token), start_today, current, "15minute")
             if current.time() >= dtime(9, 15) else []
         )
-        daily_candles = (
-            self.historical_candles(int(token), daily_start, current, "day")
-            if include_daily_candles else []
-        )
+        daily_cache: dict[str, Any] = {"status": "DISABLED"}
+        daily_candles: list[dict[str, Any]] = []
+        if include_daily_candles:
+            daily_candles, daily_cache = self._daily_ohlc_history(
+                symbol=symbol,
+                instrument_token=int(token),
+                current=current,
+            )
         relative_volume_start = datetime.combine(
             current.date() - timedelta(days=relative_volume_lookback_days), dtime(9, 15), tzinfo=IST
         )
@@ -595,6 +663,7 @@ class KiteMarketData:
             "candles_5m": candles_5m,
             "candles_15m": candles_15m,
             "candles_daily_60d": daily_candles,
+            "daily_candles_cache": daily_cache,
             "candles_5m_history": relative_volume_history,
             "relative_volume_cache": relative_volume_cache,
             "instrument_metadata": {

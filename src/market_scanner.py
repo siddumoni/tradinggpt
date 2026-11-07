@@ -535,6 +535,9 @@ def evaluate_symbol_bundle(
         )
 
     market_safety_validation: dict[str, Any] = {}
+    mis_eligibility = bundle.get("mis_eligibility")
+    if isinstance(mis_eligibility, dict):
+        market_safety_validation["mis_eligibility"] = mis_eligibility
     history_error: str | None = None
     try:
         historical_5m = candles_to_frame(bundle.get("candles_5m_history", []))
@@ -932,7 +935,7 @@ def evaluate_symbol_bundle(
         and data_verified_live
         and news_status not in ("NOT_CHECKED", "UNAVAILABLE")
         and company_specific_risk != "HIGH"
-        and surveillance.get("eligible") is not False
+        and surveillance.get("eligible") is True
     )
     if approved:
         action = "CONDITIONAL_BUY" if signal.side == "LONG" else "CONDITIONAL_SHORT"

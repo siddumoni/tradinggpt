@@ -517,7 +517,8 @@ def refresh_outcomes(
         "outcome_rows": int(len(outcomes)),
         "candidate_slippage_metrics": _outcome_metrics(outcomes),
         "slippage_bps_per_side": list(slippage_values),
-        "minimum_net_reward_risk_gate": MINIMUM_NET_RR,
+        "account_profile": profile,
+        "minimum_net_reward_risk_gate": max(MINIMUM_NET_RR, configured.minimum_net_risk_reward),
         "minimum_completed_signals_for_review": MINIMUM_COMPLETED_FOR_REVIEW,
         "starting_capital_for_individual_signal_sizing_inr": configured.capital_inr,
         "risk_budget_per_signal_inr": configured.risk_per_trade_inr,
@@ -652,7 +653,7 @@ def run_once(
 
     summary = None
     if state.get("outcomes_dirty", False):
-        summary = refresh_outcomes(signal_path, candles_dir, outcome_path, slippage_values=slippage_values)
+        summary = refresh_outcomes(signal_path, candles_dir, outcome_path, slippage_values=slippage_values, profile=profile)
         state["outcomes_dirty"] = False
         state["last_outcome_refresh_at"] = recorded_at.isoformat()
         _write_state(state_path, state)

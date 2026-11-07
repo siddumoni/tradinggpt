@@ -206,8 +206,8 @@ def run_validation(
     )
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         raise ValueError("risk_per_trade must be a finite positive INR amount")
-    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be finite and positive")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward must be finite and at least 1.5")
     if not math.isfinite(target_atr_multiple) or target_atr_multiple <= 1.0 or target_atr_multiple > 10.0:
         raise ValueError("target_atr_multiple must be finite, > 1.0 and <= 10.0")
     if any(not math.isfinite(bps) or bps < 5 or bps > 100 for bps in slippage_values):

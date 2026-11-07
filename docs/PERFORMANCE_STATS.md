@@ -28,6 +28,6 @@ The analysis always writes its private JSON/Markdown diagnostics. It updates `do
 
 Promotion thresholds live in `config/promotion.yaml`: at least 100 accepted trades across 20 sessions, positive lower 95% expectancy bound at 8 bps, profit factor at least 1.0, and no symbol/session contributing more than 30% of positive P&L. The decision is `PROMOTE` or `INCONCLUSIVE`; PROMOTE means eligible for the next research-validation stage only, never live trading.
 
-Outputs: `reports/performance/validation.json`, `reports/performance/validation.md`, and sanitized aggregate `docs/RESULTS.md`. No trade-level rows, credentials, or account data are written to RESULTS.md.
+Outputs: `reports/performance/validation.json` and `reports/performance/validation.md` for every run. The sanitized aggregate `docs/RESULTS.md` is updated only after all promotion gates pass. No trade-level rows, credentials, or account data are written to RESULTS.md.
 
 Limitations: drawdown is realized-only, the session bootstrap does not remove serial dependence between adjacent sessions, and the 8 bps repricing does not re-run position sizing or acceptance. Missing MAE/MFE source fields are reported as unavailable, never estimated from incomplete data.

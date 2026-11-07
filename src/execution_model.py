@@ -51,7 +51,12 @@ def session_aware_atr(candles: pd.DataFrame, period: int = 14) -> pd.Series:
     previous_session_atr: float | None = None
     previous_session_date = None
     for session_date in session_keys.unique():
-        if market_day_status(session_date)["status"] != "OPEN":
+        session_status = market_day_status(session_date)["status"]
+        if session_status in {
+            "WEEKEND",
+            "EXCHANGE_HOLIDAY",
+            "SPECIAL_SESSION_NOT_SUPPORTED",
+        }:
             previous_session_atr = None
             previous_session_date = session_date
             continue

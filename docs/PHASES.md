@@ -20,9 +20,9 @@ This document is the current phase index. Historical phase notes are retained un
 | B | Prior-session ATR seed with strict session completeness | Complete; PR #41 merged |
 | C | Validated pre-entry Telegram trade plans and EOD digest | Complete; PR #42 merged |
 | D | Signal-journal cost feasibility, profile-aware forward sizing, paired challenger comparison and results gate | Complete; PR #43 merged as `6b6d607`; Ubuntu and Windows Python 3.13 CI passed |
-| E | Prior-day level proximity filter, MIS eligibility/surveillance checks, 45-day relative-volume cache and calendar rollover warning | Implementation and tests in progress on `foundation/phase-e-market-eligibility-cache-filters` |
+| E | Exact previous-session level proximity with executable bid/ask recheck, MIS eligibility/surveillance status, 45-day relative-volume and daily OHLC caches, calendar rollover warning | Complete; PR #44 merged as `bc1e7a6`; Ubuntu and Windows Python 3.13 CI passed (478 tests each) |
 
-All foundation steps preserve the advisory-only boundary. On merge of Phase E, new paper entries use the frozen `nse_champion_v2` version on the first supported normal NSE cash session. The earlier `nse_champion_v2_foundation_candidate` and `champion_v1` remain frozen archives; their trade rows and daily reports are explicitly labelled `CHAMPION_ARCHIVE` and must not be pooled with v2. See [Market Safety](MARKET_SAFETY.md) for the Phase E operational contract.
+All foundation steps preserve the advisory-only boundary. With Phase E merged, new paper entries use the frozen `nse_champion_v2` version on the first supported normal NSE cash session. Final executable-quote revalidation also repeats the 0.3 ATR previous-session clearance check at the best ask (LONG) or best bid (SHORT); a failed recheck demotes the candidate to watch-only with zero quantity. The earlier `nse_champion_v2_foundation_candidate` and `champion_v1` remain frozen archives; their trade rows and daily reports are explicitly labelled `CHAMPION_ARCHIVE` and must not be pooled with v2. See [Market Safety](MARKET_SAFETY.md) for the Phase E operational contract.
 
 ## Phase 6 status and evidence gate
 

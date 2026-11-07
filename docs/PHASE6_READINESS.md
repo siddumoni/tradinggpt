@@ -19,7 +19,7 @@ The private research archive now contains daily reports for 2026-11-03 through 2
 
 The 193 `CANDIDATE_OUTCOME` closes recorded on 2026-11-04 are overlapping single-candidate observations from one session, not shared-capital portfolio trades; they do not satisfy the evidence gate and must not be pooled with Champion or Challenger. `WATCH_SHADOW` is also a separate research track. Phase E merged on 2026-11-07, after the last archived session, so the frozen `nse_champion_v2` baseline has no prospective session in this archive yet. Keep `champion_v1` and v2 results separate.
 
-A large number of candidate observations from one session does not create additional independent sessions. Do not combine CHAMPION, CHALLENGER, WATCH_SHADOW and CANDIDATE_OUTCOME into one result: they are separate research tracks with different selection and allocation rules. In particular, independent candidate outcomes can overlap and are not portfolio P&L.
+Keep CHAMPION, CHALLENGER, WATCH_SHADOW and CANDIDATE_OUTCOME as separate research tracks with different selection and allocation rules. Candidate observations from one session do not create additional independent sessions and must not be presented as shared-capital portfolio P&L.
 
 Until a track meets the sample gate, retain the explicit **INSUFFICIENT PROSPECTIVE EVIDENCE** status. Do not replace it with a win rate, P&L headline, or strategy ranking.
 

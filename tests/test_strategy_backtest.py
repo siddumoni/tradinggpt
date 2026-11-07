@@ -49,6 +49,7 @@ def test_backtest_strategy_returns_summary_for_historical_frame():
     trades, summary = backtest_strategy("TEST", sample_candles(), "vwap_trend")
     assert summary["symbol"] == "TEST"
     assert summary["strategy"] == "vwap_trend"
+    assert summary["strategy_version"] == "nse_champion_v2_foundation_candidate"
     assert summary["bars"] == 72
     assert summary["bars_before_session_filter"] == 100
     assert "net_pnl" in summary

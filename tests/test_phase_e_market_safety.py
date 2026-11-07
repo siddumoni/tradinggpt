@@ -240,3 +240,30 @@ def test_live_scanner_blocks_long_setup_with_previous_high_inside_point_three_at
     assert result.quantity == 0
     assert result.entry_validation["status"] == "REJECTED_PREVIOUS_DAY_LEVEL"
     assert result.entry_validation["previous_day_levels"]["proximity"]["distance_atr"] <= 0.3
+
+
+def test_previous_session_levels_never_substitutes_an_older_daily_candle():
+    frame = pd.DataFrame(
+        {
+            "high": [110.0],
+            "low": [90.0],
+            "close": [105.0],
+        },
+        index=pd.to_datetime(["2026-11-05"]),
+    )
+    with pytest.raises(ValueError, match="previous NSE session 2026-11-06 is missing"):
+        previous_session_levels(frame, session_date=date(2026, 11, 9))
+
+
+def test_previous_session_levels_skips_weekend_and_exchange_holiday():
+    frame = pd.DataFrame(
+        {
+            "high": [120.0, 999.0],
+            "low": [100.0, 1.0],
+            "close": [110.0, 500.0],
+        },
+        index=pd.to_datetime(["2026-11-09", "2026-11-10"]),
+    )
+    levels = previous_session_levels(frame, session_date=date(2026, 11, 11))
+    assert levels["previous_session_date"] == "2026-11-09"
+    assert levels["previous_high"] == 120.0

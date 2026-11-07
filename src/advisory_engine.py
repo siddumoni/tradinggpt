@@ -589,10 +589,6 @@ def run_scan(
                     "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
                     "product": "MIS", "reason": bundle["data_quality_warning"],
                 }
-                bundle["mis_eligibility"] = {
-                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
-                    "product": "MIS", "reason": bundle["data_quality_warning"],
-                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["verified"] = False
                 audit["reason"] = bundle["data_quality_warning"]
@@ -629,6 +625,10 @@ def run_scan(
                     "Executable bid/ask is at or near an exchange circuit band: "
                     + str(executable_side_circuit.get("reason") or executable_side_circuit.get("status"))
                 )
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": bundle["data_quality_warning"],
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["verified"] = False
                 audit["reason"] = bundle["data_quality_warning"]
@@ -651,7 +651,6 @@ def run_scan(
                     "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
                     "interpretation": "Kite returned a positive MIS margin estimate; this is not a guarantee of eventual order acceptance.",
                 }
-                mis_eligibility_by_symbol[candidate.symbol] = mis_status
                 bundle["mis_eligibility"] = mis_status
                 audit.update({"margin_verified": True, "mis_eligibility": mis_status, "margin_per_share_inr": round(margin_value, 4),
                               "entry_price_used": round(float(executable["executable_entry_price"]), 4)})
@@ -665,7 +664,6 @@ def run_scan(
                     "reason": f"MIS margin refresh failed: {type(exc).__name__}: {exc}",
                     "method": "Read-only Kite order_margins; hypothetical one-share LIMIT calculation",
                 }
-                mis_eligibility_by_symbol[candidate.symbol] = mis_status
                 bundle["mis_eligibility"] = mis_status
                 audit.update({"margin_verified": False, "mis_eligibility": mis_status,
                               "reason": mis_status["reason"]})
@@ -689,6 +687,16 @@ def run_scan(
                 ),
                 now=entry_validation_time,
                 max_quote_age_minutes=paper_entry_max_quote_age_minutes,
+            )
+            for candidate in candidates
+        ]
+        candidates = [
+            replace(
+                candidate,
+                entry_validation={
+                    **dict(candidate.entry_validation or {}),
+                    "mis_eligibility": bundles.get(candidate.symbol, {}).get("mis_eligibility"),
+                },
             )
             for candidate in candidates
         ]
@@ -754,6 +762,13 @@ def run_scan(
         "news": news_result,
         "candidates": [item.to_dict() for item in ranked],
         "market_snapshots": ({symbol: _paper_market_snapshot(bundle) for symbol, bundle in bundles.items() if _paper_market_snapshot(bundle)} if provider_name == "kite" else {}),
+        "market_data_cache": {
+            symbol: {
+                "daily_ohlc": bundle.get("daily_candles_cache", {"status": "NOT_AVAILABLE"}),
+                "relative_volume_history": bundle.get("relative_volume_cache", {"status": "NOT_AVAILABLE"}),
+            }
+            for symbol, bundle in bundles.items()
+        },
         "limitations": [
             ("Yahoo Finance stock data is unofficial and may be delayed or incomplete; it is not verified for live decisions."
              if provider_name == "yahoo" else

@@ -342,3 +342,36 @@ def test_no_trade_factory_always_returns_zero_quantity_and_preserves_gate_contex
     assert result.quantity == 0
     assert result.margin_verified is False
     assert result.entry_validation["status"] == "REJECTED_CIRCUIT_LIMIT"
+
+
+
+def test_prior_session_atr_unlocks_opening_range_candidate_before_old_warmup():
+    from src.execution_model import session_aware_atr
+    from src.strategies.opening_range import opening_range_signal
+
+    prior = candles_to_frame(sample_candles(14, start="2026-10-15 09:15:00"))
+    rows = [
+        (100.0, 100.4, 99.8, 100.2, 1000),
+        (100.2, 100.6, 100.0, 100.4, 1000),
+        (100.4, 100.8, 100.2, 100.6, 1000),
+        (100.7, 101.1, 100.6, 101.0, 1000),
+        (101.0, 101.4, 100.9, 101.3, 1000),
+        (101.3, 101.6, 101.2, 101.5, 1000),
+        (101.5, 101.8, 101.4, 101.7, 1000),
+        (101.7, 102.0, 101.6, 101.9, 1000),
+        (101.9, 102.3, 101.8, 102.2, 2000),
+    ]
+    index = pd.date_range("2026-10-16 09:15", periods=9, freq="5min", tz=IST)
+    current = pd.DataFrame(
+        rows, columns=["open", "high", "low", "close", "volume"], index=index
+    )
+    seeded = session_aware_atr(pd.concat([prior, current])).reindex(index)
+    unseeded = session_aware_atr(current)
+    assert seeded.iloc[-1] > 0
+    assert unseeded.isna().all()
+
+    indicators = add_scanner_indicators(current)
+    indicators["atr_14"] = seeded
+    signal = opening_range_signal("TEST", indicators, market_regime="UNKNOWN")
+    assert signal is not None
+    assert signal.side == "LONG"

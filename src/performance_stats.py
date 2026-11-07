@@ -326,7 +326,7 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         "",
         "## Sample and net performance (8 bps per side)",
         "",
-        f"- Account profile: {stats.get(\"account_profile\", \"unspecified\")} (initial capital ₹{stats.get(\"initial_capital_inr\", \"unspecified\")})",
+        f"- Account profile: {stats.get('account_profile', 'unspecified')} (initial capital ₹{stats.get('initial_capital_inr', 'unspecified')})",
         f"- Completed accepted trades: {sample['trades']}",
         f"- Trading sessions: {sample['sessions']} ({sample['first_session']} to {sample['last_session']})",
         f"- Net P&L: ₹{s['net_pnl_8bps_inr']:.2f}",

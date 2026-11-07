@@ -639,12 +639,6 @@ class KiteMarketData:
                 instrument_token=int(token),
                 current=current,
             )
-        relative_volume_start = datetime.combine(
-            current.date() - timedelta(days=relative_volume_lookback_days), dtime(9, 15), tzinfo=IST
-        )
-        relative_volume_end = datetime.combine(
-            current.date() - timedelta(days=1), dtime(15, 30), tzinfo=IST
-        )
         relative_volume_cache: dict[str, Any] = {"status": "DISABLED"}
         relative_volume_history: list[dict[str, Any]] = []
         if include_relative_volume_history:

@@ -30,6 +30,7 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
 
 - **Identifier:** `challenger_atr_1x_stop_v1`
 - **Status:** `DORMANT_CAPACITY_BLOCKED`; not an active challenger.
+- **Clarification:** The three existing challenger signal tracks still use the plain 1.0 ATR stop control. This dormant item is a separate stop-only paired experiment, not a claim that the current challenger lab has no 1 ATR track.
 - **Hypothesis:** A plain 1 ATR stop may produce a different stop-out rate and
   average stop distance from the structural-stop model, with a measurable effect
   on net R:R at T2 after costs.

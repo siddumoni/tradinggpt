@@ -56,7 +56,7 @@ def test_live_scanner_atr_uses_prior_session_seed_before_intraday_warmup():
     }
     result = evaluate_symbol_bundle("TEST", bundle, now=now)
     assert result.action == "NO_TRADE"
-    assert any("ATR seeded from the previous session" in reason for reason in result.reasons)
+    assert any("ATR seeded from the complete previous session" in reason for reason in result.reasons), result.reasons
 
 
 def test_weekend_fails_closed_without_signal():

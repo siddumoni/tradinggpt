@@ -381,7 +381,12 @@ def analyze_file(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     trades = load_trades(input_path, track=track, strategy_version=strategy_version)
     profile_risk, _charge_rates = load_phase2_settings(profile=profile)
-    capital = profile_risk.capital_inr if initial_capital is None else initial_capital
+    if initial_capital is not None and (
+        not math.isfinite(initial_capital)
+        or not math.isclose(initial_capital, profile_risk.capital_inr, rel_tol=0.0, abs_tol=0.01)
+    ):
+        raise ValueError("initial capital must match the selected account profile; change the profile configuration instead")
+    capital = profile_risk.capital_inr
     stats = calculate_statistics(
         trades, initial_capital=capital, slippage_bps=slippage_bps,
         bootstrap_resamples=bootstrap_resamples, seed=seed,

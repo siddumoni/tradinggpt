@@ -314,6 +314,7 @@ def evaluate_promotion(
     *,
     paired_comparison: dict[str, Any] | None = None,
     require_paired_comparison: bool = False,
+    eligible_for_promotion: bool = True,
 ) -> dict[str, Any]:
     thresholds = config.get("thresholds", {})
     required_trades = int(thresholds.get("minimum_trades", 100))
@@ -323,6 +324,7 @@ def evaluate_promotion(
     paired_config = config.get("paired_comparison", {})
     minimum_common_sessions = max(required_sessions, int(paired_config.get("minimum_common_sessions", required_sessions)))
     checks = {
+        "eligible_strategy_track": eligible_for_promotion,
         "minimum_trades": stats["sample"]["trades"] >= required_trades,
         "minimum_sessions": stats["sample"]["sessions"] >= required_sessions,
         "positive_95pct_expectancy_lower_bound_at_8bps": stats["expectancy_ci_95_inr"]["lower"] is not None and stats["expectancy_ci_95_inr"]["lower"] > 0,
@@ -435,6 +437,10 @@ def analyze_file(
     selected_track = str(trades.attrs.get("selected_track") or "").upper()
     selected_version = str(trades.attrs.get("selected_strategy_version") or "").lower()
     require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version
+    shadow_markers = ("SHADOW", "CANDIDATE_OUTCOME", "INDEPENDENT_OUTCOME", "NEAR_MISS")
+    eligible_track = selected_track in {"", "CHAMPION", "CHALLENGER"} and not any(
+        marker in selected_track or marker.lower() in selected_version for marker in shadow_markers
+    )
     paired = None
     if champion_input_path is not None:
         if not require_paired:
@@ -469,6 +475,7 @@ def analyze_file(
     promotion = evaluate_promotion(
         stats, config, paired_comparison=paired,
         require_paired_comparison=require_paired,
+        eligible_for_promotion=eligible_track,
     )
     output_stem.parent.mkdir(parents=True, exist_ok=True)
     source_paths = [input_path] if isinstance(input_path, Path) else input_path
@@ -480,6 +487,7 @@ def analyze_file(
         "selected_strategy_version": trades.attrs.get("selected_strategy_version"),
         "account_profile": profile,
         "initial_capital_inr": capital,
+        "eligible_strategy_track": eligible_track,
         "champion_account_profile": champion_profile,
         "paired_champion_source_files": (
             [path.name for path in ([champion_input_path] if isinstance(champion_input_path, Path) else champion_input_path)]

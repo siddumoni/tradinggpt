@@ -28,7 +28,7 @@ All foundation steps preserve the advisory-only boundary. With Phase E merged, n
 
 Phase 6 is intentionally evidence-gated. The statistical pipeline and promotion thresholds are implemented, but the public performance summary must not be refreshed from an under-sized sample.
 
-As of 2026-11-06, the available archived daily paper reports cover 2026-11-03 through 2026-11-05 only (at most three independent sessions per track). This is below the configured minimum of 20 sessions and 100 accepted, completed trades. The current status is therefore **insufficient prospective evidence**, not a positive or negative strategy result.
+As of 2026-11-07, the private research archive contains daily reports for 2026-11-03 through 2026-11-06 (four independent sessions). The archived `champion_v1` track has 16 closed trades across those four sessions; challenger strategy versions remain separate and each is still below the 20-session / 100-trade gate. The 193 `CANDIDATE_OUTCOME` closes recorded on 2026-11-04 are overlapping single-candidate observations from one session, not shared-capital portfolio trades, and are not pooled with Champion or Challenger. Phase E merged after the 2026-11-06 session, so `nse_champion_v2` has no prospective session in this archive yet. This remains below the configured minimum of 20 sessions and 100 accepted, completed trades. The status is **insufficient prospective evidence**, not a positive or negative strategy result.
 
 See [the Phase 6 readiness guide](PHASE6_READINESS.md) for data handling, per-track analysis commands, the acceptance gate and the final documentation checklist.
 

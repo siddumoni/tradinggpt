@@ -27,6 +27,8 @@ IST = ZoneInfo("Asia/Kolkata")
 OUTCOME_CAPITAL_INR = 100_000.0
 OUTCOME_RISK_INR = 500.0
 SLIPPAGE_BPS = 5.0
+# Shadow-only sizing sentinel for candidates already rejected by the scanner 1.5 gate.
+# This value never approves a live/paper entry and never changes scanner eligibility.
 MIN_ENTRY_RR = 0.01
 ENTRY_CUTOFF = dtime(14, 45)
 LAST_BAR = dtime(15, 10)

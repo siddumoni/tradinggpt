@@ -22,7 +22,7 @@ def test_audit_reports_stop_cost_and_net_rr():
 
 
 def test_audit_refuses_lower_slippage_floor():
-    with pytest.raises(ValueError, match="cannot be below"):
+    with pytest.raises(ValueError, match="between 5 and 100"):
         audit_candidates(sample(), slippage_floor_bps=4)
 
 

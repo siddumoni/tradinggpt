@@ -144,6 +144,16 @@ The runner requires at least 10 complete sessions in both chronological partitio
 
 Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
 
+## Audit prospective signal cost feasibility
+
+Run the cost audit directly against the append-only signal journal. It calculates Target 2 net R:R at the 5 bps/side floor and 8 bps/side stress case, with date/symbol pass rates:
+
+```powershell
+python -m src.cost_feasibility logs/paper_signals.csv --output reports/cost_feasibility_detail.csv --summary-output reports/cost_feasibility_by_day_symbol.csv --profile research
+```
+
+Zero-quantity journal rows remain unscorable and are excluded from the pass-rate denominator. The journal itself is not rewritten. See [the cost-feasibility guide](docs/COST_FEASIBILITY.md).
+
 ## Evaluate paper outcomes
 
 After the journal has enough later 5-minute data, evaluate the saved signals with a next-bar-open hypothesis and conservative stop/target handling:

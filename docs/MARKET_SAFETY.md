@@ -51,4 +51,6 @@ The scanner reports a maintenance warning when fewer than 30 calendar days remai
 - Cache files and the optional surveillance snapshot are under `.local/` and must never be committed.
 - The daily and relative-volume caches are provider-specific to Kite and are not mixed with Yahoo data.
 - `NOT_AVAILABLE` is an explicit status, not a synonym for unrestricted or eligible.
-- These checks are advisory/research filters only. The repository remains strictly advisory-only.
+- When Phase E is merged, the paper broker's active baseline version becomes `nse_champion_v2` from the first supported normal NSE cash session. Existing `champion_v1` and `nse_champion_v2_foundation_candidate` trades remain archived, and daily trade exports mark them `CHAMPION_ARCHIVE`. The paper account's total realized P&L still includes its entire historical account ledger; use the separate `strategy_version_performance` breakdown and version-filtered CSV rows for strategy-specific analysis.
+
+These checks are advisory/research filters only. The repository remains strictly advisory-only.

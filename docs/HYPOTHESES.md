@@ -87,3 +87,11 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
   and counts opening-range signals that also pass the completed 15-minute stock
   trend filter in the five potentially affected scan slots (10:00–10:20 IST).
   It deliberately labels these as technical opportunities, not approved trades.
+
+- **Version labels:** The paper baseline during foundation work is
+  `nse_champion_v2_foundation_candidate`; it is not the final frozen
+  `nse_champion_v2`. The three existing challenger signal tracks are versioned
+  as `*_atr_seed_v2`, with their plain 1.0 ATR stop control unchanged. Their
+  pre-seed `*_v1` observations remain archived and are not pooled. The separate
+  stop-only challenger remains dormant because the three challenger slots are
+  occupied.

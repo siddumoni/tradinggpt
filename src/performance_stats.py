@@ -326,6 +326,7 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         "",
         "## Sample and net performance (8 bps per side)",
         "",
+        f"- Account profile: {stats.get(\"account_profile\", \"unspecified\")} (initial capital ₹{stats.get(\"initial_capital_inr\", \"unspecified\")})",
         f"- Completed accepted trades: {sample['trades']}",
         f"- Trading sessions: {sample['sessions']} ({sample['first_session']} to {sample['last_session']})",
         f"- Net P&L: ₹{s['net_pnl_8bps_inr']:.2f}",
@@ -385,6 +386,8 @@ def analyze_file(
         trades, initial_capital=capital, slippage_bps=slippage_bps,
         bootstrap_resamples=bootstrap_resamples, seed=seed,
     )
+    stats["account_profile"] = profile
+    stats["initial_capital_inr"] = capital
     selected_track = str(trades.attrs.get("selected_track") or "").upper()
     selected_version = str(trades.attrs.get("selected_strategy_version") or "").lower()
     require_paired = selected_track == "CHALLENGER" or "challenger" in selected_version

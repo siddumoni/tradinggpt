@@ -54,6 +54,13 @@ def test_callback_keeps_baseline_behavior_when_filter_disabled(monkeypatch):
         "plan_atr_levels",
         lambda *args, **kwargs: SimpleNamespace(stop_loss=99.0, target_2=102.0),
     )
+    monkeypatch.setattr(
+        sb,
+        "_structural_stop_for_history",
+        lambda *args, **kwargs: SimpleNamespace(
+            stop_loss=99.0, reference="test", distance_pct=1.0
+        ),
+    )
     frame = pd.DataFrame(
         {"close": [100.0], "atr_14": [1.0]},
         index=pd.DatetimeIndex(["2026-10-19 10:00:00"], tz="Asia/Kolkata"),

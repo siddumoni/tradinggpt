@@ -25,7 +25,7 @@ DEFAULT_DAILY_LOSS_LIMIT_INR = 2_000.0
 DEFAULT_MAX_OPEN_POSITIONS = 3
 DEFAULT_SLIPPAGE_BPS = 5.0
 DEFAULT_STOP_GAP_RISK_RESERVE_PCT = 0.10
-PAPER_BASELINE_VERSION = "nse_champion_v2_foundation_candidate"
+PAPER_BASELINE_VERSION = "nse_champion_v2"
 CHALLENGER_VERSION_NAMES = {
     "challenger_ema_9_21_v1": "EMA 9/21 momentum (pre-ATR-seed)",
     "challenger_vwap_momentum_v1": "VWAP + MACD momentum (pre-ATR-seed)",
@@ -193,11 +193,18 @@ class PaperBroker:
                     "Historical evidence is preserved under this version; no new entries are assigned.",
                 ),
                 (
+                    "nse_champion_v2_foundation_candidate",
+                    "Phase A/B foundation candidate before Phase E filters",
+                    "CHAMPION_ARCHIVE",
+                    "FROZEN_VERSION",
+                    "Historical evidence is preserved; Phase E filters were not active, so do not pool with nse_champion_v2.",
+                ),
+                (
                     PAPER_BASELINE_VERSION,
-                    "Structural-stop and prior-session ATR foundation candidate",
-                    "CHAMPION_CANDIDATE",
+                    "NSE Champion v2: structural stops, prior-session ATR seed and Phase E eligibility filters",
+                    "CHAMPION",
                     "ACTIVE",
-                    "Unpromoted research version. Freeze as nse_champion_v2 only after foundation phases A, B, and E are complete.",
+                    "Frozen champion rule set for new entries after foundation phases A, B and E; evidence is separate from champion_v1 and the foundation candidate.",
                 ),
                 (
                     "challenger_ema_9_21_v1",
@@ -249,6 +256,12 @@ class PaperBroker:
                 )
             # Version changes supersede old labels; they are not performance-based
             # retirements and their historical rows remain untouched.
+            db.execute(
+                "UPDATE strategy_registry SET track='CHAMPION_ARCHIVE',status='FROZEN_VERSION',description='Historical evidence is preserved; Phase E filters were not active, so do not pool with nse_champion_v2.' WHERE strategy_version='nse_champion_v2_foundation_candidate'"
+            )
+            db.execute(
+                "UPDATE strategy_registry SET track='CHAMPION',status='ACTIVE',description='Frozen champion rule set for new entries after foundation phases A, B and E; evidence is separate from earlier versions.' WHERE strategy_version='nse_champion_v2'"
+            )
             db.execute(
                 "UPDATE strategy_registry SET track='CHAMPION_ARCHIVE',status='FROZEN_VERSION',description='Historical evidence is preserved under this version; no new entries are assigned.' WHERE strategy_version='champion_v1'"
             )
@@ -1227,7 +1240,7 @@ class PaperBroker:
               COALESCE(AVG(net_pnl),0) expectancy FROM trades WHERE status='CLOSED' GROUP BY strategy,strategy_version ORDER BY net_pnl DESC"""):
                 item = dict(r)
                 item["track"] = (
-                    "CHAMPION_CANDIDATE"
+                    "CHAMPION"
                     if item["strategy_version"] == PAPER_BASELINE_VERSION
                     else "CHAMPION_ARCHIVE"
                 )

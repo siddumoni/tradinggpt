@@ -1,7 +1,7 @@
 """Persistent virtual broker for read-only, research-only NSE paper trading."""
 
 from __future__ import annotations
-import hashlib, json, math, sqlite3
+import hashlib, json, logging, math, sqlite3
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +16,7 @@ from src.risk_engine import (
 )
 from src.exit_policy import ExitPolicy, evaluate_ohlc_exit, load_exit_policy
 
+LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_DB = Path("data/paper_trading.sqlite3")
 DEFAULT_CAPITAL_INR = 100_000.0

@@ -536,7 +536,7 @@ class KiteMarketData:
         if cache_path.exists():
             try:
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
-                candles = cached.get("candles") if isinstance(cached, dict) else None
+                candles = cached.get("history_candles") if isinstance(cached, dict) else None
                 if (
                     cached.get("schema_version") == 1
                     and cached.get("cache_date") == cache_date
@@ -549,7 +549,7 @@ class KiteMarketData:
                         "status": "HIT",
                         "cache_date": cache_date,
                         "lookback_calendar_days": lookback_calendar_days,
-                        "cached_candles": len(candles),
+                        "cached_history_candles": len(candles),
                         "cache_file": cache_path.name,
                     }
             except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):

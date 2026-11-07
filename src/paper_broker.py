@@ -688,7 +688,9 @@ class PaperBroker:
             try:
                 alert_delivered = before_entry_callback(trade_plan)
             except Exception:
-                LOGGER.exception("Pre-entry trade-plan alert callback failed; paper entry withheld.")
+                LOGGER.exception(
+                    "Pre-entry trade-plan alert callback failed; paper entry withheld."
+                )
                 alert_delivered = False
             if alert_delivered is not True:
                 raise _RejectedSignal(

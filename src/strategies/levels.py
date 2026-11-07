@@ -62,18 +62,14 @@ def previous_session_levels(
             else session_date
         )
         expected_date = _previous_normal_session(cutoff)
-        prior = df.loc[[stamp.date() < cutoff for stamp in df.index]]
-        if prior.empty:
-            raise ValueError(
-                f"No completed daily candle exists for previous NSE session {expected_date}"
-            )
-        previous = prior.iloc[-1]
-        previous_timestamp = prior.index[-1]
-        if previous_timestamp.date() != expected_date:
+        previous_session_rows = df.loc[[stamp.date() == expected_date for stamp in df.index]]
+        if previous_session_rows.empty:
             raise ValueError(
                 f"Daily candle for previous NSE session {expected_date} is missing; "
-                f"latest available prior row is {previous_timestamp.date()}. No older session is substituted."
+                "no older session is substituted."
             )
+        previous = previous_session_rows.iloc[-1]
+        previous_timestamp = previous_session_rows.index[-1]
     try:
         high, low, close = (float(previous[name]) for name in ("high", "low", "close"))
     except (TypeError, ValueError, OverflowError) as exc:

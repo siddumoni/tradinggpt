@@ -249,10 +249,8 @@ def test_backtest_rejects_non_finite_price_values():
 
 
 def test_backtest_rejects_invalid_slippage_configuration():
-    candles = make_candles()
-    config = BacktestConfig(slippage_bps_per_side=float("nan"))
     with pytest.raises(ValueError, match="must be finite"):
-        backtest_fixed_levels("TEST", candles, one_signal, config)
+        BacktestConfig(slippage_bps_per_side=float("nan"))
 
 
 

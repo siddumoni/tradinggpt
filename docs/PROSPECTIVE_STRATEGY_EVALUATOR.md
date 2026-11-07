@@ -19,6 +19,15 @@ python -m src.prospective_strategy_evaluator --candles-dir data/paper_candles_ki
 
 Keep the process running during market hours alongside the existing service. Stop it with Ctrl+C. The default poll interval is five seconds.
 
+Run each sizing profile with its own state file and output directory. For example:
+
+```powershell
+python -m src.prospective_strategy_evaluator --profile research --output-dir reports/prospective_strategy_evaluation/research --state logs/prospective_strategy_evaluator_research_state.json
+python -m src.prospective_strategy_evaluator --profile paper --output-dir reports/prospective_strategy_evaluation/paper --state logs/prospective_strategy_evaluator_paper_state.json
+```
+
+The `live-advisory` profile can also be selected for ₹20,000 / ₹200 sizing, but this candle-only evaluator does not fetch a fresh quote, does not set `data_verified_live`, and remains research-only. Do not interpret that profile name as live execution or live data validation.
+
 **First-start rule:** the first launch records the latest timestamp present in each existing archive as its watermark and skips every older candle. If an archive appears later, its current head is seeded and its existing rows are skipped too. Signals are generated only from newly appended candles after that watermark. This is deliberate: the tool does not reconstruct old signals and pretend they were observed prospectively. Keep `logs/prospective_strategy_evaluator_state.json`; deleting it causes another warm start and skips the archive head again.
 
 The process accepts only archives whose `provider_mode` is consistently `kite`. Current-session bars must be consecutive five-minute candles starting at 09:15. Incomplete current sessions are skipped without fabricating bars. Past incomplete sessions are excluded before indicators are calculated. A newly discovered candle more than 120 seconds after its candle-end boundary is audited and skipped rather than replayed as a new signal.

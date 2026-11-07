@@ -34,6 +34,7 @@ from src.risk_engine import load_phase2_settings
 LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 SUPPORTED_STRATEGIES = ("opening_range", "vwap_trend", "vwap_pullback")
+STRATEGY_VERSION = "nse_champion_v2_foundation_candidate"
 
 
 def _regime_is_filtered(regime: str, enabled: bool) -> bool:
@@ -347,6 +348,7 @@ def backtest_strategy(
     summary.update({
         "symbol": symbol.upper(),
         "strategy": strategy_name,
+        "strategy_version": STRATEGY_VERSION,
         "target_atr_multiple": policy.target_2_atr_multiple,
         "exit_policy_version": policy.version,
         "stop_model": "nearest_valid_structural_level_with_configured_distance_floor",
@@ -369,6 +371,7 @@ def backtest_strategy(
     })
     if not trades.empty:
         trades["strategy"] = strategy_name
+        trades["strategy_version"] = STRATEGY_VERSION
     return trades, summary
 
 

@@ -69,7 +69,7 @@ def test_bootstrap_seeds_existing_archive_head_without_backfilling(tmp_path):
     assert state["last_processed"]["HDFCBANK"] == frame.index[-1].isoformat()
     journal = pd.read_csv(output_dir / f"prospective_strategy_signals_{evaluator.STRATEGY_VERSION}.csv")
     assert journal.empty
-    audit = pd.read_csv(output_dir / "prospective_strategy_audit.csv")
+    audit = pd.read_csv(output_dir / f"prospective_strategy_audit_{evaluator.STRATEGY_VERSION}.csv")
     assert "ARCHIVE_FIRST_SEEN_SEEDED" not in set(audit.get("status", []))
 
 
@@ -175,7 +175,7 @@ def test_late_bar_is_audited_but_never_backfilled(tmp_path, monkeypatch):
         max_late_seconds=120,
     )
     assert result["signals_added"] == 0
-    audit = pd.read_csv(output_dir / "prospective_strategy_audit.csv")
+    audit = pd.read_csv(output_dir / f"prospective_strategy_audit_{evaluator.STRATEGY_VERSION}.csv")
     assert "LATE_CANDLE_SKIPPED" in set(audit["status"])
     journal = pd.read_csv(output_dir / f"prospective_strategy_signals_{evaluator.STRATEGY_VERSION}.csv")
     assert journal.empty

@@ -91,8 +91,8 @@ class CandidateOutcomeTracker:
         for name, value in (("capital_inr", capital_inr), ("risk_per_trade_inr", risk_per_trade_inr)):
             if not math.isfinite(float(value)) or float(value) <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-        if not math.isfinite(float(slippage_bps)) or not 0 <= float(slippage_bps) <= 100:
-            raise ValueError("slippage_bps must be between 0 and 100")
+        if not math.isfinite(float(slippage_bps)) or not 5 <= float(slippage_bps) <= 100:
+            raise ValueError("slippage_bps must be between 5 and 100")
         self.db_path = Path(db_path)
         self.capital_inr = float(capital_inr)
         self.risk_per_trade_inr = float(risk_per_trade_inr)

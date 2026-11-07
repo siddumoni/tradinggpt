@@ -385,7 +385,9 @@ def render_markdown(stats: dict[str, Any], promotion: dict[str, Any]) -> str:
         paired = promotion.get("paired_comparison") or {}
         lines += ["", "## Paired challenger-minus-Champion comparison", ""]
         lines += [
-            f"- Common entry sessions: {paired.get('common_sessions', 0)}",
+            f"- Common evaluation sessions: {paired.get('common_sessions', 0)}",
+            f"- Challenger no-trade sessions (zero P&L): {paired.get('challenger_zero_trade_sessions', 0)}",
+            f"- Champion no-trade sessions (zero P&L): {paired.get('champion_zero_trade_sessions', 0)}",
             f"- Mean paired difference at 8 bps/side: {paired.get('mean_difference_inr_per_session') if paired.get('mean_difference_inr_per_session') is not None else 'not estimable'} INR/session",
             f"- Bonferroni-adjusted lower bound: {paired.get('adjusted_lower_bound_inr_per_session') if paired.get('adjusted_lower_bound_inr_per_session') is not None else 'not estimable'} INR/session",
             f"- Multiple-testing family size: {paired.get('family_size', 3)}",

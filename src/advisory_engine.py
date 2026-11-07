@@ -279,8 +279,8 @@ def run_scan(
         raise ValueError("Paper capital, risk and net R:R overrides must be finite and positive")
     if paper_slippage_bps_per_side is not None:
         slippage_override = float(paper_slippage_bps_per_side)
-        if not isfinite(slippage_override) or not 0 <= slippage_override <= 100:
-            raise ValueError("Paper slippage override must be finite and between 0 and 100 bps per side")
+        if not isfinite(slippage_override) or not 5 <= slippage_override <= 100:
+            raise ValueError("Paper slippage override must be finite and between 5 and 100 bps per side")
         overrides["slippage_bps_per_side"] = slippage_override
     if overrides: risk_settings = replace(risk_settings, **overrides)
     bundles: dict[str, dict[str, Any]] = {}
@@ -710,7 +710,7 @@ def main() -> int:
     parser.add_argument("--account-capital", type=float, default=None, help="Optional capital override for the selected profile")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Optional virtual account planned risk per trade")
     parser.add_argument("--minimum-net-rr", type=float, default=None, help="Optional minimum after-cost reward/risk gate")
-    parser.add_argument("--slippage-bps-per-side", type=float, default=None, help="Optional slippage assumption override (0-100 bps per side)")
+    parser.add_argument("--slippage-bps-per-side", type=float, default=None, help="Optional slippage assumption override (5-100 bps per side)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")

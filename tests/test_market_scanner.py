@@ -31,6 +31,14 @@ def test_indicators_are_computed_without_external_ta_package():
     assert frame["atr_14"].dropna().gt(0).any()
 
 
+def test_scanner_indicators_seed_at_next_session_open_without_overnight_gap():
+    prior = sample_candles(14, start="2026-10-15 09:15:00")
+    current = sample_candles(1, start="2026-10-16 09:15:00")
+    frame = add_scanner_indicators(candles_to_frame(prior + current))
+    current_open = pd.Timestamp("2026-10-16 09:15:00", tz=IST)
+    assert frame.loc[current_open, "atr_14"] == pytest.approx(0.6)
+
+
 def test_completed_candles_excludes_current_forming_bar():
     now = datetime(2026, 10, 16, 9, 42, tzinfo=IST)
     frame = candles_to_frame(sample_candles(6, start="2026-10-16 09:15:00"))

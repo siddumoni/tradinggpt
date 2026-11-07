@@ -433,8 +433,10 @@ def format_daily_digest(snapshot: dict[str, Any], report_date: str) -> str:
         if isinstance(row, dict) and row.get("track") in {"CHAMPION", "SHADOW"}:
             daily = ""
             if row.get("track") == "CHAMPION":
+                today_count = int(row.get("trades_today", 0) or 0)
+                today_label = "trade" if today_count == 1 else "trades"
                 daily = (
-                    f" · today {_safe(row.get('trades_today', 0))} trades"
+                    f" · today {today_count} {today_label}"
                     f" · accept rate {_price(row.get('accept_rate_pct', 0))}%"
                 )
             lines.append(

@@ -31,6 +31,7 @@ from src.market_safety import (
     load_market_safety_settings,
     load_surveillance_snapshot,
     surveillance_status_for_symbol,
+    inspect_directional_level_proximity,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -671,8 +672,9 @@ def run_scan(
 
         # Timestamp the final validation after quote and margin refresh.
         entry_validation_time = datetime.now(IST) if now is None else current
-        candidates = [
-            revalidate_candidate_at_quote(
+        revalidated_candidates = []
+        for candidate in candidates:
+            refreshed = revalidate_candidate_at_quote(
                 candidate,
                 bundles.get(candidate.symbol, {}).get("quote"),
                 margin_per_share=margin_per_share_by_symbol.get(candidate.symbol),
@@ -688,8 +690,76 @@ def run_scan(
                 now=entry_validation_time,
                 max_quote_age_minutes=paper_entry_max_quote_age_minutes,
             )
-            for candidate in candidates
-        ]
+            if refreshed.action in {"CONDITIONAL_BUY", "CONDITIONAL_SHORT"}:
+                validation = dict(refreshed.entry_validation or {})
+                previous_levels = validation.get("previous_day_levels")
+                executable_entry = validation.get("executable_entry_price")
+                try:
+                    if not isinstance(previous_levels, dict) or executable_entry is None:
+                        raise ValueError("Previous-session levels or executable entry price are unavailable")
+                    original_proximity = previous_levels.get("proximity")
+                    if not isinstance(original_proximity, dict):
+                        raise ValueError("Original previous-session clearance evidence is unavailable")
+                    executable_proximity = inspect_directional_level_proximity(
+                        refreshed.side,
+                        entry_price=float(executable_entry),
+                        atr=float(previous_levels["atr"]),
+                        previous_levels=previous_levels,
+                        buffer_atr=float(original_proximity["buffer_atr"]),
+                    )
+                except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                    reason = (
+                        "Previous-session level clearance could not be revalidated at the executable entry; "
+                        f"setup remains watch-only ({type(exc).__name__}: {exc})."
+                    )
+                    validation.update({
+                        "status": "REJECTED_PREVIOUS_DAY_LEVEL_RECHECK",
+                        "reason": reason,
+                    })
+                    refreshed = replace(
+                        refreshed,
+                        action="WATCH_CANDIDATE",
+                        quantity=0,
+                        estimated_net_risk_inr=None,
+                        estimated_net_reward_t1_inr=None,
+                        estimated_net_reward_t2_inr=None,
+                        net_rr_t1=None,
+                        net_rr_t2=None,
+                        reasons=[*refreshed.reasons, reason],
+                        entry_validation=validation,
+                    )
+                else:
+                    previous_levels = {
+                        **previous_levels,
+                        "executable_proximity": executable_proximity,
+                    }
+                    validation["previous_day_levels"] = previous_levels
+                    if not executable_proximity["eligible"]:
+                        reason = (
+                            "Executable entry failed previous-session level clearance: "
+                            + str(executable_proximity.get("reason") or executable_proximity.get("status"))
+                            + "."
+                        )
+                        validation.update({
+                            "status": "REJECTED_PREVIOUS_DAY_LEVEL_AT_EXECUTABLE_ENTRY",
+                            "reason": reason,
+                        })
+                        refreshed = replace(
+                            refreshed,
+                            action="WATCH_CANDIDATE",
+                            quantity=0,
+                            estimated_net_risk_inr=None,
+                            estimated_net_reward_t1_inr=None,
+                            estimated_net_reward_t2_inr=None,
+                            net_rr_t1=None,
+                            net_rr_t2=None,
+                            reasons=[*refreshed.reasons, reason],
+                            entry_validation=validation,
+                        )
+                    else:
+                        refreshed = replace(refreshed, entry_validation=validation)
+            revalidated_candidates.append(refreshed)
+        candidates = revalidated_candidates
         candidates = [
             replace(
                 candidate,

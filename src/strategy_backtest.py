@@ -447,7 +447,7 @@ def run_yahoo_backtest(
             "stop_loss", "target", "quantity", "gross_pnl", "brokerage",
             "stt", "exchange_charges", "sebi_charges", "gst", "stamp_duty",
             "ipft", "slippage", "estimated_costs", "net_pnl", "exit_reason",
-            "strategy",
+            "strategy", "strategy_version",
         ])
     trades.to_csv(out / f"{stem}_trades.csv", index=False)
     # JSON does not support NaN/Infinity; represent an infinite profit factor as null.

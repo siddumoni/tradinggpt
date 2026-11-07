@@ -270,7 +270,7 @@ def test_nse_equity_universe_uses_bulk_quote_screen_and_selected_instruments(mon
     assert captured["screen_kwargs"]["max_symbols"] == 25
     assert captured["bundle_args"]["symbol"] == "INFY"
     assert captured["bundle_args"]["quote_data"]["last_price"] == 1500.0
-    assert captured["bundle_args"]["include_daily_candles"] is False
+    assert captured["bundle_args"]["include_daily_candles"] is True
     assert report["candidates"][0]["data_verified_live"] is True
     assert report["advisory_only"] is True
     assert report["orders_placed_or_modified"] is False
@@ -410,6 +410,11 @@ def _run_directional_kite_scan(
                 "candles_5m": candles_5m,
                 "candles_15m": candles_15m,
                 "candles_5m_history": candles_5m_history,
+                "candles_daily_60d": [{
+                    "date": datetime(2026, 10, 23, 15, 30, tzinfo=IST),
+                    "open": 13.0, "high": 17.0, "low": 10.0, "close": 14.0,
+                    "volume": 100000,
+                }],
                 "provider": "test Kite",
             }
 

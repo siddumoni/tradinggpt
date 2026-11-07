@@ -1,387 +1,87 @@
-# TradingGPT — NSE Advisory-Only Intraday Research Assistant
+# TradingGPT — NSE Stock Scanner & Paper-Trading Research
 
-TradingGPT is a Python research and advisory project for NSE equities. It combines market-data helpers, technical indicators, candidate intraday strategies, risk checks, news/context helpers, historical backtesting, and validation reports.
+TradingGPT is a tool that watches NSE stocks, checks possible intraday trading setups, and tests them using a virtual account. It is built for research and learning—not for automatically trading real money.
 
-**Safety boundary:** the project is advisory-only. It must not place, modify, or cancel orders. Backtests and scanner signals are research outputs, not promises of profit or recommendations to trade.
+> **Important:** TradingGPT is advisory-only. It can read market data from Zerodha Kite, but it does not place, change, or cancel real orders. Paper-trading results are simulated and do not guarantee profits.
 
-## Manual paper-position exit
+## What it does
 
-The local Champion dashboard provides a confirmed **Close** action for each open virtual position. It uses the latest cached bid for LONG positions or ask for SHORT positions, and refuses to close if the quote is missing, stale (older than 120 seconds), or future-dated. Estimated slippage and NSE charges are included in the exit accounting, and the normal `PAPER_EXIT` event is emitted for Telegram notifications. The endpoint is localhost-only, requires a JSON request, and never submits a broker order.
+- Scans the NSE cash-equity market and selects liquid stocks for closer analysis.
+- Checks market conditions, price and volume, previous-day support/resistance, surveillance status, news, and data quality.
+- Looks for intraday setups using strategies such as VWAP, EMA and opening-range patterns.
+- Rechecks the live bid/ask price before approving a setup. If the price, data, or risk checks fail, the setup is kept on a watchlist instead.
+- Calculates position size, stop-loss, targets, estimated charges, slippage and risk/reward.
+- Runs a **Champion** virtual portfolio and separate **Challenger** and **Watch** research portfolios.
+- Provides a local dashboard, daily reports, trade history and optional Telegram alerts.
+- Saves research reports to a separate private GitHub repository when automatic uploads are configured.
 
-## What is in the repository
+## How the project works
 
-- **Authentication and session checks:** Zerodha Kite Connect login/session helpers.
-- **Market-data adapters:** Kite-related fetch helpers and a Yahoo Finance historical-data adapter.
-- **Indicators and strategies:** EMA, RSI, MACD, ATR, session VWAP, VWAP trend/pullback, and opening-range logic.
-- **Risk and costs:** risk assessment, cash-only notional sizing in the backtester, and estimated NSE intraday charges.
-- **Research tools:** fixed-level trade simulator, multi-stock/slippage sensitivity runner, frozen-trade-set slippage repricing, shared-capital portfolio replay, prospective paper-signal journal/outcome evaluator, candle data-quality audit, and chronological validation.
-- **Tests:** offline unit and regression tests. Tests should not require a live brokerage session.
+1. **Connect:** Sign in to Zerodha Kite. TradingGPT uses the session only to read market data and perform permitted checks.
+2. **Scan:** On each completed 5-minute candle, it checks the NSE equity list and selects the most liquid eligible stocks.
+3. **Find setups:** It studies price, volume and technical indicators to identify possible LONG or SHORT opportunities.
+4. **Apply safety checks:** It checks data freshness, market eligibility, price levels, news, margin estimates and trading costs. It then verifies the executable bid/ask price again.
+5. **Make a decision:** A setup either passes the rules, becomes watch-only, or is rejected. Failed checks do not get bypassed.
+6. **Simulate:** Approved candidates can enter the Champion virtual account if cash, position, daily-loss and portfolio-risk limits allow it. Other research candidates are tracked separately.
+7. **Monitor:** The dashboard shows decisions and virtual positions. The service tracks exits, stop-losses, targets and estimated costs without sending broker orders.
+8. **Review:** At the end of the day, it creates reports and an upload checklist. Configured private GitHub uploads and optional Telegram alerts help with review.
+9. **Validate:** Historical tests and new paper-trading sessions are analysed for after-cost returns, drawdown, consistency and sample size before any strategy is considered for promotion.
 
-The modules are separate components; a passing unit suite does not prove the strategy has a repeatable positive edge. See [the delivery phase index](docs/PHASES.md) for the current milestone and acceptance criteria.
+## Project status
 
-## Account profiles
+- **Development:** Core scanner, safety checks, paper-trading engine, dashboard, reporting and research tools are implemented.
+- **Current focus:** Prospective paper validation—collecting new sessions and completed trades to see whether the strategies perform consistently.
+- **Not yet proven:** A working scanner or a successful test suite does not prove a profitable strategy. Do not use real money based only on backtests or a small sample of paper trades.
 
-Risk and capital defaults are selected from `config/settings.yaml`:
+The next validation milestone requires at least **100 accepted, completed trades across 20 independent sessions**, a positive lower bound on the 95% expectancy confidence interval at **8 bps slippage per side**, a profit factor of at least **1.0**, and no single stock or session contributing more than **30% of positive net P&L**. See [Phase 6 readiness](docs/PHASE6_READINESS.md) for the full rules.
 
-| Profile | Capital | Risk per trade | Daily loss cap | Max positions | Portfolio risk cap |
-|---|---:|---:|---:|---:|---:|
-| `research` | ₹20,000 | ₹200 | ₹600 | 1 | ₹200 |
-| `paper` | ₹1,00,000 | ₹500 | ₹2,000 | 3 | ₹1,500 |
-| `live-advisory` | ₹20,000 | ₹200 | ₹600 | 1 | ₹200 |
+## Start here (Windows 11 / PowerShell)
 
-All profiles remain advisory-only. `live-advisory` means stricter live-data/margin validation in the advisory pipeline; it does **not** enable broker order placement. The integrated virtual-broker service defaults to `paper`; the standalone scanner defaults to `research`.
-
-Examples:
-
-```powershell
-# Historical/research scanner profile
-python -m src.advisory_engine --profile research --provider yahoo --symbols RELIANCE,HDFCBANK
-
-# Live-data advisory profile (read-only Kite; no real orders)
-python -m src.advisory_engine --profile live-advisory --provider kite --symbols RELIANCE,HDFCBANK
-
-# Integrated virtual account
-python -m src.paper_trading_service --profile paper
-
-# CLI flags override the selected profile without editing YAML
-python -m src.paper_trading_service --profile paper --account-capital 125000 --risk-per-trade 600 --daily-loss-limit 2500 --max-open-positions 4 --max-portfolio-risk 1800 --minimum-net-rr 1.8 --slippage-bps-per-side 6
-```
-
-The paper service refuses to silently reuse a SQLite account initialized with a different starting capital. Select the matching profile or supply a separate `--db-path`; it never resets existing paper history automatically. Every scan report records the selected profile and effective risk settings.
-
-## Optional OS keyring
-
-By default, the Kite access token is stored in the local ignored `.local/kite_token.json` file. For Windows Credential Manager or another supported OS keyring backend, install the optional dependency set and opt in:
+Requirements: Python 3.13 (64-bit recommended), Git, and optional Zerodha Kite Connect credentials.
 
 ```powershell
-python -m pip install -r requirements-keyring.txt
-$env:TRADINGGPT_USE_KEYRING = "true"
-python -m src.main login
-```
-
-When keyring mode is enabled, the JSON cache stores token metadata only; the access token itself is stored in the OS keyring. If keyring is unavailable, login fails rather than silently falling back to plaintext. Existing file-based caches continue to work. A cache marked as keyring-backed is always read from the OS keyring (and therefore still requires the optional package), regardless of the current environment flag; the flag controls where newly saved tokens are written.
-
-## Requirements
-
-- Windows 11
-- Python 3.13 (64-bit recommended)
-- VS Code with the Python extension
-- Optional Zerodha Kite Connect app credentials for authentication/API workflows
-
-## Setup in PowerShell
-
-Run from the cloned repository root:
-
-```powershell
+git clone https://github.com/siddumoni/tradinggpt.git
+cd tradinggpt
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-# Optional contributor tools (Ruff, MyPy and coverage)
-python -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 
-Add your Kite API credentials to `.env` only if you use the Kite login flow. Never commit `.env`, API secrets, access tokens, or screenshots containing them.
+Add Kite credentials to your local `.env` only if you use Kite. Never commit API keys, access tokens or the `.env` file.
 
-If PowerShell blocks activation, use this only in the current terminal session:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-## Authentication commands
+Sign in and start the integrated paper-trading service:
 
 ```powershell
 python -m src.main login
 python -m src.main check
+python -m src.paper_trading_service
 ```
 
-The login flow opens the broker login URL, then asks you to paste the short-lived request-token value from your registered redirect URL. The session check is intended to verify the cached session through a read-only profile request.
+Open the dashboard at **http://127.0.0.1:8000**. Keep the computer awake and the Windows user signed in while the service is running. For automatic weekday scans, see the [Windows scheduler guide](docs/PAPER_SCAN_SCHEDULER.md).
 
-The token cache is plaintext under `.local\kite_token.json`; treat it like a password. The `.env` and `.local/` paths are excluded by `.gitignore`. If a secret is ever committed, rotate/revoke it—the later deletion of a file does not remove it from Git history.
+## Virtual account and safety
 
-## Run the test suite
+The default integrated paper account uses **₹1,00,000 virtual capital**, **₹500 planned risk per trade**, a **₹2,000 daily loss limit**, up to **3 open positions**, and estimated slippage and transaction charges. These are simulation settings, not money held at Zerodha. The service also has separate research and live-advisory profiles; every profile remains unable to place real orders.
+
+The dashboard is local to your computer. The Champion account is kept separate from Challenger and Watch research results so experimental signals cannot improve or distort Champion performance.
+
+## Research and project documentation
+
+- [Delivery phases](docs/PHASES.md) — project milestones and progress.
+- [Phase 6 readiness](docs/PHASE6_READINESS.md) — what must be proven before promotion.
+- [Research protocol](docs/RESEARCH_PROTOCOL.md) — how to compare strategies fairly.
+- [Market safety](docs/MARKET_SAFETY.md) and [NSE scanner guide](docs/NSE_UNIVERSE_SCANNER.md) — stock filters and safety checks.
+- [Paper portfolio allocation](docs/PAPER_PORTFOLIO_ALLOCATION.md) — virtual capital and risk controls.
+- [Results](docs/RESULTS.md) and [performance statistics](docs/PERFORMANCE_STATS.md) — how results are measured.
+- [Private GitHub report uploads](docs/GITHUB_RESEARCH_UPLOAD.md) — daily research backup setup.
+- [Telegram alerts](docs/TELEGRAM_ALERTS.md) — optional paper-trading notifications.
+
+Run the automated checks before contributing:
 
 ```powershell
-python -m compileall -q src tests
-ruff check src tests
-ruff format --check src/paper_broker.py src/paper_trading_service.py
-mypy src --ignore-missing-imports --follow-imports=silent
-python -m pytest -q --cov=src --cov-report=term-missing
+python -m pytest -q
 ```
 
-Unit tests are expected to use dummy values and local data. Do not add tests that submit real orders or require live market access.
-
-## Historical research workflow
-
-### 1. Run a reproducible multi-stock baseline
-
-```powershell
-python -m src.multi_stock_validation --days 59 --risk-per-trade 200 --output-dir reports/backtests/phase9
-```
-
-The script caches the downloaded candle set and uses it for the scenarios in that run. If you intentionally want new data, pass `--refresh-data`; record that choice because refreshing changes the sample. The provider's returned coverage can be shorter than the requested calendar-day window.
-
-### 2. Audit the cached candles
-
-```powershell
-python -m src.data_quality_audit --data-dir reports/backtests/phase9/candle_cache --days-label 59d --symbols RELIANCE,HDFCBANK,ICICIBANK,SBIN,INFY
-```
-
-Inspect both summary and per-session reports. Missing candles are not reconstructed. A session with a missing required bar or invalid OHLCV must not quietly enter the backtest.
-
-### 3. Run a chronological holdout diagnostic
-
-```powershell
-python -m src.chronological_validation --data-dir reports/backtests/phase9/candle_cache --days-label 59d --candidates HDFCBANK:vwap_trend,INFY:vwap_pullback --train-fraction 0.70 --risk-per-trade 200
-```
-
-The runner requires at least 10 complete sessions in both chronological partitions and reports when the test sample has fewer than 30 trades (configurable with `--minimum-test-trades`). This threshold is a warning label, not proof of statistical significance or profitability.
-
-**Important selection-bias rule:** if you chose a stock, strategy, or parameter after inspecting the same period's backtest results, a later split of those same dates is not an untouched out-of-sample test. Treat it as a diagnostic. Freeze the candidate list and settings, then test them prospectively on unseen sessions before considering real-money use.
-
-Read [the research protocol](docs/RESEARCH_PROTOCOL.md) before comparing strategy results.
-
-## Audit prospective signal cost feasibility
-
-Run the cost audit directly against the append-only signal journal. It calculates Target 2 net R:R at the 5 bps/side floor and 8 bps/side stress case, with date/symbol pass rates:
-
-```powershell
-python -m src.cost_feasibility logs/paper_signals.csv --output reports/cost_feasibility_detail.csv --summary-output reports/cost_feasibility_by_day_symbol.csv --profile research
-```
-
-Zero-quantity journal rows remain unscorable and are excluded from the pass-rate denominator. The journal itself is not rewritten. See [the cost-feasibility guide](docs/COST_FEASIBILITY.md).
-
-## Evaluate paper outcomes
-
-After the journal has enough later 5-minute data, evaluate the saved signals with a next-bar-open hypothesis and conservative stop/target handling:
-
-```powershell
-python -m src.paper_outcomes --journal logs/paper_signals.csv --candles-dir data/paper_candles --output reports/paper_outcomes.csv
-python -m src.portfolio_replay --trades reports/paper_outcomes_portfolio_candidates.csv --initial-capital 20000 --risk-per-trade 200 --slippage-bps 5 --max-concurrent-positions 3
-```
-
-The outcome report preserves pending/invalid/gap statuses and does not treat individual overlapping signals as portfolio results. Read [the paper outcome evaluator guide](docs/PAPER_OUTCOME_EVALUATOR.md) before interpreting the output. For the integrated live-Kite paper service's uncapped, independent WATCH_CANDIDATE near-miss tracker, read [the candidate outcome tracker guide](docs/CANDIDATE_OUTCOME_TRACKER.md).
-
-## Prospective strategy forward test
-
-To test the frozen candidates selected in the historical study using new Kite candles (without reconstructing old signals), run the separate prospective evaluator alongside the integrated paper-trading service in another terminal:
-
-```powershell
-python -m src.prospective_strategy_evaluator --candles-dir data/paper_candles_kite --candidates HDFCBANK:vwap_trend,INFY:vwap_pullback
-```
-
-The first launch seeds a per-symbol watermark at the current archive head and skips pre-start bars. Keep it running as new completed candles are appended. The evaluator uses the named profile selected by `--profile`: `research` and `live-advisory` are ₹20,000 capital / ₹200 risk per signal; `paper` is ₹1,00,000 / ₹500. The default slippage scenarios are 5 and 8 bps per side; values below the 5 bps floor are rejected. Run each profile with its own output directory and state file so profile-specific outcomes cannot overwrite or pool one another. The fixed 1.5 after-cost Target 2 net R:R gate remains unchanged. Only signals rejected specifically by that gate get a separate research-only shadow outcome; other risk/data failures stay fail-closed. Individual signals may overlap, so their summed P&L is not portfolio P&L. The candle-only evaluator does not validate fresh quotes and always remains research-only, including when `live-advisory` is selected. Read [the forward evaluator guide](docs/PROSPECTIVE_STRATEGY_EVALUATOR.md) before interpreting results.
-
-## NSE equity universe scanner
-
-The read-only market-wide scanner screens Kite's NSE cash-equity instrument universe by fresh quotes and liquidity, then runs the technical/risk/news pipeline on the top-ranked symbols. The integrated paper service invokes this same scan after each completed five-minute candle (default top 50) and passes all conditional LONG/SHORT candidates to the ₹1 lakh Champion virtual account for quality ranking and shared-capital allocation. The paper WebSocket follows the latest selected top-N list plus open Champion/Watch-Shadow positions; it does not subscribe to every NSE instrument.
-
-After authenticating with Kite, run:
-
-```powershell
-python -m src.main login
-python -m src.main check
-python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 50 --output-dir reports --verbose
-```
-
-The scanner obtains the current NSE instrument dump (cached for the IST calendar day), requests full quotes in batches of at most 500, and selects fresh NSE EQ quotes using configurable price, current-day volume and turnover-proxy filters. Quote requests are paced at one request per second, historical candles at approximately three requests per second, and other read-only API calls (such as margin estimates) at no more than roughly nine per second. The default deep-analysis limit is 50 stocks. Current turnover ranking uses `average_price × current-day volume`; it is a screening proxy, **not** an exchange-reported turnover value or an average-daily-volume calculation. Symbols with missing/stale/invalid quotes or failed filters are excluded and counted in the JSON report.
-
-The selected symbols reuse their already-fetched quote snapshots. For each selected symbol, the scanner fetches current-session 5-minute and 15-minute candles, plus cached daily OHLC and 45-calendar-day 5-minute history. Daily and relative-volume history are cached once per symbol, instrument token and IST date, then revalidated through the existing completeness checks. LONG setups are blocked when previous-session high or pivot is within 0.3 ATR ahead of entry; SHORT setups use previous-session low or pivot. The report includes the cache hit/refresh state, universe filters, quote coverage, previous-day levels, surveillance status, MIS margin-estimate status, exclusions and selected symbols.
-
-Before a Kite directional candidate can retain `CONDITIONAL_BUY` / `CONDITIONAL_SHORT`, the scanner now revalidates it at the best executable ask (LONG) or bid (SHORT). MIS margin, position size, estimated charges, slippage and after-cost net R:R are recalculated at that price while the original candle-derived stop/target levels remain fixed. Missing/crossed/stale book data, an invalidated level, or a failed risk/news/data gate leaves the setup watch-only. Reports expose quote time, price drift and a full stop/target cost breakdown. ETF-like records whose security name identifies an ETF or whose symbol ends in `BEES` are excluded from the cash-equity universe; this is a practical metadata filter, not a complete exchange security-master classification.
-
-Optional thresholds:
-
-```powershell
-python -m src.advisory_engine --provider kite --universe nse_equity --universe-max-symbols 75 --universe-min-price 50 --universe-max-price 10000 --universe-min-volume 10000 --universe-min-turnover 5000000 --universe-max-quote-age-minutes 15 --output-dir reports --verbose
-```
-
-The standalone scanner command produces an advisory research report only. The integrated paper service uses the same universe screen as its input, but the broker only simulates entries for conditional candidates that pass its independent cash, quote, position, daily-loss, portfolio-risk and after-cost R:R gates. No real orders are placed. Review scan duration, quote coverage, API errors and the report's exclusions; a top-50 liquidity ranking is not a prediction of future returns or proof that the selected symbols are tradable.
-
-See [the NSE universe scanner guide](docs/NSE_UNIVERSE_SCANNER.md) for the filtering methodology, Kite API pacing and operational limitations. See [Market Safety](docs/MARKET_SAFETY.md) for the 0.3 ATR previous-day level filter, cache behaviour, optional NSE surveillance snapshot and calendar rollover controls.
-
-## Use authenticated Kite market data
-
-The scanner now accepts `--provider kite` for read-only stock quotes and 5/15-minute candles from the authenticated Kite Connect API. Log in through the existing manual flow first:
-
-```powershell
-python -m src.main login
-python -m src.main check
-python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv --candle-archive-dir data/paper_candles
-```
-
-This option needs valid Kite credentials and a same-day session. A quote must include a positive last price and timestamp no more than 15 minutes old for the stock-data trust flag to pass. Missing/stale quotes fail closed. In Kite mode, the NIFTY 50 regime is fetched from Kite historical candles when the index instrument is present; Yahoo is not used as a fallback. For directional candidates, the scanner calls Kite's read-only order-margin calculator for a hypothetical one-share NSE MIS limit order. This does not submit an order. Missing, invalid or unavailable margin estimates fail closed. The report records the index source and each margin check. Use this for research/paper journaling, not live trade decisions.
-
-## Automate paper scans on Windows
-
-To scan automatically after each completed 5-minute candle, install the local scheduler and Windows Task Scheduler entry once:
-
-```powershell
-git pull origin main
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m src.main check
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_paper_scan_task.ps1
-```
-
-The task launches `src.paper_scan_scheduler` at user sign-in and starts it immediately when installed. It checks every five seconds, waits 10 seconds after the candle boundary for data publication, and scans on weekdays from 09:20 through 15:15 IST. It runs the existing Kite scanner with the paper signal journal, scan ledger, and Kite-only candle archive. A persistent state file prevents repeated attempts for the same candle; stale boundaries are skipped rather than replayed.
-
-Keep the Windows user signed in and the PC awake. The task uses that user's cached Kite session and does not run while the computer is asleep or powered off. It does not place, modify, or cancel orders. For log monitoring and stop/uninstall instructions, see [the automatic scheduler guide](docs/PAPER_SCAN_SCHEDULER.md).
-
-## Virtual paper broker and local dashboard
-
-The virtual account is separate from Kite's brokerage account and uses no real-order API. It starts with ₹1,00,000 virtual capital, ₹500 planned risk per entry, a ₹2,000 daily loss limit, at most three open positions, no leverage, and 5 bps per-side slippage by default. The persistent SQLite ledger tracks simulated entry/exit prices, quantity, stop/targets, estimated fees, slippage, gross/net P&L, and strategy reasons.
-
-Start the dashboard locally:
-
-```powershell
-python -m src.paper_dashboard --db-path data/paper_trading.sqlite3 --host 127.0.0.1 --port 8000
-```
-
-Open `http://127.0.0.1:8000`. The dashboard binds to localhost only. The simulator accepts only fresh, verified Kite reports with approved conditional candidates, verified margin, valid price levels, sufficient virtual cash and passing risk/after-cost reward-to-risk checks. No actual Kite orders are submitted. Quote snapshots are included in saved Kite reports for the simulator; stale quotes are rejected.
-
-The integrated service now runs the scheduler, live read-only Kite tick monitor, champion virtual broker, challenger shadow portfolios, dashboard and daily report generator in one process. After pulling these updates, rerun the Windows task installer once so Task Scheduler switches from the scan-only module to the integrated service.
-
-## Run the integrated paper-trading service
-
-The integrated service runs the candle scheduler, read-only Kite WebSocket monitor, champion virtual account, isolated challenger shadow portfolios, the watch-candidate shadow book, localhost dashboard and daily reports together.
-
-Foreground command: `python -m src.paper_trading_service`
-
-By default, the service screens the full available Kite NSE EQ universe and deeply analyses the top 50 liquid names on every five-minute candle. Use `--universe-max-symbols 75` to increase the technical-analysis limit after measuring scan time. The legacy fixed-symbol mode is available explicitly with `--universe watchlist --symbols RELIANCE,HDFCBANK,INFY`.
-
-Open http://127.0.0.1:8000. After pulling updates, rerun the Windows task installer once so Task Scheduler starts src.paper_trading_service instead of the old scan-only module. Keep the Windows user signed in and the PC awake. If the Kite session expires, authenticate again using python -m src.main login.
-
-Daily outputs are written to `reports/paper_daily_YYYY-MM-DD.md`, `.json` and `_trades.csv`. All three files distinguish the champion account, challenger strategy lab, and watch-candidate shadow book. The combined trade CSV includes the three tracks. Challenger and watch-shadow books never affect champion statistics and are never automatically promoted. The report also lists closed trades whose realised simulated loss exceeded their recorded per-trade risk budget.
-
-### Watch-candidate shadow book
-
-The integrated service also maintains a separate cash-only shadow book for directional `WATCH_CANDIDATE` signals rejected specifically by the scanner's minimum **net** reward-to-risk gate. It does not lower or bypass that gate for the champion account. A shadow entry is recorded only when the saved report is Kite-only, the no-order assertion is explicit, live data and margin are verified, company-specific risk is not HIGH, news checks are complete, the quote is fresh, and best bid/ask are available. Other watch candidates are shown in the dashboard's decision audit with their exclusion reason.
-
-The shadow book uses the service's virtual capital/risk settings, a maximum-position limit, 5 bps adverse slippage per side, estimated transaction charges, stop-loss/target-2 exits, and a fresh-quote square-off at 15:15 IST. Its P&L and trade history remain completely separate from champion and challenger statistics. Outcomes are prospective observations—not evidence of a profitable edge and never real Kite orders. Existing saved reports are not replayed automatically; observations begin as new reports arrive after you update and restart the service.
-
-### End-of-session report and upload checklist
-
-At or after **15:20 IST** on a weekday, the service writes the daily report and prints an **UPLOAD CHECKLIST** in the console. When you stop the service with **Ctrl+C**, it refreshes the report and prints the checklist again, including when you stop it before market close. The checklist is also saved as `reports/paper_upload_checklist_YYYY-MM-DD.txt`. Allow the shutdown messages to finish before closing the terminal; do not use Task Manager/force-kill if you want the final report written.
-
-During end-of-session finalization, challenger shadow entries are reconciled: a signal whose next-bar entry is at/after the 14:45 IST entry cutoff becomes `EXPIRED_NO_ENTRY`; an otherwise eligible signal whose next-bar candle is missing becomes `INCOMPLETE_DATA_GAP`. Neither status is treated as a filled trade, and no price is fabricated. The project's final modeled candle is timestamped 15:10 and completes at the configured 15:15 square-off boundary.
-
-For the next review, upload the three daily report files plus the operational inputs listed as REQUIRED in the checklist:
-- `logs/paper_daily_report_state.json`
-- `logs/paper_scan_runs.csv`
-- `logs/paper_signals.csv`
-- `logs/paper_scan_scheduler_state.json`
-- `logs/paper_trading_service.log`
-- Each selected symbol's `data/paper_candles_kite/SYMBOL.csv` archive.
-
-The SQLite paper-account database is listed as optional but can help when investigating full persistent trade/event history. **Never upload Kite API keys, access tokens, `.env` files, or browser profiles.** A missing file is explicitly marked in the checklist, so you can tell whether the file was not created or is merely optional.
-
-
-
-## Capture prospective paper observations
-
-To append directional candidates from each scan to the idempotent signal journal (without pretending candidates are filled trades), add `--paper-journal`:
-
-```powershell
-python -m src.advisory_engine --provider kite --symbols RELIANCE,HDFCBANK,INFY --paper-journal logs/paper_signals.csv --candle-archive-dir data/paper_candles_kite
-```
-
-When `--paper-journal` is enabled, completed 5-minute candles are archived to `data/paper_candles` by default unless `--candle-archive-dir` is specified. The scanner also appends a row to `logs/paper_scan_runs.csv` by default. This **scan-run ledger includes successful scans with zero directional signals**, plus candidate counts, quote-verification totals, margin-check pass/fail counts, fetch errors, and candle-archive health. Use `--scan-ledger PATH` to choose another path or enable the run ledger without a signal journal.
-
-The signal journal remains selective: it stores only directional setups, so an empty signal journal can be normal when strategies return `NO_TRADE`. The separate ledger makes those no-trade runs auditable without manufacturing paper signals. The candle archive records `provider_mode` and refuses to mix Yahoo and Kite history for the same symbol. The outcome evaluator remains separate; see [the paper signal journal guide](docs/PAPER_SIGNAL_JOURNAL.md).
-
-## Replay selected signals with shared capital
-
-Per-symbol backtests do not model several stocks competing for one account balance. Use the shared-capital replay with **one selected baseline trade log per intended candidate stream**:
-
-```powershell
-python -m src.portfolio_replay --trades reports/backtests/RELIANCE_vwap_trend_trades.csv reports/backtests/INFY_vwap_pullback_trades.csv --initial-capital 20000 --risk-per-trade 200 --slippage-bps 5 --max-concurrent-positions 3
-```
-
-The replay records accepted/rejected candidates, allocated quantity, reserved capital, estimated costs and net P&L. It replays saved trades rather than regenerating signals, so it is an allocation diagnostic—not a full portfolio backtest. See [the portfolio replay guide](docs/PORTFOLIO_REPLAY.md).
-
-## Statistical validation and promotion
-
-After running a shared-capital portfolio replay, evaluate its accepted trade-detail CSV:
-
-```powershell
-python -m src.performance_stats --trades reports/backtests/portfolio_replay_trade_details.csv --initial-capital 20000
-
-# Or select one isolated paper-report track
-python -m src.performance_stats --trades reports/paper_daily_2026-11-03_trades.csv reports/paper_daily_2026-11-04_trades.csv reports/paper_daily_2026-11-05_trades.csv --track CHAMPION --initial-capital 100000
-```
-
-This produces a 10,000-resample session-block bootstrap expectancy interval at 8 bps per-side slippage, net performance metrics, realized drawdown, losing streak, MAE/MFE when recorded, hour buckets, and symbol/session profit concentration. Promotion criteria are fixed in `config/promotion.yaml`. A PROMOTE decision only advances the strategy to another research-validation stage; it is not live-trading approval. See [the statistical validation guide](docs/PERFORMANCE_STATS.md) and [the current results](docs/RESULTS.md).
-
-## Isolate slippage cost from trade selection
-
-The ordinary multi-stock sensitivity runner reruns the strategy for each slippage assumption; the minimum-net-R:R rule can therefore change the accepted trade set. To price the **same saved trades** at multiple slippage values, use the frozen-trade-set repricer:
-
-```powershell
-python -m src.slippage_repricing --trades reports/backtests/BASELINE_trades.csv --slippage-bps 2,5,8
-```
-
-It produces a summary CSV and a trade-level details CSV. Each source file is reported independently; alternative scenario logs often overlap and must not be summed as a portfolio. See [the frozen-trade repricing guide](docs/FROZEN_TRADE_SLIPPAGE_REPRICING.md).
-
-## Current default backtest assumptions
-
-- Starting capital: ₹20,000.
-- Planned loss budget per trade: ₹200 by default; configurable to any finite positive amount.
-- Minimum net reward/risk: 1.5 by default after estimated charges and configured slippage.
-- Entry cutoff: 14:45 IST.
-- Intended square-off: 15:15 IST.
-- Maximum three entries per day in the fixed-level backtester.
-- Cash-only notional sizing; the backtest does **not** assume MIS leverage.
-- When a stop and target are both touched in the same OHLC bar, stop-loss is assumed first.
-- Estimated costs and slippage are approximations; actual executed fills, gaps, order count, charges, and contract notes can differ. Realized loss can exceed the planned risk budget.
-
-These are research-model assumptions, not guarantees about actual execution. Check `config/settings.yaml` and the backtest configuration before interpreting any report.
-
-## Data and cost limitations
-
-Yahoo Finance is an unofficial data source, is not endorsed by Yahoo, and is intended for personal use under its applicable terms. Its intraday history can be incomplete or limited, and it does not provide exchange-grade market depth. Do not treat a latest candle as a guaranteed live quote.
-
-Transaction-charge rates are configurable estimates. Verify the current broker/exchange charges and applicable statutory levies before relying on net P&L estimates.
-
-## Phase 4 market-safety gates
-
-Live Kite candidates also pass an NSE equity calendar, circuit-band and time-of-day relative-volume checks. The 2026 holiday calendar is in `config/nse_equity_calendar.yaml` and fails closed beyond its verified coverage. Both exchange circuit limits must be present; prices within 0.5% of either band are blocked, including a final check against the executable bid/ask. Relative volume compares completed current-session 5-minute cumulative volume with the median same-time prefix from up to 20 prior complete sessions; at least 10 sessions and 1.0x are required by default. Missing or incomplete history is rejected rather than imputed.
-
-The existing MIS margin call remains read-only and is required for a conditional advisory. These safeguards do not relax the minimum 1.5 after-cost net R:R or any existing quote, risk, news or paper-broker checks. See [the NSE scanner guide](docs/NSE_UNIVERSE_SCANNER.md) for the configuration and limitations.
-
-## Development principles
-
-1. Preserve advisory-only behavior—no order placement, modification, or cancellation.
-2. Never synthesize missing candles to make a backtest pass.
-3. Keep all candidate selection and parameter tuning separate from final holdout evaluation.
-4. Report net-of-cost metrics, sample size, drawdown, exclusions, and slippage sensitivity.
-5. Prefer robust performance across unseen time periods and symbols over the highest in-sample P&L.
-6. Do not promote a candidate to live trading on the basis of this tool's backtest alone.
-
-
-See [docs/PAPER_PORTFOLIO_ALLOCATION.md](docs/PAPER_PORTFOLIO_ALLOCATION.md) for shared-capital paper allocation and aggregate portfolio-risk controls.
-
-
-## Automatic private GitHub research uploads
-
-At end-of-day report finalization, TradingGPT can automatically upload the daily reports, per-scan JSON files, date-scoped scan/journal diagnostics, date-filtered service log, and date-scoped Kite candle extracts to a dated folder in a **separate private repository**. The uploader refuses public repositories and excludes the SQLite database, credentials, tokens, and files outside the project root. It batches each day into one Git commit and never changes paper-trading or Kite order behavior.
-
-See [Automatic private GitHub research uploads](docs/GITHUB_RESEARCH_UPLOAD.md) for repository setup, least-privilege token permissions, Windows environment variables, folder layout, and troubleshooting. The public source repository is not a permitted data-upload destination.
-
-
-## Optional Telegram paper-trading alerts
-
-Telegram notifications are opt-in and are disabled by default. The integrated paper service can forward simulated Champion-account entry, exit, and planned-risk-overrun events to a Telegram chat. Alerts are informational only; they do not place, modify, or cancel broker orders.
-
-1. Create a bot with Telegram's official `@BotFather` and start a private chat with it.
-2. Copy `.env.example` to `.env`, then set `TELEGRAM_ALERTS_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`.
-3. Keep `.env` local. Never commit the bot token or share it in chat, screenshots, or logs.
-4. Start the integrated paper service as usual. The notifier polls the paper event journal and sends only new `PAPER_ENTRY`, `PAPER_EXIT`, and `RISK_OVERRUN` events.
-5. To disable notifications, set `TELEGRAM_ALERTS_ENABLED=false` and restart the service.
-
-The notifier stores its last processed event ID in `logs/telegram_alert_state.json`, retries failed deliveries on a later poll, and never blocks or changes the paper broker. Delivery is at-least-once, so a rare duplicate is possible if the process stops after Telegram accepts a message but before the local cursor is saved. The first run seeds the cursor at the current event-log head and does not send historical alerts.
-
-Read [the Telegram alert setup and troubleshooting guide](docs/TELEGRAM_ALERTS.md). Alerts are research notifications, not instructions to trade.
+**Bottom line:** TradingGPT scans, filters, evaluates, simulates and reports. The software is built to support disciplined research; only fresh, independent paper-trading evidence can show whether a strategy is worth taking further.

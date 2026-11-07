@@ -185,3 +185,48 @@ def test_atr_seed_challenger_versions_keep_plain_one_atr_stop_control():
   "challenger_ema_pullback_atr_seed_v2",
  }
  assert EXIT_POLICY.stop_atr_multiple==pytest.approx(1.0)
+
+
+
+def test_challenger_capacity_is_shared_across_atr_seed_version_boundary(tmp_path):
+ from src.paper_strategy_lab import VERSION_FAMILY
+ db_path=tmp_path/"paper.sqlite3"
+ old_version="challenger_ema_9_21_v1"
+ new_version="challenger_ema_9_21_atr_seed_v2"
+ with sqlite3.connect(db_path) as db:
+  db.row_factory=sqlite3.Row
+  ensure_shadow_schema(db)
+  for index,symbol in enumerate(("AAA","BBB","CCC")):
+   db.execute(
+    """INSERT INTO shadow_signals(
+     signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+     stop_loss,target_1,target_2,status,entry_time,entry_reference_price,
+     entry_fill_price,quantity,reason,created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,'OPEN',?,?,?,?,?,?)""",
+    (f"old-{index}",old_version,"EMA momentum",symbol,"LONG",
+     "2026-10-30T09:30:00+05:30",100.0,99.0,102.5,104.0,
+     "2026-10-30T09:35:00+05:30",100.0,100.05,10,"old version open",
+     "2026-10-30T09:30:00+05:30"),
+   )
+  db.execute(
+   """INSERT INTO shadow_signals(
+    signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+    stop_loss,target_1,target_2,status,reason,created_at
+   ) VALUES(?,?,?,?,?,?,?,?,?,?,'PENDING_ENTRY',?,?)""",
+   ("new-pending",new_version,"EMA momentum","INFY","LONG",
+    "2026-10-30T09:30:00+05:30",100.0,99.0,102.5,104.0,
+    "new version pending","2026-10-30T09:30:00+05:30"),
+  )
+  row=db.execute("SELECT * FROM shadow_signals WHERE signal_id='new-pending'").fetchone()
+  index=pd.date_range("2026-10-30 09:15",periods=10,freq="5min",tz=ZoneInfo("Asia/Kolkata"))
+  frame=pd.DataFrame(
+   {"open":[100.0]*10,"high":[100.2]*10,"low":[99.8]*10,
+    "close":[100.0]*10,"volume":[1000]*10},index=index
+  )
+  _entry_shadow(db,row,frame)
+  status,reason=db.execute(
+   "SELECT status,reason FROM shadow_signals WHERE signal_id='new-pending'"
+  ).fetchone()
+ assert VERSION_FAMILY[new_version]==(old_version,new_version)
+ assert status=="ENTRY_REJECTED"
+ assert "position limit reached" in reason

@@ -216,7 +216,7 @@ def test_eod_digest_is_deduplicated_and_keeps_versions_separate(tmp_path):
                          'BULLISH','digest fixture',?,130,5,5,10,?,?)""",
                 (
                     signal_id, "vwap_trend", version, now.isoformat(), now.isoformat(),
-                    100.0, 100.0, 100.05, now.isoformat(), pnl + 10, pnl, now.isoformat(),
+                    100.0, 100.0, 100.05, now.isoformat(), pnl, now.isoformat(),
                 ),
             )
         db.execute(

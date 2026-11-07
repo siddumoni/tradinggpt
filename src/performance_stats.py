@@ -211,7 +211,7 @@ def _daily_report_sessions(paths: Path | list[Path]) -> list[str]:
     selected_paths = [paths] if isinstance(paths, Path) else list(paths)
     sessions: set[str] = set()
     for path in selected_paths:
-        match = re.search(r"(20\\d{2}-\\d{2}-\\d{2})", path.name)
+        match = re.search(r"(20\d{2}-\d{2}-\d{2})", path.name)
         if match is None:
             raise ValueError(
                 f"Paired comparison requires date-stamped daily report filenames; "

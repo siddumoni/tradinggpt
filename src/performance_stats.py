@@ -248,7 +248,7 @@ def paired_session_bootstrap(
     challenger_daily = challenger.groupby("session").net_pnl_8bps.sum()
     champion_daily = champion.groupby("session").net_pnl_8bps.sum()
     if session_calendar is None:
-        calendar = sorted(set(challenger_daily.index).union(champion_daily.index))
+        calendar = sorted(set(challenger_daily.index).intersection(champion_daily.index))
     else:
         calendar = sorted({pd.Timestamp(day).date().isoformat() for day in session_calendar})
     if not set(challenger_daily.index).issubset(calendar) or not set(champion_daily.index).issubset(calendar):

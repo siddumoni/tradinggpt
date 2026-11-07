@@ -64,3 +64,18 @@ def test_zero_quantity_journal_rows_are_retained_but_not_counted_as_gate_passes(
     assert summary.loc[0, "candidate_count"] == 0
     assert summary.loc[0, "unscorable_count"] == 1
     assert pd.isna(summary.loc[0, "pass_rate_5bps"])
+
+
+
+def test_missing_quantity_is_not_defaulted_to_one_share():
+    journal = pd.DataFrame([{
+        "signal_time": "2026-11-05T10:00:00+05:30",
+        "symbol": "TCS", "side": "LONG",
+        "reference_entry": 3000.0, "stop_loss": 2980.0,
+        "target_1": 3040.0, "target_2": 3060.0,
+    }])
+
+    result = audit_candidates(journal)
+
+    assert result.loc[0, "quantity"] is None
+    assert result.loc[0, "status"] == "UNSCORABLE_NONPOSITIVE_OR_INVALID_QUANTITY"

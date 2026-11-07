@@ -247,24 +247,28 @@ def test_paper_broker_reserves_ten_percent_of_risk_budget_for_stop_gaps(tmp_path
 
 
 
-def test_foundation_candidate_version_is_separate_from_frozen_history(tmp_path):
- b=PaperBroker(tmp_path/"paper.sqlite3")
- registry={row["strategy_version"]:row for row in b.snapshot()["strategy_registry"]}
- assert registry["champion_v1"]["status"]=="FROZEN_VERSION"
- assert registry[paper_broker_module.PAPER_BASELINE_VERSION]["status"]=="ACTIVE"
- assert sum(1 for row in registry.values() if row["track"]=="CHALLENGER" and row["status"]=="SHADOW")==3
- for version in (
-  "challenger_ema_9_21_v1",
-  "challenger_vwap_momentum_v1",
-  "challenger_ema_pullback_v1",
- ):
-  assert registry[version]["status"]=="SUPERSEDED_VERSION"
- for version in (
-  "challenger_ema_9_21_atr_seed_v2",
-  "challenger_vwap_momentum_atr_seed_v2",
-  "challenger_ema_pullback_atr_seed_v2",
- ):
-  assert registry[version]["status"]=="SHADOW"
+def test_nse_champion_v2_freezes_all_previous_champion_evidence(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    registry = {row["strategy_version"]: row for row in broker.snapshot()["strategy_registry"]}
+    assert paper_broker_module.PAPER_BASELINE_VERSION == "nse_champion_v2"
+    assert registry["champion_v1"]["status"] == "FROZEN_VERSION"
+    assert registry["nse_champion_v2_foundation_candidate"]["status"] == "FROZEN_VERSION"
+    assert registry["nse_champion_v2_foundation_candidate"]["track"] == "CHAMPION_ARCHIVE"
+    assert registry["nse_champion_v2"]["status"] == "ACTIVE"
+    assert registry["nse_champion_v2"]["track"] == "CHAMPION"
+    assert sum(1 for row in registry.values() if row["track"] == "CHALLENGER" and row["status"] == "SHADOW") == 3
+    for version in (
+        "challenger_ema_9_21_v1",
+        "challenger_vwap_momentum_v1",
+        "challenger_ema_pullback_v1",
+    ):
+        assert registry[version]["status"] == "SUPERSEDED_VERSION"
+    for version in (
+        "challenger_ema_9_21_atr_seed_v2",
+        "challenger_vwap_momentum_atr_seed_v2",
+        "challenger_ema_pullback_atr_seed_v2",
+    ):
+        assert registry[version]["status"] == "SHADOW"
 
 
 

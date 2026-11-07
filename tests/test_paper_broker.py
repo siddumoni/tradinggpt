@@ -249,6 +249,7 @@ def test_foundation_candidate_version_is_separate_from_frozen_history(tmp_path):
  registry={row["strategy_version"]:row for row in b.snapshot()["strategy_registry"]}
  assert registry["champion_v1"]["status"]=="FROZEN_VERSION"
  assert registry[paper_broker_module.PAPER_BASELINE_VERSION]["status"]=="ACTIVE"
+ assert sum(1 for row in registry.values() if row["track"]=="CHALLENGER" and row["status"]=="SHADOW")==3
  for version in (
   "challenger_ema_9_21_v1",
   "challenger_vwap_momentum_v1",

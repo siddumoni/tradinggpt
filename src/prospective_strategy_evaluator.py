@@ -265,6 +265,7 @@ def _make_candidate(
         "signal_time": stamp.isoformat(),
         "symbol": symbol,
         "strategy": strategy,
+        "strategy_version": "nse_champion_v2_foundation_candidate",
         "side": signal["side"],
         "reference_entry": close,
         "stop_loss": float(signal["stop_loss"]),

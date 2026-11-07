@@ -183,8 +183,7 @@ def add_scanner_indicators(candles: pd.DataFrame) -> pd.DataFrame:
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False, min_periods=9).mean()
     df["macd_histogram"] = df["macd"] - df["macd_signal"]
     prev_close = close.shift(1)
-    tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-    df["atr_14"] = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    df["atr_14"] = session_aware_atr(df, 14)
     typical = (high + low + close) / 3.0
     session = pd.Index(df.index.date, name="session")
     cumulative_pv = (typical * volume).groupby(session).cumsum()
@@ -534,6 +533,13 @@ def evaluate_symbol_bundle(
         )
 
     market_safety_validation: dict[str, Any] = {}
+    history_error: str | None = None
+    try:
+        historical_5m = candles_to_frame(bundle.get("candles_5m_history", []))
+    except (ValueError, TypeError) as exc:
+        historical_5m = pd.DataFrame(columns=OHLCV)
+        history_error = str(exc)
+
     if data_verified_live:
         try:
             safety_settings = load_market_safety_settings()
@@ -568,21 +574,27 @@ def evaluate_symbol_bundle(
             entry_validation={"status": "REJECTED_CIRCUIT_LIMIT", **market_safety_validation},
         )
 
-        try:
-            historical_5m = candles_to_frame(bundle.get("candles_5m_history", []))
-            relative_volume = time_of_day_relative_volume(
-                c5,
-                historical_5m,
-                lookback_sessions=safety_settings.relative_volume_lookback_sessions,
-                minimum_valid_sessions=safety_settings.relative_volume_minimum_valid_sessions,
-                minimum_ratio=safety_settings.relative_volume_minimum_ratio,
-            )
-        except (ValueError, TypeError) as exc:
+        if history_error is not None:
             relative_volume = {
                 "eligible": False,
                 "status": "RELATIVE_VOLUME_DATA_INVALID",
-                "reason": f"Relative-volume input failed validation: {exc}",
+                "reason": f"Relative-volume input failed validation: {history_error}",
             }
+        else:
+            try:
+                relative_volume = time_of_day_relative_volume(
+                    c5,
+                    historical_5m,
+                    lookback_sessions=safety_settings.relative_volume_lookback_sessions,
+                    minimum_valid_sessions=safety_settings.relative_volume_minimum_valid_sessions,
+                    minimum_ratio=safety_settings.relative_volume_minimum_ratio,
+                )
+            except (ValueError, TypeError) as exc:
+                relative_volume = {
+                    "eligible": False,
+                    "status": "RELATIVE_VOLUME_DATA_INVALID",
+                    "reason": f"Relative-volume input failed validation: {exc}",
+                }
         market_safety_validation["relative_volume"] = relative_volume
         if not relative_volume.get("eligible"):
             reason = str(relative_volume.get("reason") or "Relative volume did not pass its minimum threshold.")
@@ -610,8 +622,20 @@ def evaluate_symbol_bundle(
 
     ind5 = add_scanner_indicators(c5)
     ind15 = add_scanner_indicators(c15)
-    ind5['atr_session_14'] = session_aware_atr(ind5, 14)
-    ind15['atr_session_14'] = session_aware_atr(ind15, 14)
+    # Seed the current session from the last valid prior-session ATR. Restrict
+    # history to dates before today so no current/future candle is reused.
+    prior_sessions_5m = historical_5m.loc[
+        historical_5m.index.date < c5.index[0].date()
+    ].copy()
+    atr_source_5m = pd.concat([prior_sessions_5m, c5]).sort_index()
+    atr_values_5m = session_aware_atr(atr_source_5m, 14).reindex(ind5.index)
+    ind5["atr_14"] = atr_values_5m
+    ind5["atr_session_14"] = atr_values_5m
+    ind15["atr_session_14"] = session_aware_atr(ind15, 14)
+    if not session_aware_atr(prior_sessions_5m, 14).dropna().empty:
+        reasons.append("ATR seeded from the previous session; overnight gap excluded.")
+    else:
+        reasons.append("Previous-session ATR seed unavailable; current-session warm-up is required.")
     index_indicators = add_scanner_indicators(idx) if not idx.empty else pd.DataFrame()
     regime = classify_market_regime(index_indicators) if not index_indicators.empty else "UNKNOWN"
     stock_regime = _stock_15m_regime(ind15)

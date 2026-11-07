@@ -1205,7 +1205,7 @@ class PaperBroker:
                         "last_price": last,
                         "unrealized_gross_pnl": gross,
                         "unrealized_net_pnl": gross - fees.total - slip,
-                        "track": "SHADOW",
+                        "track": CHALLENGER_VERSION_TRACKS.get(item["strategy_version"], "SHADOW"),
                         "position_value_inr": entry_fill * qty,
                         "market_time": mark.get("market_time") if mark else None,
                         **rr_metrics,

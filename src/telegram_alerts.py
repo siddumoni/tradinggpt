@@ -402,8 +402,8 @@ def format_trade_plan(plan: dict[str, Any]) -> str:
         f"<b>Quote age:</b> {_price(plan.get('quote_age_seconds'))} sec\n"
         f"<b>Market regime:</b> {_safe(plan.get('market_regime'))}\n"
         f"<b>Reason:</b> {reason_text}\n"
-        "Paper risk and live quote checks passed. The paper ledger records entry only "
-        "after this alert; no broker order is placed."
+        "Paper risk and live quote checks passed at alert time; the quote is rechecked "
+        "before the paper ledger records entry. No broker order is placed."
     )
 
 

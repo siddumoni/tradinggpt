@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from src import telegram_alerts
 from src.telegram_alerts import TelegramEventNotifier, format_daily_digest, format_event, format_trade_plan
+from src.paper_broker import PAPER_BASELINE_VERSION, PaperBroker
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -197,6 +198,49 @@ def test_trade_plan_rate_limit_and_quiet_hours_withhold_alert(tmp_path):
 
 def test_eod_digest_is_deduplicated_and_keeps_versions_separate(tmp_path):
     sent = []
+    now = datetime.now(IST).replace(hour=15, minute=45, second=0, microsecond=0)
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    with broker._connect() as db:
+        for signal_id, version, pnl in (
+            ("champion-today", PAPER_BASELINE_VERSION, 120.0),
+            ("archived-today", "champion_v1", 500.0),
+        ):
+            db.execute(
+                """INSERT INTO trades(
+                    signal_id,strategy,strategy_version,symbol,side,status,signal_time,entry_time,
+                    signal_reference_entry,entry_reference_price,entry_fill_price,stop_loss,target_1,target_2,
+                    quantity,risk_budget_inr,position_value_inr,planned_net_risk_inr,market_regime,
+                    entry_reason,exit_time,gross_pnl,transaction_charges,slippage_cost,
+                    total_estimated_costs,net_pnl,created_at
+                ) VALUES(?,?,?,'INFY','LONG','CLOSED',?,?,?,?,?,98,104,108,1,500,100,100,
+                         'BULLISH','digest fixture',?,130,5,5,10,?,?)""",
+                (
+                    signal_id, "vwap_trend", version, now.isoformat(), now.isoformat(),
+                    100.0, 100.0, 100.05, now.isoformat(), pnl + 10, pnl, now.isoformat(),
+                ),
+            )
+        db.execute(
+            """INSERT INTO shadow_signals(
+                signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+                stop_loss,target_1,target_2,status,exit_time,gross_pnl,transaction_charges,
+                slippage_cost,total_estimated_costs,net_pnl,reason,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,'CLOSED',?,?,?,?,?,?,?,?)""",
+            (
+                "shadow-today", "challenger_ema_9_21_atr_seed_v2",
+                "EMA 9/21 momentum (ATR-seeded)", "TCS", "LONG", now.isoformat(),
+                100.0, 98.0, 104.0, 108.0, now.isoformat(), 320.0, 10.0, 10.0,
+                20.0, 300.0, "digest fixture", now.isoformat(),
+            ),
+        )
+        broker._event(
+            db, "SIGNAL_REJECTED", "One candidate was rejected.",
+            symbol="SBIN", details={"candidate": {"action": "WATCH_CANDIDATE"}},
+            event_key="digest-rejection", at=now,
+        )
+
+    # The strategies fixture is the broker's real snapshot, not hand-authored labels.
+    snapshot = broker.snapshot()
+    assert any(row["strategy_version"] == PAPER_BASELINE_VERSION for row in snapshot["strategies"])
     notifier = TelegramEventNotifier(
         lambda: {"events": []},
         state_path=tmp_path / "cursor.json",
@@ -204,32 +248,18 @@ def test_eod_digest_is_deduplicated_and_keeps_versions_separate(tmp_path):
         token="token",
         chat_id="chat",
         sender=lambda message: sent.append(message) or True,
-        now_provider=lambda: datetime(2026, 11, 6, 15, 45, tzinfo=IST),
+        now_provider=lambda: now,
     )
-    snapshot = {
-        "account": {
-            "today_net_pnl": 250.0,
-            "realized_pnl": 1200.0,
-            "unrealized_net_pnl": 20.0,
-            "open_positions": 1,
-            "max_open_positions": 3,
-            "open_planned_risk_inr": 450.0,
-            "available_portfolio_risk_inr": 1050.0,
-        },
-        "strategies": [
-            {"strategy_version": "nse_champion_v2_foundation_candidate", "track": "CHAMPION_CANDIDATE", "trades": 4, "net_pnl": 120.0},
-            {"strategy_version": "challenger_ema_9_21_atr_seed_v2", "track": "SHADOW", "trades": 8, "net_pnl": 300.0},
-            {"strategy_version": "champion_v1", "track": "CHAMPION_ARCHIVE", "trades": 10, "net_pnl": 500.0},
-        ],
-    }
-    digest = format_daily_digest(snapshot, "2026-11-06")
-    assert "nse_champion_v2_foundation_candidate" in digest
+    report_date = now.date().isoformat()
+    digest = format_daily_digest(snapshot, report_date)
+    assert "nse_champion_v2" in digest
     assert "challenger_ema_9_21_atr_seed_v2" in digest
     assert "champion_v1" not in digest
-    assert notifier.send_daily_digest(snapshot, "2026-11-06") is True
-    assert notifier.send_daily_digest(snapshot, "2026-11-06") is True
+    assert "today 1 trade" in digest
+    assert "accept rate 50.00%" in digest
+    assert notifier.send_daily_digest(snapshot, report_date) is True
+    assert notifier.send_daily_digest(snapshot, report_date) is True
     assert len(sent) == 1
-
 
 def test_telegram_send_uses_html_parse_mode_for_ampersand_escaping(tmp_path, monkeypatch):
     captured = {}

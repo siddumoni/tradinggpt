@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any
 
@@ -43,8 +44,8 @@ def audit_candidates(
     Zero-quantity journal observations are retained as unscorable, not assigned
     an invented one-share quantity.
     """
-    if not pd.notna(slippage_floor_bps) or slippage_floor_bps < MINIMUM_SLIPPAGE_BPS:
-        raise ValueError("slippage floor cannot be below 5 bps per side")
+    if not math.isfinite(float(slippage_floor_bps)) or not MINIMUM_SLIPPAGE_BPS <= slippage_floor_bps <= 100:
+        raise ValueError("slippage floor must be between 5 and 100 bps per side")
     if frame.empty:
         return pd.DataFrame(columns=[
             "date", "symbol", "side", "status", "quantity", "stop_distance_pct",
@@ -71,6 +72,14 @@ def audit_candidates(
         date = stamp.date().isoformat()
         if not symbol:
             raise ValueError("candidate symbol is required")
+        if side not in {"LONG", "SHORT"}:
+            raise ValueError("candidate side must be LONG or SHORT")
+        if min(entry, stop, target_1, target_2) <= 0:
+            raise ValueError("candidate prices must be positive")
+        if side == "LONG" and not stop < entry < target_1 <= target_2:
+            raise ValueError("invalid LONG stop/entry/target ordering")
+        if side == "SHORT" and not target_2 <= target_1 < entry < stop:
+            raise ValueError("invalid SHORT stop/entry/target ordering")
         quantity_value = raw.get("quantity", 1)
         try:
             quantity_float = float(quantity_value)

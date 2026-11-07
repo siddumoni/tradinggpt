@@ -492,6 +492,8 @@ class KiteMarketData:
                 LOGGER.warning("Daily OHLC cache is invalid for %s on %s; refreshing", symbol, cache_date)
         start = datetime.combine(current.date() - timedelta(days=lookback_calendar_days), dtime(0, 0), tzinfo=IST)
         candles = self.historical_candles(int(instrument_token), start, current, "day")
+        # Match the JSON cache representation on both refresh and hit paths.
+        candles = json.loads(json.dumps(candles, default=str, allow_nan=False))
         payload = {
             "schema_version": 1,
             "cache_date": cache_date,
@@ -571,6 +573,8 @@ class KiteMarketData:
             history_candles = self.historical_candles(
                 int(instrument_token), start, end, "5minute"
             )
+        # Return the same JSON-safe timestamp representation on refresh and hit.
+        history_candles = json.loads(json.dumps(history_candles, default=str, allow_nan=False))
         payload = {
             "schema_version": 1,
             "cache_date": cache_date,

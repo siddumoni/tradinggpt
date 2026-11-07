@@ -14,6 +14,10 @@ You can pass multiple daily CSVs in one command; their columns are aligned befor
 
 The 95% expectancy interval resamples complete entry sessions with replacement (10,000 draws, fixed seed 42). Metrics include expectancy, win rate, profit factor, realized close-to-close drawdown, maximum losing streak, MAE/MFE in R where the outcome evaluator recorded them, entry-hour buckets, and positive-P&L concentration by symbol and session.
 
+For a `CHALLENGER` track, supply the matching Champion daily trade exports with `--champion-trades` and, if needed, `--champion-strategy-version`. The comparison pairs daily net P&L on common entry sessions at 8 bps/side, then bootstraps the session-level challenger-minus-Champion difference. The lower confidence bound uses Bonferroni adjustment across the configured family of three active challenger tracks (`config/promotion.yaml`). A challenger cannot pass without at least 20 common sessions, a positive paired mean, and a positive multiplicity-adjusted lower bound. If Champion comparison data is absent, the challenger decision remains `INCONCLUSIVE`.
+
+The analysis always writes its private JSON/Markdown diagnostics. It updates `docs/RESULTS.md` only when every configured promotion check passes; an `INCONCLUSIVE` analysis leaves the existing public results status untouched.
+
 Promotion thresholds live in `config/promotion.yaml`: at least 100 accepted trades across 20 sessions, positive lower 95% expectancy bound at 8 bps, profit factor at least 1.0, and no symbol/session contributing more than 30% of positive P&L. The decision is `PROMOTE` or `INCONCLUSIVE`; PROMOTE means eligible for the next research-validation stage only, never live trading.
 
 Outputs: `reports/performance/validation.json`, `reports/performance/validation.md`, and sanitized aggregate `docs/RESULTS.md`. No trade-level rows, credentials, or account data are written to RESULTS.md.

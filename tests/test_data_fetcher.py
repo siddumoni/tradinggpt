@@ -65,7 +65,7 @@ def test_instrument_cache_refreshes_on_new_day(tmp_path: Path):
     client = KiteMarketData(kite, DataClientConfig(retries=1, retry_delay_seconds=0))
     cache = tmp_path / "instruments.json"
     client.instruments(cache, datetime(2026, 10, 19, 10, 0, tzinfo=IST))
-    client.instruments(cache, datetime(2026, 10, 20, 10, 0, tzinfo=IST))
+    client.instruments(cache, datetime(2026, 10, 21, 10, 0, tzinfo=IST))
     assert kite.instrument_calls == 2
 
 
@@ -338,7 +338,7 @@ def test_relative_volume_history_is_cached_per_symbol_and_ist_date(tmp_path):
     assert second["relative_volume_cache"]["status"] == "HIT"
     assert second["candles_5m_history"] == first["candles_5m_history"]
 
-    next_day = datetime(2026, 10, 20, 10, 0, tzinfo=IST)
+    next_day = datetime(2026, 10, 21, 10, 0, tzinfo=IST)
     third = client.fetch_symbol_bundle(instrument, now=next_day, include_daily_candles=False)
     history_calls = [
         call for call in kite.historical_calls
@@ -390,7 +390,7 @@ def test_daily_ohlc_history_is_cached_per_symbol_and_ist_date(tmp_path):
     assert first["daily_candles_cache"]["status"] == "REFRESHED"
     assert second["daily_candles_cache"]["status"] == "HIT"
 
-    next_day = datetime(2026, 10, 20, 10, 0, tzinfo=IST)
+    next_day = datetime(2026, 10, 21, 10, 0, tzinfo=IST)
     third = client.fetch_symbol_bundle(
         instrument, now=next_day, include_relative_volume_history=False,
     )

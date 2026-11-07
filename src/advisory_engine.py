@@ -545,6 +545,10 @@ def run_scan(
                 bundle["quote"] = None
                 bundle["verified_live_data"] = False
                 bundle["data_quality_warning"] = "Final executable quote refresh returned no quote."
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": "Final executable quote refresh returned no quote.",
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 entry_quote_refresh_checks.append({"symbol": candidate.symbol, "verified": False,
                     "reason": "Final executable quote refresh returned no quote."})
@@ -562,6 +566,10 @@ def run_scan(
                 "reason": quote_warning or "",
             }
             if not quote_verified:
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": quote_warning or "Final executable quote failed verification.",
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 entry_quote_refresh_checks.append(audit)
                 continue
@@ -577,6 +585,14 @@ def run_scan(
                     "Final quote failed the circuit-limit safety gate: "
                     + str(circuit_check.get("reason") or circuit_check.get("status"))
                 )
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": bundle["data_quality_warning"],
+                }
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": bundle["data_quality_warning"],
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["verified"] = False
                 audit["reason"] = bundle["data_quality_warning"]
@@ -590,6 +606,10 @@ def run_scan(
             audit.update({"bid": executable.get("bid"), "ask": executable.get("ask"),
                           "executable_quote_valid": executable.get("valid") is True})
             if not executable.get("valid"):
+                bundle["mis_eligibility"] = {
+                    "status": "MIS_ELIGIBILITY_UNVERIFIED", "eligible": None, "verified": False,
+                    "product": "MIS", "reason": executable.get("reason") or "Executable quote validation failed.",
+                }
                 margin_per_share_by_symbol.pop(candidate.symbol, None)
                 audit["reason"] = executable.get("reason")
                 entry_quote_refresh_checks.append(audit)

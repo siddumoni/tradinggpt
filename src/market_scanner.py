@@ -26,11 +26,13 @@ from src.exit_policy import plan_policy_levels
 from src.execution_model import build_structural_stop, session_aware_atr, spread_slippage_bps_per_side
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
+from src.strategies.levels import previous_session_levels
 from src.market_calendar import is_regular_market_session
 from src.market_safety import (
     inspect_circuit_limits,
     load_market_safety_settings,
     time_of_day_relative_volume,
+    inspect_directional_level_proximity,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -780,6 +782,96 @@ def evaluate_symbol_bundle(
             company_specific_risk=company_specific_risk,
         )
     reasons.append(signal.reason)
+
+    # Previous completed daily levels are evaluated against the signal close.
+    # If verified live data lacks reliable daily bars, the setup is held back.
+    try:
+        daily_frame = candles_to_frame(bundle.get("candles_daily_60d", []))
+        daily_levels = previous_session_levels(daily_frame, session_date=current.date())
+        safety_settings = load_market_safety_settings()
+        proximity = inspect_directional_level_proximity(
+            signal.side,
+            entry_price=close,
+            atr=atr,
+            previous_levels=daily_levels,
+            buffer_atr=safety_settings.previous_day_level_buffer_atr,
+        )
+        market_safety_validation["previous_day_levels"] = {
+            **daily_levels,
+            "proximity": proximity,
+        }
+        if not proximity["eligible"]:
+            reasons.append(f"Previous-session level filter: {proximity['reason']}")
+            return _no_trade_candidate(
+                symbol,
+                reasons,
+                market_regime=regime,
+                signal_time=str(ind5.index[-1]),
+                reference_entry=close,
+                data_verified_live=data_verified_live,
+                news_status=news_status,
+                news_risk=news_risk,
+                market_context_status=market_context_status,
+                market_context_risk=market_context_risk,
+                company_headline_match_status=company_headline_match_status,
+                company_specific_risk=company_specific_risk,
+                entry_validation={"status": "REJECTED_PREVIOUS_DAY_LEVEL", **market_safety_validation},
+            )
+    except (ValueError, TypeError, OSError) as exc:
+        market_safety_validation["previous_day_levels"] = {
+            "eligible": False if data_verified_live else None,
+            "status": "UNAVAILABLE",
+            "reason": f"Previous-session daily levels could not be verified: {type(exc).__name__}: {exc}",
+            "buffer_atr": None,
+        }
+        if data_verified_live:
+            reasons.append(market_safety_validation["previous_day_levels"]["reason"])
+            return _no_trade_candidate(
+                symbol,
+                reasons,
+                market_regime=regime,
+                signal_time=str(ind5.index[-1]),
+                reference_entry=close,
+                data_verified_live=data_verified_live,
+                news_status=news_status,
+                news_risk=news_risk,
+                market_context_status=market_context_status,
+                market_context_risk=market_context_risk,
+                company_headline_match_status=company_headline_match_status,
+                company_specific_risk=company_specific_risk,
+                entry_validation={"status": "REJECTED_PREVIOUS_DAY_LEVELS_UNAVAILABLE", **market_safety_validation},
+            )
+        reasons.append("Previous-session daily levels are unavailable; this unverified data path cannot use the level filter.")
+
+    surveillance = bundle.get("surveillance")
+    if not isinstance(surveillance, dict):
+        surveillance = {
+            "eligible": None,
+            "status": "NOT_AVAILABLE",
+            "reason": "No validated NSE surveillance snapshot was supplied.",
+        }
+    market_safety_validation["surveillance"] = surveillance
+    if surveillance.get("eligible") is False:
+        reasons.append(str(surveillance.get("reason") or "NSE surveillance classification blocks this setup."))
+        return _no_trade_candidate(
+            symbol,
+            reasons,
+            market_regime=regime,
+            signal_time=str(ind5.index[-1]),
+            reference_entry=close,
+            data_verified_live=data_verified_live,
+            news_status=news_status,
+            news_risk=news_risk,
+            market_context_status=market_context_status,
+            market_context_risk=market_context_risk,
+            company_headline_match_status=company_headline_match_status,
+            company_specific_risk=company_specific_risk,
+            entry_validation={"status": "REJECTED_NSE_SURVEILLANCE", **market_safety_validation},
+        )
+    if surveillance.get("eligible") is None:
+        reasons.append(
+            "NSE surveillance classification is unavailable or unverified; no clean classification is assumed."
+        )
     if len(signals) > 1:
         reasons.append(f"{len(signals)} strategies agreed on {signal.side}; strongest-confidence strategy selected.")
 
@@ -840,6 +932,7 @@ def evaluate_symbol_bundle(
         and data_verified_live
         and news_status not in ("NOT_CHECKED", "UNAVAILABLE")
         and company_specific_risk != "HIGH"
+        and surveillance.get("eligible") is not False
     )
     if approved:
         action = "CONDITIONAL_BUY" if signal.side == "LONG" else "CONDITIONAL_SHORT"

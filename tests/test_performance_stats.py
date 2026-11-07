@@ -207,3 +207,22 @@ def test_paired_analysis_rejects_mismatched_or_undeclared_account_profiles(tmp_p
             champion_input_path=champion_path, profile="research",
             champion_profile="paper",
         )
+
+
+
+def test_performance_analysis_rejects_capital_outside_selected_profile(tmp_path):
+    trades_path = tmp_path / "trades.csv"
+    sample_trades().to_csv(trades_path, index=False)
+    promotion_path = tmp_path / "promotion.yaml"
+    promotion_path.write_text(
+        "thresholds:\n  minimum_trades: 100\n  minimum_sessions: 20\n"
+        "  minimum_profit_factor: 1.0\n  maximum_symbol_or_session_profit_share: 0.30\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must match the selected account profile"):
+        analyze_file(
+            trades_path, output_stem=tmp_path / "capital-mismatch",
+            promotion_config=promotion_path, results_doc=tmp_path / "RESULTS.md",
+            profile="research", initial_capital=100_000.0,
+        )

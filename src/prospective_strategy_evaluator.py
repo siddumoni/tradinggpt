@@ -239,10 +239,12 @@ def _make_candidate(
     recorded_at: pd.Timestamp,
 ) -> dict[str, Any] | None:
     """Generate one signal from the exact callback used by the baseline backtester."""
+    risk_settings, _ = load_phase2_settings()
     callback = make_signal_callback(
         symbol,
         strategy,
         reject_nontrending_regimes=False,
+        minimum_stop_distance_pct=risk_settings.minimum_stop_distance_pct,
     )
     signal = callback(indicators, len(indicators) - 1)
     if signal is None:

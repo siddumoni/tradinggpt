@@ -1,8 +1,10 @@
 """Conservative intraday stop and execution-cost helpers."""
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import timedelta
 from math import isfinite
 import pandas as pd
+from src.market_calendar import market_day_status
 
 @dataclass(frozen=True)
 class StopPlan:
@@ -47,7 +49,21 @@ def session_aware_atr(candles: pd.DataFrame, period: int = 14) -> pd.Series:
 
     result = pd.Series(float("nan"), index=f.index, dtype=float)
     previous_session_atr: float | None = None
+    previous_session_date = None
     for session_date in session_keys.unique():
+        if previous_session_date is not None and previous_session_atr is not None:
+            gap_day = previous_session_date + timedelta(days=1)
+            while gap_day < session_date:
+                status = market_day_status(gap_day)["status"]
+                if status in {
+                    "OPEN",
+                    "CALENDAR_OUT_OF_COVERAGE",
+                    "SPECIAL_SESSION_NOT_SUPPORTED",
+                }:
+                    previous_session_atr = None
+                    break
+                gap_day += timedelta(days=1)
+
         session_mask = session_keys == session_date
         session_true_range = true_range.loc[session_mask]
         if previous_session_atr is None:
@@ -66,6 +82,7 @@ def session_aware_atr(candles: pd.DataFrame, period: int = 14) -> pd.Series:
         valid = result.loc[session_true_range.index].dropna()
         if not valid.empty:
             previous_session_atr = float(valid.iloc[-1])
+        previous_session_date = session_date
 
     return result.rename(f"atr_session_{period}")
 

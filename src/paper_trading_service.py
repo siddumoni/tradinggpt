@@ -291,7 +291,9 @@ def _finalize_reports(
     now = datetime.now(IST)
     shadow_update: dict = {}
     try:
-        finalize_session = market_day_status(now.date())["status"] == "OPEN" and now.time().replace(tzinfo=None) >= dtime(15, 15)
+        finalize_session = market_day_status(now.date())["status"] == "OPEN" and now.time().replace(
+            tzinfo=None
+        ) >= dtime(15, 15)
         shadow_update = process_archive(
             archive, db_path, now=now, finalize_session=finalize_session
         )
@@ -722,7 +724,9 @@ def main(argv=None) -> int:
                     LOGGER.info(
                         "Square-off closed %s watch-shadow virtual position(s)", shadow_closed
                     )
-                if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(tzinfo=None) >= dtime(15, 20):
+                if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(
+                    tzinfo=None
+                ) >= dtime(15, 20):
                     date_key = now.date().isoformat()
                     if date_key not in reported_dates:
                         _finalize_reports(
@@ -739,15 +743,22 @@ def main(argv=None) -> int:
                             reason="market close daily summary",
                         )
                         reported_dates.add(date_key)
-                if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(tzinfo=None) >= dtime(15, 45):
+                if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(
+                    tzinfo=None
+                ) >= dtime(15, 45):
                     date_key = now.date().isoformat()
                     if date_key not in digest_sent_dates:
                         try:
                             if telegram_notifier.send_daily_digest(broker.snapshot(), date_key):
                                 digest_sent_dates.add(date_key)
-                                LOGGER.info("Telegram EOD paper digest delivered or intentionally disabled for %s.", date_key)
+                                LOGGER.info(
+                                    "Telegram EOD paper digest delivered or intentionally disabled for %s.",
+                                    date_key,
+                                )
                         except Exception:
-                            LOGGER.exception("Telegram EOD digest failed; paper service remains available.")
+                            LOGGER.exception(
+                                "Telegram EOD digest failed; paper service remains available."
+                            )
             except Exception:
                 LOGGER.exception("Paper service cycle failed; continuing")
             time.sleep(a.poll_seconds)

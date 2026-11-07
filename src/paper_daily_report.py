@@ -105,6 +105,8 @@ def generate_daily_report(
         "closed_trades_today": len(champion_closed),
         "net_pnl_today": pnl(champion_closed),
         "all_time_realized_net_pnl": champion_account["realized_pnl"],
+        "all_time_realized_net_pnl_scope": "Paper-account aggregate across active and archived champion versions; not nse_champion_v2 strategy performance.",
+        "strategy_version_performance": state.get("strategies", []),
         "open_positions": champion_account["open_positions"],
         "closed_trades": champion_closed,
     }

@@ -5,6 +5,7 @@ from src.multi_stock_validation import run_validation
 from src.risk_engine import RiskSettings, assess_trade, calculate_net_reward_risk
 from src.strategy_backtest import run_slippage_sensitivity, run_yahoo_backtest
 from src.paper_broker import PaperBroker
+from src.candidate_outcome_tracker import CandidateOutcomeTracker
 
 
 def test_backtest_config_rejects_slippage_below_floor():
@@ -74,3 +75,9 @@ def test_single_yahoo_backtest_rejects_slippage_below_floor():
 def test_paper_broker_rejects_slippage_below_floor(tmp_path):
     with pytest.raises(ValueError, match="between 5 and 100"):
         PaperBroker(db_path=tmp_path / "paper.sqlite3", slippage_bps=4.99)
+
+
+
+def test_candidate_shadow_tracker_rejects_slippage_below_floor(tmp_path):
+    with pytest.raises(ValueError, match="between 5 and 100"):
+        CandidateOutcomeTracker(tmp_path / "candidate.sqlite3", slippage_bps=4.99)

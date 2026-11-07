@@ -253,8 +253,10 @@ def paired_session_bootstrap(
         calendar = sorted({pd.Timestamp(day).date().isoformat() for day in session_calendar})
     if not set(challenger_daily.index).issubset(calendar) or not set(champion_daily.index).issubset(calendar):
         raise ValueError("paired trade sessions fall outside the declared evaluation calendar")
-    challenger_zero_trade_sessions = int((challenger_daily.reindex(calendar, fill_value=0.0) == 0).sum())
-    champion_zero_trade_sessions = int((champion_daily.reindex(calendar, fill_value=0.0) == 0).sum())
+    challenger_session_counts = challenger.groupby("session").size()
+    champion_session_counts = champion.groupby("session").size()
+    challenger_zero_trade_sessions = int((challenger_session_counts.reindex(calendar, fill_value=0) == 0).sum())
+    champion_zero_trade_sessions = int((champion_session_counts.reindex(calendar, fill_value=0) == 0).sum())
     challenger_aligned = challenger_daily.reindex(calendar, fill_value=0.0)
     champion_aligned = champion_daily.reindex(calendar, fill_value=0.0)
     alpha = familywise_alpha / family_size

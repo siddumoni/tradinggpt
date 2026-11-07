@@ -51,6 +51,10 @@ def session_aware_atr(candles: pd.DataFrame, period: int = 14) -> pd.Series:
     previous_session_atr: float | None = None
     previous_session_date = None
     for session_date in session_keys.unique():
+        if market_day_status(session_date)["status"] != "OPEN":
+            previous_session_atr = None
+            previous_session_date = session_date
+            continue
         if previous_session_date is not None and previous_session_atr is not None:
             gap_day = previous_session_date + timedelta(days=1)
             while gap_day < session_date:

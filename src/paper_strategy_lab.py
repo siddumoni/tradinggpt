@@ -20,7 +20,7 @@ MIN_NET_RR=1.5
 SLIPPAGE_BPS=5.0
 ENTRY_CUTOFF=dtime(14,45)
 EXIT_POLICY=load_exit_policy()
-DEFINITIONS={"challenger_ema_9_21_atr_seed_v2":"EMA 9/21 crossover with VWAP and MACD confirmation","challenger_vwap_momentum_atr_seed_v2":"VWAP crossover with EMA and MACD confirmation","challenger_ema_pullback_atr_seed_v2":"Trend-aligned EMA21 pullback with ATR-scaled levels"}
+DEFINITIONS={"challenger_ema_9_21_atr_seed_v2":"EMA 9/21 crossover with VWAP and MACD confirmation (plain 1 ATR stop control)","challenger_vwap_momentum_atr_seed_v2":"VWAP crossover with EMA and MACD confirmation (plain 1 ATR stop control)","challenger_ema_pullback_atr_seed_v2":"Trend-aligned EMA21 pullback with ATR-scaled levels (plain 1 ATR stop control)"}
 def _signal_id(version:str,symbol:str,side:str,stamp:str)->str:
  return hashlib.sha256("|".join((version,symbol.upper(),side.upper(),stamp)).encode()).hexdigest()[:32]
 def _valid(row:pd.Series,names:list[str])->bool:
@@ -55,7 +55,7 @@ def generate_challenger_signals(symbol:str,candles:pd.DataFrame)->list[dict[str,
  for version,reason,side in setups:
   try:levels=plan_policy_levels(side,entry=close,atr=atr,policy=EXIT_POLICY)
   except (ValueError,TypeError):continue
-  out.append({"signal_id":_signal_id(version,symbol,side,stamp),"strategy_version":version,"strategy_name":DEFINITIONS[version],"symbol":symbol.upper(),"side":side,"signal_time":stamp,"signal_close":close,"stop_loss":float(levels.stop_loss),"target_1":float(levels.target_1),"target_2":float(levels.target_2),"reason":reason})
+  out.append({"signal_id":_signal_id(version,symbol,side,stamp),"strategy_version":version,"strategy_name":DEFINITIONS[version],"symbol":symbol.upper(),"side":side,"signal_time":stamp,"signal_close":close,"stop_loss":float(levels.stop_loss),"target_1":float(levels.target_1),"target_2":float(levels.target_2),"reason":reason+" Plain 1 ATR stop control."})
  return out
 def ensure_shadow_schema(db:sqlite3.Connection)->None:
  db.execute("""CREATE TABLE IF NOT EXISTS shadow_signals(

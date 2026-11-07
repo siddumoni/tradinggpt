@@ -342,10 +342,12 @@ def inspect_directional_level_proximity(
         raise ValueError("previous_levels must be a mapping")
     keys = ("previous_high", "pivot") if direction == "LONG" else ("previous_low", "pivot")
     ahead: list[tuple[str, float, float]] = []
+    available_levels = 0
     for key in keys:
         raw = previous_levels.get(key)
         if raw is None:
             continue
+        available_levels += 1
         try:
             level = float(raw)
         except (TypeError, ValueError, OverflowError) as exc:
@@ -355,6 +357,8 @@ def inspect_directional_level_proximity(
         distance = (level - entry_price) / atr if direction == "LONG" else (entry_price - level) / atr
         if distance >= 0:
             ahead.append((key, level, distance))
+    if available_levels == 0:
+        raise ValueError("No relevant previous-session reference levels are available")
     if not ahead:
         return {
             "eligible": True,

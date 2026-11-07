@@ -1,7 +1,10 @@
 import math
 import pandas as pd
 import pytest
-from src.performance_stats import calculate_statistics, evaluate_promotion, load_trades, session_block_bootstrap
+from src.performance_stats import (
+    analyze_file, calculate_statistics, evaluate_promotion, load_trades,
+    paired_session_bootstrap, session_block_bootstrap,
+)
 
 def sample_trades():
     rows=[]
@@ -79,3 +82,90 @@ def test_loader_combines_daily_files_with_different_optional_columns(tmp_path):
     combined=load_trades([one,two],track="CHAMPION")
     assert len(combined)==2
     assert set(combined.symbol)=={"AAA","BBB"}
+
+
+
+def paired_sample(days, gross_pnl):
+    rows = []
+    for day in days:
+        entry = 100.0
+        exit_price = entry + gross_pnl / 10.0
+        rows.append({
+            "symbol": "AAA", "side": "LONG",
+            "entry_time": f"{day} 10:00:00+05:30",
+            "exit_time": f"{day} 10:30:00+05:30",
+            "entry": entry, "exit": exit_price, "quantity": 10,
+            "gross_pnl": gross_pnl, "transaction_charges": 0.0,
+        })
+    return pd.DataFrame(rows)
+
+
+def test_paired_session_bootstrap_uses_common_sessions_and_bonferroni_adjustment():
+    days = [f"2026-02-{day:02d}" for day in range(1, 21)]
+    challenger = paired_sample(days, 20.0)
+    champion = paired_sample(days, 0.0)
+
+    result = paired_session_bootstrap(
+        challenger, champion, family_size=3, resamples=1000, seed=11,
+    )
+
+    assert result["status"] == "estimated"
+    assert result["common_sessions"] == 20
+    assert result["per_comparison_alpha"] == pytest.approx(0.05 / 3)
+    assert result["mean_difference_inr_per_session"] > 0
+    assert result["adjusted_lower_bound_inr_per_session"] > 0
+    assert "Bonferroni" in result["method"]
+
+
+def test_paired_session_bootstrap_does_not_invent_nonoverlapping_sessions():
+    challenger = paired_sample(["2026-02-01", "2026-02-02"], 20.0)
+    champion = paired_sample(["2026-02-03", "2026-02-04"], 0.0)
+
+    result = paired_session_bootstrap(challenger, champion, resamples=1000)
+
+    assert result["common_sessions"] == 0
+    assert result["adjusted_lower_bound_inr_per_session"] is None
+
+
+def test_challenger_promotion_requires_positive_adjusted_paired_comparison():
+    stats = calculate_statistics(sample_trades(), bootstrap_resamples=1000)
+    config = {
+        "thresholds": {
+            "minimum_trades": 1, "minimum_sessions": 1,
+            "minimum_profit_factor": 0.0,
+            "maximum_symbol_or_session_profit_share": 1.0,
+        },
+        "paired_comparison": {"minimum_common_sessions": 1},
+    }
+
+    result = evaluate_promotion(stats, config, require_paired_comparison=True)
+
+    assert result["decision"] == "INCONCLUSIVE"
+    assert result["checks"]["minimum_common_paired_sessions"] is False
+    assert result["checks"]["positive_multiplicity_adjusted_paired_lower_bound_at_8bps"] is False
+
+
+def test_inconclusive_analysis_never_overwrites_public_results_document(tmp_path):
+    trades_path = tmp_path / "trades.csv"
+    sample_trades().to_csv(trades_path, index=False)
+    promotion_path = tmp_path / "promotion.yaml"
+    promotion_path.write_text(
+        "thresholds:\n  minimum_trades: 100\n  minimum_sessions: 20\n"
+        "  minimum_profit_factor: 1.0\n  maximum_symbol_or_session_profit_share: 0.30\n",
+        encoding="utf-8",
+    )
+    results_path = tmp_path / "RESULTS.md"
+    results_path.write_text("KEEP EXISTING EVIDENCE STATUS", encoding="utf-8")
+
+    _stats, promotion = analyze_file(
+        trades_path,
+        output_stem=tmp_path / "validation",
+        promotion_config=promotion_path,
+        results_doc=results_path,
+        bootstrap_resamples=1000,
+    )
+
+    assert promotion["decision"] == "INCONCLUSIVE"
+    assert results_path.read_text(encoding="utf-8") == "KEEP EXISTING EVIDENCE STATUS"
+    assert (tmp_path / "validation.json").exists()
+    assert (tmp_path / "validation.md").exists()

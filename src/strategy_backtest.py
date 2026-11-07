@@ -489,8 +489,8 @@ def run_slippage_sensitivity(
     )
     if not math.isfinite(risk_per_trade) or risk_per_trade <= 0:
         raise ValueError("risk_per_trade must be finite and positive")
-    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be finite and positive")
+    if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward must be finite and at least 1.5")
     if not slippage_values or any(not math.isfinite(value) or value < 5 or value > 100 for value in slippage_values):
         raise ValueError("slippage values must be finite and between 5 and 100 bps per side")
     now = datetime.now(IST)

@@ -719,6 +719,13 @@ def run_scan(
                         "status": "REJECTED_PREVIOUS_DAY_LEVEL_RECHECK",
                         "reason": reason,
                     })
+                    risk_breakdown = validation.get("risk_breakdown")
+                    if isinstance(risk_breakdown, dict):
+                        validation["risk_breakdown"] = {
+                            **risk_breakdown,
+                            "approved_quantity": 0,
+                            "executable_level_clearance_passed": False,
+                        }
                     refreshed = replace(
                         refreshed,
                         action="WATCH_CANDIDATE",
@@ -747,6 +754,13 @@ def run_scan(
                             "status": "REJECTED_PREVIOUS_DAY_LEVEL_AT_EXECUTABLE_ENTRY",
                             "reason": reason,
                         })
+                        risk_breakdown = validation.get("risk_breakdown")
+                        if isinstance(risk_breakdown, dict):
+                            validation["risk_breakdown"] = {
+                                **risk_breakdown,
+                                "approved_quantity": 0,
+                                "executable_level_clearance_passed": False,
+                            }
                         refreshed = replace(
                             refreshed,
                             action="WATCH_CANDIDATE",
@@ -760,6 +774,12 @@ def run_scan(
                             entry_validation=validation,
                         )
                     else:
+                        risk_breakdown = validation.get("risk_breakdown")
+                        if isinstance(risk_breakdown, dict):
+                            validation["risk_breakdown"] = {
+                                **risk_breakdown,
+                                "executable_level_clearance_passed": True,
+                            }
                         refreshed = replace(refreshed, entry_validation=validation)
             revalidated_candidates.append(refreshed)
         candidates = revalidated_candidates

@@ -801,6 +801,7 @@ def evaluate_symbol_bundle(
         )
         market_safety_validation["previous_day_levels"] = {
             **daily_levels,
+            "atr": atr,
             "proximity": proximity,
         }
         if not proximity["eligible"]:

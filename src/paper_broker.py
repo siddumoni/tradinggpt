@@ -95,8 +95,8 @@ class PaperBroker:
                 raise ValueError(f"{label} must be finite and positive")
         if isinstance(max_open_positions, bool) or int(max_open_positions) < 1:
             raise ValueError("max_open_positions must be a positive integer")
-        if not math.isfinite(slippage_bps) or not 0 <= slippage_bps <= 100:
-            raise ValueError("slippage_bps must be between 0 and 100")
+        if not math.isfinite(slippage_bps) or not 5 <= slippage_bps <= 100:
+            raise ValueError("slippage_bps must be between 5 and 100")
         if (
             not math.isfinite(float(stop_gap_risk_reserve_pct))
             or not 0 <= float(stop_gap_risk_reserve_pct) < 1

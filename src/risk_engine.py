@@ -159,8 +159,8 @@ def assess_trade(
         raise ValueError("capital, risk, net R:R, and slippage settings must be finite")
     if settings.capital_inr <= 0 or settings.risk_per_trade_inr <= 0:
         raise ValueError("capital and risk_per_trade_inr must be positive")
-    if settings.minimum_net_risk_reward <= 0:
-        raise ValueError("minimum_net_risk_reward must be positive")
+    if settings.minimum_net_risk_reward < 1.5:
+        raise ValueError("minimum_net_risk_reward cannot be below 1.5")
     if settings.minimum_stop_distance_pct <= 0:
         raise ValueError("minimum_stop_distance_pct must be positive")
     if settings.minimum_net_rr_target not in ("target_1", "target_2"):

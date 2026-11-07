@@ -55,3 +55,27 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
 - Data-error sessions are excluded and logged, not repaired synthetically.
 - Do not publish performance claims or update `RESULTS.md` until the configured
   sample and promotion gates are independently satisfied.
+
+
+## Prior-session ATR warm-up
+
+- **Identifier:** `nse_atr_prior_session_seed_v1`
+- **Status:** Foundation implementation; not a promoted strategy version.
+- **Hypothesis:** Seeding the current session's Wilder ATR from the previous
+  session's final valid ATR, while using high-minus-low for the first bar, will
+  make the ATR input valid from the 09:20 close when prior-session history is
+  available. This should expose otherwise-hidden early-session setups without
+  allowing the overnight price gap to inflate true range.
+- **Single change:** ATR initialization only. EMA, RSI, MACD, VWAP, entry filters,
+  structural-stop selection, target distances, costs, and exit rules are not
+  changed by this hypothesis.
+- **Measurements:** Count sessions with a valid prior-session seed; count 5-minute
+  bars and strategy signals that were previously ATR-unavailable but become
+  evaluable; split by symbol and session. Report actual accepted/approved setups
+  separately from merely ATR-eligible bars.
+- **Data rule:** Use only the previous session's final valid ATR and completed
+  current-session candles. If the prior seed is unavailable, retain the original
+  14-bar warm-up; never synthesize a seed or repair missing candles.
+- **Version boundary:** Results using this initialization must be labelled
+  separately from older ATR-reset evidence. The eventual `nse_champion_v2`
+  freeze remains deferred until A, B, and E are all complete.

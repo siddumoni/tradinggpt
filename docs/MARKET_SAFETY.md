@@ -34,7 +34,7 @@ Example schema:
 }
 ```
 
-Only HTTPS URLs on `nseindia.com` are accepted. The snapshot date must not be in the future and must be no more than three calendar days old. The file must be explicitly marked complete. Supported measure labels are `ASM`, `GSM`, `ESM`, `TRADE_TO_TRADE` and `PERIODIC_CALL_AUCTION`. A listed symbol is blocked from conditional entry. A symbol absent from a complete, current snapshot is reported as `NO_RESTRICTION_LISTED_IN_COMPLETE_SNAPSHOT`. A missing, stale, incomplete or invalid snapshot is reported as unavailable/unverified and is not treated as clear; verified-live candidates remain watch-only until a complete current snapshot is available.
+Only HTTPS URLs on `nseindia.com` are accepted. The snapshot date must not be in the future and must be no more than three calendar days old. The file must be explicitly marked complete. Supported measure labels are `ASM`, `GSM`, `ESM`, `TRADE_TO_TRADE` and `PERIODIC_CALL_AUCTION`. A listed symbol is blocked from conditional entry. A symbol absent from a complete, current snapshot is reported as `NO_RESTRICTION_LISTED_IN_COMPLETE_SNAPSHOT`. A missing, stale, incomplete or invalid snapshot is reported as unavailable/unverified and is never described as clear. In line with the status-only requirement when surveillance data is available, an unavailable snapshot does not independently change the existing entry decision; a current snapshot that explicitly lists a restricted symbol blocks that setup.
 
 Until the snapshot is maintained from NSE's latest official surveillance files, the scan report will show the status as `NOT_AVAILABLE` (or `STALE` / `INCOMPLETE` / `INVALID`). Do not mark `complete: true` unless the snapshot genuinely covers the full required universe.
 

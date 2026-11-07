@@ -72,7 +72,6 @@ def previous_session_levels(
         if previous_timestamp.date() != expected_date:
             raise ValueError(
                 f"Daily candle for previous NSE session {expected_date} is missing; "
-
                 f"latest available prior row is {previous_timestamp.date()}. No older session is substituted."
             )
     try:

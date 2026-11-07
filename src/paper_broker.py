@@ -694,6 +694,12 @@ class PaperBroker:
                 raise _RejectedSignal(
                     "Pre-entry Telegram trade-plan alert was not delivered; paper entry withheld."
                 )
+            post_alert_age = (datetime.now(IST) - to_ist(qtime)).total_seconds()
+            if post_alert_age < -2 or post_alert_age > self.max_entry_quote_age_seconds:
+                raise _RejectedSignal(
+                    f"Entry quote became stale during Telegram alert delivery ({post_alert_age:.1f}s old)."
+                )
+            now = datetime.now(IST)
         try:
             db.execute(
                 """INSERT INTO trades(

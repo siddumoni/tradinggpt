@@ -134,6 +134,191 @@ def inspect_circuit_limits(quote: Any, *, buffer_pct: float = 0.5) -> dict[str, 
     }
 
 
+from pathlib import Path
+from urllib.parse import urlparse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SURVEILLANCE_SNAPSHOT = PROJECT_ROOT / ".local" / "nse_surveillance.json"
+SURVEILLANCE_MAX_AGE_DAYS = 3
+SUPPORTED_SURVEILLANCE_MEASURES = {
+    "ASM", "GSM", "ESM", "TRADE_TO_TRADE", "PERIODIC_CALL_AUCTION",
+}
+
+
+def load_surveillance_snapshot(
+    path: Path = DEFAULT_SURVEILLANCE_SNAPSHOT,
+    *,
+    as_of: date | datetime | None = None,
+    max_age_days: int = SURVEILLANCE_MAX_AGE_DAYS,
+) -> dict[str, Any]:
+    """Load an optional, manually refreshed NSE surveillance snapshot.
+
+    The file is intentionally not synthesized from Kite instrument rows: those
+    rows do not expose ASM/GSM/ESM classifications. Missing or stale evidence
+    remains unavailable and is never interpreted as a clean surveillance status.
+    """
+    current_day = (
+        as_of.astimezone(IST).date() if isinstance(as_of, datetime) and as_of.tzinfo
+        else as_of.date() if isinstance(as_of, datetime)
+        else as_of if isinstance(as_of, date)
+        else datetime.now(IST).date()
+    )
+    if max_age_days < 0:
+        raise ValueError("max_age_days must be non-negative")
+    if not path.exists():
+        return {
+            "status": "NOT_AVAILABLE",
+            "eligible": None,
+            "reason": f"NSE surveillance snapshot is not available at {path}.",
+            "source": None,
+            "as_of": None,
+        }
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        return {
+            "status": "INVALID",
+            "eligible": None,
+            "reason": f"NSE surveillance snapshot could not be read: {type(exc).__name__}.",
+            "source": None,
+            "as_of": None,
+        }
+    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+        return {
+            "status": "INVALID",
+            "eligible": None,
+            "reason": "NSE surveillance snapshot schema_version must be 1 and content must be a mapping.",
+            "source": None,
+            "as_of": None,
+        }
+    source_url = str(raw.get("source_url") or "")
+    parsed_url = urlparse(source_url)
+    if parsed_url.scheme != "https" or parsed_url.hostname not in {"nseindia.com", "www.nseindia.com"}:
+        return {
+            "status": "INVALID",
+            "eligible": None,
+            "reason": "Surveillance snapshot source_url must be an HTTPS NSE India URL.",
+            "source": raw.get("source"),
+            "as_of": raw.get("as_of"),
+        }
+    try:
+        snapshot_date = date.fromisoformat(str(raw.get("as_of") or ""))
+    except (TypeError, ValueError):
+        return {
+            "status": "INVALID",
+            "eligible": None,
+            "reason": "Surveillance snapshot as_of must be an ISO calendar date.",
+            "source": raw.get("source"),
+            "as_of": raw.get("as_of"),
+        }
+    if snapshot_date > current_day:
+        status = "INVALID"
+        reason = "Surveillance snapshot date is in the future."
+    elif (current_day - snapshot_date).days > max_age_days:
+        status = "STALE"
+        reason = (
+            f"Surveillance snapshot is {(current_day - snapshot_date).days} calendar days old; "
+            f"maximum allowed age is {max_age_days}."
+        )
+    elif raw.get("complete") is not True:
+        status = "INCOMPLETE"
+        reason = "Surveillance snapshot is not explicitly marked complete."
+    elif not isinstance(raw.get("symbols"), dict):
+        status = "INVALID"
+        reason = "Surveillance snapshot symbols must be a mapping."
+    else:
+        status = "VALID"
+        reason = ""
+    return {
+        "status": status,
+        "eligible": True if status == "VALID" else None,
+        "reason": reason,
+        "source": raw.get("source") or "NSE India",
+        "source_url": source_url,
+        "as_of": snapshot_date.isoformat(),
+        "complete": raw.get("complete") is True,
+        "symbols": raw.get("symbols") if isinstance(raw.get("symbols"), dict) else {},
+        "snapshot_date": snapshot_date.isoformat(),
+    }
+
+
+def surveillance_status_for_symbol(
+    symbol: str,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Return an explicit surveillance state; unknown evidence is not a clean bill."""
+    status = str(snapshot.get("status") or "NOT_AVAILABLE").upper()
+    if status != "VALID":
+        return {
+            "eligible": None,
+            "status": status,
+            "symbol": str(symbol).strip().upper(),
+            "as_of": snapshot.get("as_of"),
+            "reason": str(snapshot.get("reason") or "Surveillance classification is unavailable."),
+        }
+    symbol_key = str(symbol).strip().upper()
+    symbols = snapshot.get("symbols")
+    if not isinstance(symbols, dict):
+        return {
+            "eligible": None,
+            "status": "INVALID",
+            "symbol": symbol_key,
+            "as_of": snapshot.get("as_of"),
+            "reason": "Validated surveillance snapshot has no usable symbol mapping.",
+        }
+    entries = symbols.get(symbol_key, [])
+    if entries is None:
+        entries = []
+    if not isinstance(entries, list):
+        return {
+            "eligible": None,
+            "status": "INVALID",
+            "symbol": symbol_key,
+            "as_of": snapshot.get("as_of"),
+            "reason": f"Surveillance entries for {symbol_key} must be a list.",
+        }
+    normalized: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return {
+                "eligible": None,
+                "status": "INVALID",
+                "symbol": symbol_key,
+                "as_of": snapshot.get("as_of"),
+                "reason": f"Surveillance entry for {symbol_key} is malformed.",
+            }
+        measure = str(entry.get("measure") or "").strip().upper().replace("-", "_").replace(" ", "_")
+        stage = str(entry.get("stage") or "").strip()
+        if measure not in SUPPORTED_SURVEILLANCE_MEASURES:
+            return {
+                "eligible": None,
+                "status": "INVALID",
+                "symbol": symbol_key,
+                "as_of": snapshot.get("as_of"),
+                "reason": f"Unsupported surveillance measure {measure!r} for {symbol_key}.",
+            }
+        normalized.append({"measure": measure, "stage": stage})
+    if normalized:
+        measures = sorted({entry["measure"] for entry in normalized})
+        return {
+            "eligible": False,
+            "status": "RESTRICTED",
+            "symbol": symbol_key,
+            "as_of": snapshot.get("as_of"),
+            "measures": measures,
+            "entries": normalized,
+            "reason": f"{symbol_key} is listed under NSE surveillance: {', '.join(measures)}.",
+        }
+    return {
+        "eligible": True,
+        "status": "NO_RESTRICTION_LISTED_IN_COMPLETE_SNAPSHOT",
+        "symbol": symbol_key,
+        "as_of": snapshot.get("as_of"),
+        "measures": [],
+        "reason": "No supported surveillance classification is listed in the complete NSE snapshot.",
+    }
+
+
 def inspect_directional_level_proximity(
     side: str,
     *,

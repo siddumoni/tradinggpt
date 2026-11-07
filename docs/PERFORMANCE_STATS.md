@@ -12,6 +12,14 @@ python -m src.performance_stats --trades data/paper_daily_2026-11-03_trades.csv 
 
 You can pass multiple daily CSVs in one command; their columns are aligned before concatenation. For daily paper-report CSVs, pass `--track` (for example `CHAMPION`, `CHALLENGER`, `WATCH_SHADOW`, or `CANDIDATE_OUTCOME`). If a selected track contains multiple strategy versions, also pass `--strategy-version`; the loader refuses to pool isolated tracks or strategy versions accidentally. Only `CLOSED` rows are evaluated. The performance engine filters to accepted trades, validates gross P&L against side/entry/exit/quantity, retains transaction charges, and reprices the *same accepted trades* at 8 bps per side. It does not change selection, quantity, or risk gate at 8 bps.
 
+For example, a challenger comparison must use the exact strategy version and the corresponding Champion export:
+
+```powershell
+python -m src.performance_stats --trades data/paper_daily_YYYY-MM-DD_trades.csv --track CHALLENGER --strategy-version challenger_ema_9_21_atr_seed_v2 --champion-trades data/paper_daily_YYYY-MM-DD_trades.csv --champion-strategy-version nse_champion_v2_foundation_candidate
+```
+
+The example date arguments are placeholders; pass every retained daily report in the same frozen evaluation window. Do not compare non-overlapping date sets or pool versions.
+
 The 95% expectancy interval resamples complete entry sessions with replacement (10,000 draws, fixed seed 42). Metrics include expectancy, win rate, profit factor, realized close-to-close drawdown, maximum losing streak, MAE/MFE in R where the outcome evaluator recorded them, entry-hour buckets, and positive-P&L concentration by symbol and session.
 
 For a `CHALLENGER` track, supply the matching Champion daily trade exports with `--champion-trades` and, if needed, `--champion-strategy-version`. The comparison pairs daily net P&L on common entry sessions at 8 bps/side, then bootstraps the session-level challenger-minus-Champion difference. The lower confidence bound uses Bonferroni adjustment across the configured family of three active challenger tracks (`config/promotion.yaml`). A challenger cannot pass without at least 20 common sessions, a positive paired mean, and a positive multiplicity-adjusted lower bound. If Champion comparison data is absent, the challenger decision remains `INCONCLUSIVE`.

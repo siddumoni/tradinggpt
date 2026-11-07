@@ -6,7 +6,7 @@ The append-only `logs/paper_signals.csv` journal records scanner reference entry
 python -m src.cost_feasibility logs/paper_signals.csv --output reports/cost_feasibility_detail.csv --summary-output reports/cost_feasibility_by_day_symbol.csv --profile research
 ```
 
-The detailed output reports stop distance, estimated round-trip cost, net T2 R:R and the unchanged 1.5 gate at the 5 bps/side floor and at 8 bps/side. A wider observed bid/ask spread raises the assumed slippage; it never lowers either floor. The summary groups the auditable observations by signal date and symbol and reports pass counts/rates independently at both cost levels.
+The detailed output reports stop distance, estimated round-trip cost, net T2 R:R and the unchanged 1.5 gate at the 5 bps/side floor and at 8 bps/side. A wider observed bid/ask spread raises the assumed slippage; it never lowers either floor. The summary groups auditable observations by signal date, symbol, strategy and strategy version, and reports pass counts/rates independently at both cost levels. The current legacy scanner journal does not carry an explicit strategy-version column, so those rows are labelled `UNVERSIONED_SIGNAL_JOURNAL` rather than being assigned an inferred version.
 
 A journal row with zero, missing or invalid quantity is retained as `UNSCORABLE_NONPOSITIVE_OR_INVALID_QUANTITY`. It is excluded from the pass-rate denominator, not silently assigned one share. Invalid price ordering or malformed price data fails the audit rather than being repaired. This audit measures whether the saved signal's levels clear the estimated cost gate; it does not assert a fill, realized outcome, portfolio return or tradable opportunity.
 

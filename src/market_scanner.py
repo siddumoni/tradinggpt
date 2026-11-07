@@ -635,6 +635,7 @@ def evaluate_symbol_bundle(
             previous_day = history_dates[-1]
             previous_session = historical_5m.loc[
                 (historical_5m.index.date == previous_day)
+                & (historical_5m.index.time >= dtime(9, 15))
                 & (historical_5m.index.time <= dtime(15, 10))
             ].copy()
             expected_previous = pd.date_range(

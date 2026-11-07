@@ -73,9 +73,11 @@ Do not pool outcomes across strategy versions, stop models, or cost assumptions.
   bars and strategy signals that were previously ATR-unavailable but become
   evaluable; split by symbol and session. Report actual accepted/approved setups
   separately from merely ATR-eligible bars.
-- **Data rule:** Use only the previous session's final valid ATR and completed
-  current-session candles. If the prior seed is unavailable, retain the original
-  14-bar warm-up; never synthesize a seed or repair missing candles.
+- **Data rule:** Use only the immediately previous normal NSE session's final
+  valid ATR and completed current-session candles. The live scanner requires a
+  complete prior 09:15–15:10 candle grid; a missing intervening trading session,
+  special session, or incomplete prior session disables the seed. If unavailable,
+  retain the original 14-bar warm-up; never synthesize a seed or repair candles.
 - **Version boundary:** Results using this initialization must be labelled
   separately from older ATR-reset evidence. The eventual `nse_champion_v2`
   freeze remains deferred until A, B, and E are all complete.

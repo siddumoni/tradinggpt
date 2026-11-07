@@ -251,7 +251,10 @@ def paired_session_bootstrap(
         calendar = sorted(set(challenger_daily.index).intersection(champion_daily.index))
     else:
         calendar = sorted({pd.Timestamp(day).date().isoformat() for day in session_calendar})
-    if not set(challenger_daily.index).issubset(calendar) or not set(champion_daily.index).issubset(calendar):
+    if session_calendar is not None and (
+        not set(challenger_daily.index).issubset(calendar)
+        or not set(champion_daily.index).issubset(calendar)
+    ):
         raise ValueError("paired trade sessions fall outside the declared evaluation calendar")
     challenger_session_counts = challenger.groupby("session").size()
     champion_session_counts = champion.groupby("session").size()

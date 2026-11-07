@@ -336,12 +336,14 @@ Generated: {current.isoformat()}
 
 > **RESEARCH ONLY.** No real Kite orders were submitted. Fills, charges and slippage are hypothetical estimates. Each research book is separate; candidate outcomes are overlapping single-candidate experiments, not a portfolio.
 
-## Champion account
+## Champion account — {champion['strategy_version']}
 - Virtual starting capital: INR {champion['starting_capital']:,.2f}
-- Champion trades closed today: {champion['closed_trades_today']}
-- Champion net P&L today: INR {champion['net_pnl_today']:,.2f}
-- All-time champion realised net P&L: INR {champion['all_time_realized_net_pnl']:,.2f}
-- Current open champion positions: {champion['open_positions']}
+- {champion['strategy_version']} trades closed today: {champion['closed_trades_today']}
+- {champion['strategy_version']} net P&L today: INR {champion['net_pnl_today']:,.2f}
+- Archived champion trades closed today: {champion_archive['closed_trades_today']}
+- Archived champion net P&L today: INR {champion_archive['net_pnl_today']:,.2f}
+- All-time paper-account realised P&L across active and archived versions: INR {champion['all_time_realized_net_pnl']:,.2f} (not v2-only performance)
+- Current open positions across the shared paper account: {champion['open_positions']} (may include archived-version positions)
 
 ## Challenger strategy lab
 - Challenger trades closed today: {challengers['closed_trades_today']}

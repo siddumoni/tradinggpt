@@ -410,8 +410,8 @@ def run_yahoo_backtest(
         raise ValueError("risk_per_trade must be finite and positive")
     if not math.isfinite(minimum_net_risk_reward) or minimum_net_risk_reward < 1.5:
         raise ValueError("minimum_net_risk_reward must be finite and at least 1.5")
-    if not math.isfinite(slippage_bps_per_side) or not 0 <= slippage_bps_per_side <= 100:
-        raise ValueError("slippage_bps_per_side must be finite and between 0 and 100")
+    if not math.isfinite(slippage_bps_per_side) or not 5 <= slippage_bps_per_side <= 100:
+        raise ValueError("slippage_bps_per_side must be finite and between 5 and 100")
     now = datetime.now(IST)
     start = now - timedelta(days=days)
     provider = YahooFinanceMarketData()

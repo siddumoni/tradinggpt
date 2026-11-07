@@ -2,7 +2,7 @@
 
 ## Previous-session level proximity
 
-Before a directional setup reaches structural-stop and risk sizing, the scanner reads the most recent completed daily candle strictly before the current IST session. The current-day daily candle, if the provider returns one while it is still forming, is excluded.
+Before a directional setup reaches structural-stop and risk sizing, the scanner resolves the exact previous normal NSE cash session from the verified exchange calendar and requires that session's completed daily OHLC candle. Weekend, exchange-holiday and unsupported special-session dates are skipped. If the exact previous-session candle is missing, the scanner fails closed; it never substitutes an older available daily candle. The current-day daily candle, if the provider returns one while it is still forming, is excluded.
 
 The configured clearance is `0.3 ATR` (`config/market_safety.yaml`). LONG setups check only previous-session high and pivot levels ahead of the entry. SHORT setups check only previous-session low and pivot levels ahead of the entry. If the nearest relevant level is no more than 0.3 ATR away, the setup is returned as `NO_TRADE`. Levels behind the direction of travel do not block the trade.
 

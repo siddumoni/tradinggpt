@@ -169,3 +169,41 @@ def test_inconclusive_analysis_never_overwrites_public_results_document(tmp_path
     assert results_path.read_text(encoding="utf-8") == "KEEP EXISTING EVIDENCE STATUS"
     assert (tmp_path / "validation.json").exists()
     assert (tmp_path / "validation.md").exists()
+
+
+
+def test_paired_analysis_rejects_mismatched_or_undeclared_account_profiles(tmp_path):
+    challenger = sample_trades()
+    challenger["track"] = "CHALLENGER"
+    challenger["strategy_version"] = "challenger_test_v1"
+    champion = sample_trades()
+    champion["track"] = "CHAMPION"
+    champion["strategy_version"] = "nse_champion_v2_foundation_candidate"
+    challenger_path = tmp_path / "challenger.csv"
+    champion_path = tmp_path / "champion.csv"
+    challenger.to_csv(challenger_path, index=False)
+    champion.to_csv(champion_path, index=False)
+    promotion_path = tmp_path / "promotion.yaml"
+    promotion_path.write_text(
+        "thresholds:\n  minimum_trades: 100\n  minimum_sessions: 20\n"
+        "  minimum_profit_factor: 1.0\n  maximum_symbol_or_session_profit_share: 0.30\n"
+        "paired_comparison:\n  minimum_common_sessions: 20\n  familywise_alpha: 0.05\n"
+        "  family_size: 3\n  adjustment: bonferroni\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="matching explicit profile"):
+        analyze_file(
+            challenger_path, output_stem=tmp_path / "missing-profile",
+            promotion_config=promotion_path, results_doc=tmp_path / "RESULTS.md",
+            track="CHALLENGER", strategy_version="challenger_test_v1",
+            champion_input_path=champion_path, profile="research",
+        )
+    with pytest.raises(ValueError, match="matching explicit profile"):
+        analyze_file(
+            challenger_path, output_stem=tmp_path / "mismatched-profile",
+            promotion_config=promotion_path, results_doc=tmp_path / "RESULTS.md",
+            track="CHALLENGER", strategy_version="challenger_test_v1",
+            champion_input_path=champion_path, profile="research",
+            champion_profile="paper",
+        )

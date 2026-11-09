@@ -1269,9 +1269,7 @@ class PaperBroker:
             attempted_signal_ids = accepted_signal_ids | rejected_signal_ids
             accepted_today = len(accepted_signal_ids)
             accept_rate_pct = (
-                100.0 * accepted_today / len(attempted_signal_ids)
-                if attempted_signal_ids
-                else 0.0
+                100.0 * accepted_today / len(attempted_signal_ids) if attempted_signal_ids else 0.0
             )
 
             strategies = []
@@ -1304,9 +1302,7 @@ class PaperBroker:
                 strategies.append(
                     {
                         "strategy": (
-                            champion["strategy_name"]
-                            if champion
-                            else PAPER_BASELINE_VERSION
+                            champion["strategy_name"] if champion else PAPER_BASELINE_VERSION
                         ),
                         "strategy_version": PAPER_BASELINE_VERSION,
                         "track": "CHAMPION",

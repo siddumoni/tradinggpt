@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from src import telegram_alerts
 from src.telegram_alerts import TelegramEventNotifier, format_daily_digest, format_event, format_trade_plan
+from src.paper_broker import PAPER_BASELINE_VERSION, PaperBroker
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -197,6 +198,76 @@ def test_trade_plan_rate_limit_and_quiet_hours_withhold_alert(tmp_path):
 
 def test_eod_digest_is_deduplicated_and_keeps_versions_separate(tmp_path):
     sent = []
+    now = datetime.now(IST).replace(hour=15, minute=45, second=0, microsecond=0)
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    with broker._connect() as db:
+        for signal_id, version, strategy, pnl in (
+            ("champion-vwap-today", PAPER_BASELINE_VERSION, "vwap_trend", 120.0),
+            ("champion-breakout-today", PAPER_BASELINE_VERSION, "opening_range", 80.0),
+            ("archived-today", "champion_v1", "vwap_trend", 500.0),
+        ):
+            db.execute(
+                """INSERT INTO trades(
+                    signal_id,strategy,strategy_version,symbol,side,status,signal_time,entry_time,
+                    signal_reference_entry,entry_reference_price,entry_fill_price,stop_loss,target_1,target_2,
+                    quantity,risk_budget_inr,position_value_inr,planned_net_risk_inr,market_regime,
+                    entry_reason,exit_time,gross_pnl,transaction_charges,slippage_cost,
+                    total_estimated_costs,net_pnl,created_at
+                ) VALUES(?,?,?,?,'LONG','CLOSED',?,?,?,?,?,98,104,108,1,500,100,100,
+                         'BULLISH','digest fixture',?,130,5,5,10,?,?)""",
+                (
+                    signal_id, strategy, version, "INFY", now.isoformat(), now.isoformat(),
+                    100.0, 100.0, 100.05, now.isoformat(), pnl, now.isoformat(),
+                ),
+            )
+
+        actionable_rejection = {
+            "symbol": "HDFCBANK",
+            "action": "CONDITIONAL_BUY",
+            "side": "LONG",
+            "strategy": "vwap_trend",
+            "signal_time": "2026-11-09T10:00:00+05:30",
+        }
+        # Repeated rejection records for the same actionable signal count once.
+        broker._record_rejection(db, actionable_rejection, now.isoformat(), "First rejection")
+        broker._record_rejection(db, actionable_rejection, now.isoformat(), "Repeated rejection")
+        # Neutral scan outcomes must not lower the acceptance rate.
+        broker._record_rejection(
+            db,
+            {"symbol": "SBIN", "action": "WATCH_CANDIDATE", "side": None,
+             "strategy": "vwap_trend", "signal_time": "2026-11-09T10:05:00+05:30"},
+            now.isoformat(),
+            "Watch-only candidate",
+        )
+
+        db.execute(
+            """INSERT INTO shadow_signals(
+                signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+                stop_loss,target_1,target_2,status,exit_time,gross_pnl,transaction_charges,
+                slippage_cost,total_estimated_costs,net_pnl,reason,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,'CLOSED',?,?,?,?,?,?,?,?)""",
+            (
+                "shadow-today", "challenger_ema_9_21_atr_seed_v2",
+                "EMA 9/21 momentum (ATR-seeded)", "TCS", "LONG", now.isoformat(),
+                100.0, 98.0, 104.0, 108.0, now.isoformat(), 320.0, 10.0, 10.0,
+                20.0, 300.0, "digest fixture", now.isoformat(),
+            ),
+        )
+
+    # The strategy rows come from the broker snapshot, not hand-written labels.
+    snapshot = broker.snapshot()
+    champion_rows = [
+        row for row in snapshot["strategies"]
+        if row["strategy_version"] == PAPER_BASELINE_VERSION
+    ]
+    assert len(champion_rows) == 2
+    assert sum(row["trades"] for row in champion_rows) == 2
+    assert sum(row["net_pnl"] for row in champion_rows) == 200.0
+    assert sum("trades_today" in row for row in champion_rows) == 1
+    assert next(row for row in champion_rows if "trades_today" in row)["trades_today"] == 2
+    champion_metrics = next(row for row in champion_rows if "trades_today" in row)
+    assert round(champion_metrics["accept_rate_pct"], 2) == 66.67
+
     notifier = TelegramEventNotifier(
         lambda: {"events": []},
         state_path=tmp_path / "cursor.json",
@@ -204,31 +275,41 @@ def test_eod_digest_is_deduplicated_and_keeps_versions_separate(tmp_path):
         token="token",
         chat_id="chat",
         sender=lambda message: sent.append(message) or True,
-        now_provider=lambda: datetime(2026, 11, 6, 15, 45, tzinfo=IST),
+        now_provider=lambda: now,
     )
-    snapshot = {
-        "account": {
-            "today_net_pnl": 250.0,
-            "realized_pnl": 1200.0,
-            "unrealized_net_pnl": 20.0,
-            "open_positions": 1,
-            "max_open_positions": 3,
-            "open_planned_risk_inr": 450.0,
-            "available_portfolio_risk_inr": 1050.0,
-        },
-        "strategies": [
-            {"strategy_version": "nse_champion_v2_foundation_candidate", "track": "CHAMPION_CANDIDATE", "trades": 4, "net_pnl": 120.0},
-            {"strategy_version": "challenger_ema_9_21_atr_seed_v2", "track": "SHADOW", "trades": 8, "net_pnl": 300.0},
-            {"strategy_version": "champion_v1", "track": "CHAMPION_ARCHIVE", "trades": 10, "net_pnl": 500.0},
-        ],
-    }
-    digest = format_daily_digest(snapshot, "2026-11-06")
-    assert "nse_champion_v2_foundation_candidate" in digest
+    report_date = now.date().isoformat()
+    digest = format_daily_digest(snapshot, report_date)
+    assert digest.count("nse_champion_v2") == 1
+    assert "nse_champion_v2: 2 closed" in digest
+    assert "net ₹200.00" in digest
+    assert "today 2 trades" in digest
+    assert "accept rate 66.67%" in digest
     assert "challenger_ema_9_21_atr_seed_v2" in digest
     assert "champion_v1" not in digest
-    assert notifier.send_daily_digest(snapshot, "2026-11-06") is True
-    assert notifier.send_daily_digest(snapshot, "2026-11-06") is True
+    assert notifier.send_daily_digest(snapshot, report_date) is True
+    assert notifier.send_daily_digest(snapshot, report_date) is True
     assert len(sent) == 1
+
+
+def test_active_champion_is_present_in_digest_before_any_trade_closes(tmp_path):
+    broker = PaperBroker(tmp_path / "empty-paper.sqlite3")
+    snapshot = broker.snapshot()
+
+    champion_rows = [
+        row for row in snapshot["strategies"]
+        if row["strategy_version"] == PAPER_BASELINE_VERSION
+        and row["track"] == "CHAMPION"
+    ]
+    assert len(champion_rows) == 1
+    assert champion_rows[0]["trades"] == 0
+    assert champion_rows[0]["trades_today"] == 0
+    assert champion_rows[0]["accept_rate_pct"] == 0.0
+
+    digest = format_daily_digest(snapshot, datetime.now(IST).date().isoformat())
+    assert digest.count("nse_champion_v2") == 1
+    assert "nse_champion_v2: 0 closed" in digest
+    assert "today 0 trades" in digest
+    assert "accept rate 0.00%" in digest
 
 
 def test_telegram_send_uses_html_parse_mode_for_ampersand_escaping(tmp_path, monkeypatch):

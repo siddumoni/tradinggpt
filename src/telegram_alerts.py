@@ -429,12 +429,44 @@ def format_daily_digest(snapshot: dict[str, Any], report_date: str) -> str:
         f"Available portfolio risk: ₹{_price(account.get('available_portfolio_risk_inr', 0))}",
         "<b>Version-isolated cumulative results</b>",
     ]
+    # Closed-trade rows are grouped by strategy and version in the broker
+    # snapshot. The digest is version-level, so combine each version exactly once.
+    version_results: dict[tuple[str, str], dict[str, Any]] = {}
     for row in snapshot.get("strategies", []) if isinstance(snapshot, dict) else []:
-        if isinstance(row, dict) and row.get("track") in {"CHAMPION_CANDIDATE", "SHADOW"}:
-            lines.append(
-                f"{_safe(row.get('strategy_version'))}: {_safe(row.get('trades', 0))} closed · "
-                f"net ₹{_price(row.get('net_pnl', 0))}"
+        if not isinstance(row, dict) or row.get("track") not in {"CHAMPION", "SHADOW"}:
+            continue
+        version = str(row.get("strategy_version") or "")
+        track = str(row.get("track") or "")
+        key = (track, version)
+        summary = version_results.setdefault(
+            key,
+            {
+                "trades": 0,
+                "net_pnl": 0.0,
+                "trades_today": None,
+                "accept_rate_pct": None,
+            },
+        )
+        summary["trades"] += int(row.get("trades", 0) or 0)
+        summary["net_pnl"] += float(row.get("net_pnl", 0) or 0)
+        if row.get("trades_today") is not None:
+            summary["trades_today"] = int(row.get("trades_today", 0) or 0)
+        if row.get("accept_rate_pct") is not None:
+            summary["accept_rate_pct"] = float(row.get("accept_rate_pct", 0) or 0)
+
+    for (track, version), row in version_results.items():
+        daily = ""
+        if track == "CHAMPION":
+            today_count = int(row["trades_today"] or 0)
+            today_label = "trade" if today_count == 1 else "trades"
+            daily = (
+                f" · today {today_count} {today_label}"
+                f" · accept rate {_price(row['accept_rate_pct'] or 0)}%"
             )
+        lines.append(
+            f"{_safe(version)}: {_safe(row['trades'])} closed · "
+            f"net ₹{_price(row['net_pnl'])}{daily}"
+        )
     lines.append("Research only — no broker orders were placed.")
     return "\n".join(lines)
 

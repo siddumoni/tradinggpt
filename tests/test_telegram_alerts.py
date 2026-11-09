@@ -265,7 +265,8 @@ def test_eod_digest_is_deduplicated_and_keeps_versions_separate(tmp_path):
     assert sum(row["net_pnl"] for row in champion_rows) == 200.0
     assert sum("trades_today" in row for row in champion_rows) == 1
     assert next(row for row in champion_rows if "trades_today" in row)["trades_today"] == 2
-    assert round(next(row for row in champion_rows if "trades_today" in row)["accept_rate_pct"], 2) == 66.67
+    champion_metrics = next(row for row in champion_rows if "trades_today" in row)
+    assert round(champion_metrics["accept_rate_pct"], 2) == 66.67
 
     notifier = TelegramEventNotifier(
         lambda: {"events": []},

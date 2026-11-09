@@ -1234,7 +1234,48 @@ class PaperBroker:
                 equity += float(r["net_pnl"] or 0)
                 peak = max(peak, equity)
                 dd = max(dd, peak - equity)
+            # These aggregates are reporting-only. Count unique actionable Champion
+            # signal IDs, not neutral NO_TRADE/WATCH_CANDIDATE scan outcomes.
+            today = datetime.now(IST).date().isoformat()
+            accepted_signal_ids = {
+                str(row["signal_id"])
+                for row in db.execute(
+                    "SELECT signal_id FROM trades WHERE strategy_version=? AND substr(entry_time,1,10)=?",
+                    (PAPER_BASELINE_VERSION, today),
+                )
+            }
+            rejected_signal_ids = set()
+            for rejection in db.execute(
+                "SELECT details_json FROM events WHERE event_type='SIGNAL_REJECTED' AND substr(event_time,1,10)=?",
+                (today,),
+            ):
+                try:
+                    details = json.loads(rejection["details_json"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                candidate = details.get("candidate") if isinstance(details, dict) else None
+                if not isinstance(candidate, dict):
+                    continue
+                if str(candidate.get("action") or "").upper() not in {
+                    "CONDITIONAL_BUY",
+                    "CONDITIONAL_SHORT",
+                }:
+                    continue
+                candidate_version = candidate.get("strategy_version")
+                if candidate_version and candidate_version != PAPER_BASELINE_VERSION:
+                    continue
+                rejected_signal_ids.add(_signal_key(candidate))
+
+            attempted_signal_ids = accepted_signal_ids | rejected_signal_ids
+            accepted_today = len(accepted_signal_ids)
+            accept_rate_pct = (
+                100.0 * accepted_today / len(attempted_signal_ids)
+                if attempted_signal_ids
+                else 0.0
+            )
+
             strategies = []
+            champion_metrics_attached = False
             for r in db.execute("""SELECT strategy,strategy_version,COUNT(*) trades,
               SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) wins,COALESCE(SUM(net_pnl),0) net_pnl,
               COALESCE(AVG(net_pnl),0) expectancy FROM trades WHERE status='CLOSED' GROUP BY strategy,strategy_version ORDER BY net_pnl DESC"""):
@@ -1247,27 +1288,33 @@ class PaperBroker:
                 item["win_rate_pct"] = (
                     100.0 * item["wins"] / item["trades"] if item["trades"] else 0.0
                 )
-                if item["track"] == "CHAMPION":
-                    # Reporting-only counters: these values never feed entry or risk decisions.
-                    today = datetime.now(IST).date().isoformat()
-                    accepted_today = int(
-                        db.execute(
-                            "SELECT COUNT(*) trades FROM trades WHERE strategy_version=? AND substr(entry_time,1,10)=?",
-                            (item["strategy_version"], today),
-                        ).fetchone()["trades"]
-                    )
-                    rejected_today = int(
-                        db.execute(
-                            "SELECT COUNT(*) attempts FROM events WHERE event_type='SIGNAL_REJECTED' AND substr(event_time,1,10)=?",
-                            (today,),
-                        ).fetchone()["attempts"]
-                    )
-                    attempts_today = accepted_today + rejected_today
+                if item["track"] == "CHAMPION" and not champion_metrics_attached:
                     item["trades_today"] = accepted_today
-                    item["accept_rate_pct"] = (
-                        100.0 * accepted_today / attempts_today if attempts_today else 0.0
-                    )
+                    item["accept_rate_pct"] = accept_rate_pct
+                    champion_metrics_attached = True
                 strategies.append(item)
+
+            # Keep the active Champion visible on a fresh day even before a
+            # Champion trade has closed (or when its only trades remain open).
+            if not champion_metrics_attached:
+                champion = db.execute(
+                    "SELECT strategy_name FROM strategy_registry WHERE strategy_version=?",
+                    (PAPER_BASELINE_VERSION,),
+                ).fetchone()
+                strategies.append(
+                    {
+                        "strategy": champion["strategy_name"] if champion else PAPER_BASELINE_VERSION,
+                        "strategy_version": PAPER_BASELINE_VERSION,
+                        "track": "CHAMPION",
+                        "trades": 0,
+                        "wins": 0,
+                        "net_pnl": 0.0,
+                        "expectancy": 0.0,
+                        "win_rate_pct": 0.0,
+                        "trades_today": accepted_today,
+                        "accept_rate_pct": accept_rate_pct,
+                    }
+                )
             shadow_open = []
             shadow_closed = []
             for row in db.execute(

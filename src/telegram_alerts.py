@@ -431,7 +431,7 @@ def format_daily_digest(snapshot: dict[str, Any], report_date: str) -> str:
     ]
     # Closed-trade rows are grouped by strategy and version in the broker
     # snapshot. The digest is version-level, so combine each version exactly once.
-    version_results = {}
+    version_results: dict[tuple[str, str], dict[str, Any]] = {}
     for row in snapshot.get("strategies", []) if isinstance(snapshot, dict) else []:
         if not isinstance(row, dict) or row.get("track") not in {"CHAMPION", "SHADOW"}:
             continue

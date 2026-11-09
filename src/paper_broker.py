@@ -1303,7 +1303,11 @@ class PaperBroker:
                 ).fetchone()
                 strategies.append(
                     {
-                        "strategy": champion["strategy_name"] if champion else PAPER_BASELINE_VERSION,
+                        "strategy": (
+                            champion["strategy_name"]
+                            if champion
+                            else PAPER_BASELINE_VERSION
+                        ),
                         "strategy_version": PAPER_BASELINE_VERSION,
                         "track": "CHAMPION",
                         "trades": 0,

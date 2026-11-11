@@ -92,7 +92,7 @@ def _refresh_eod_candles(
             )
             if len(session_rows) < 75 or latest_ist.time().replace(tzinfo=None) < time(15, 25):
                 candidates.append(path)
-        except (OSError, csv.Error, UnicodeDecodeError, ValueError) as exc:
+        except (OSError, csv.Error, UnicodeDecodeError, ValueError):
             # The profile builder reports the precise archive error separately.
             continue
 

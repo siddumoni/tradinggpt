@@ -120,6 +120,32 @@ def test_invalid_tick_sizes_are_rejected(tick_size):
         build_volume_profile(rows, tick_size=tick_size)
 
 
+
+def test_ohlc_prices_must_align_to_the_instrument_tick_size():
+    rows = [
+        candle("2026-11-10T09:15:00", 100.00, 100.10, 100.00, 100.02, 10),
+    ]
+
+    with pytest.raises(VolumeProfileError, match="not aligned to instrument tick size"):
+        build_volume_profile(rows, tick_size=0.05)
+
+
+@pytest.mark.parametrize("stamp", ["2026-11-10T09:10:00", "2026-11-10T15:30:00"])
+def test_candles_outside_the_regular_session_are_rejected(stamp):
+    rows = [candle(stamp, 100, 100, 100, 100, 10)]
+
+    with pytest.raises(VolumeProfileError, match="regular NSE session grid"):
+        build_volume_profile(rows, tick_size=0.05)
+
+
+def test_candle_timestamp_must_align_to_the_five_minute_session_grid():
+    rows = [candle("2026-11-10T09:17:00", 100, 100, 100, 100, 10)]
+
+    with pytest.raises(VolumeProfileError, match="regular NSE session grid"):
+        build_volume_profile(rows, tick_size=0.05)
+
+
+
 def test_trade_print_profile_is_not_called_exact_without_completeness_attestation():
     trades = [
         {"timestamp": "2026-11-10T09:15:01+05:30", "price": 100.00, "quantity": 12},

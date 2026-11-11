@@ -63,6 +63,16 @@ def _price_from_level(level: int, tick_size: Decimal) -> float:
     return float(Decimal(level) * tick_size)
 
 
+def _aligned_price_level(price: float, tick_size: Decimal) -> int:
+    level = _price_level(price, tick_size)
+    aligned_price = _price_from_level(level, tick_size)
+    if not math.isclose(price, aligned_price, rel_tol=0.0, abs_tol=float(tick_size) * 1e-6):
+        raise VolumeProfileError(
+            f"OHLC price {price} is not aligned to instrument tick size {tick_size}"
+        )
+    return level
+
+
 def _summarize(
     volumes: Mapping[int, float],
     *,
@@ -239,6 +249,20 @@ def build_volume_profile(
             raise VolumeProfileError("OHLC prices must be positive and volume non-negative")
         if high < max(open_price, close, low) or low > min(open_price, close, high):
             raise VolumeProfileError("Invalid OHLC range: high/low must contain open and close")
+        session_minute = stamp.hour * 60 + stamp.minute
+        offset_from_open = session_minute - (9 * 60 + 15)
+        if (
+            offset_from_open < 0
+            or offset_from_open + bar_minutes > 15 * 60 + 30 - (9 * 60 + 15)
+            or offset_from_open % bar_minutes != 0
+            or stamp.second != 0
+            or stamp.microsecond != 0
+        ):
+            raise VolumeProfileError(
+                "Candle timestamps must be aligned to the regular NSE session grid starting 09:15 IST"
+            )
+        for price in (open_price, high, low, close):
+            _aligned_price_level(price, tick)
         if cutoff is not None and stamp.timestamp() + bar_minutes * 60 > cutoff.timestamp():
             excluded += 1
             continue
@@ -252,8 +276,8 @@ def build_volume_profile(
     parsed_rows.sort(key=lambda item: item[0])
     volumes: dict[int, float] = {}
     for _, _, high, low, _, volume in parsed_rows:
-        low_level = _price_level(low, tick)
-        high_level = _price_level(high, tick)
+        low_level = _aligned_price_level(low, tick)
+        high_level = _aligned_price_level(high, tick)
         level_count = high_level - low_level + 1
         if level_count < 1 or level_count > _MAX_LEVELS_PER_CANDLE:
             raise VolumeProfileError(
@@ -304,10 +328,7 @@ def build_trade_volume_profile(
             raise VolumeProfileError("Trade prices must be positive and finite")
         if not math.isfinite(quantity) or quantity < 0:
             raise VolumeProfileError("Trade quantities must be finite and non-negative")
-        level = _price_level(price, tick)
-        aligned_price = _price_from_level(level, tick)
-        if not math.isclose(price, aligned_price, rel_tol=0.0, abs_tol=float(tick) * 1e-6):
-            raise VolumeProfileError(f"Trade price {price} is not aligned to tick size {tick}")
+        level = _aligned_price_level(price, tick)
         stamp_value = row.get("date", row.get("timestamp", row.get("time")))
         if stamp_value is not None:
             session_dates.add(_timestamp(stamp_value).date().isoformat())

@@ -211,6 +211,7 @@ def test_required_artifact_over_github_api_limit_fails_closed(tmp_path, monkeypa
     assert "Required artifact is too large" in result["message"]
 
 
+
 def test_upload_accepts_volume_profile_and_order_flow_report_categories(tmp_path):
     profile = tmp_path / "volume_profile_summary.json"
     flow = tmp_path / "order_flow_summary.json"
@@ -220,11 +221,26 @@ def test_upload_accepts_volume_profile_and_order_flow_report_categories(tmp_path
     result = upload_daily_artifacts(
         root=tmp_path,
         artifacts=[
-            {"path":str(profile),"category":"volume_profile","exists":True,"required":False,"upload":True},
-            {"path":str(flow),"category":"order_flow","exists":True,"required":False,"upload":True},
+            {
+                "path": str(profile),
+                "category": "volume_profile",
+                "exists": True,
+                "required": False,
+                "upload": True,
+            },
+            {
+                "path": str(flow),
+                "category": "order_flow",
+                "exists": True,
+                "required": False,
+                "upload": True,
+            },
         ],
         report_date="2026-11-11",
-        environ={"TRADINGGPT_RESEARCH_REPO":"acme/research","TRADINGGPT_RESEARCH_TOKEN":"github_pat_test_token_value"},
+        environ={
+            "TRADINGGPT_RESEARCH_REPO": "acme/research",
+            "TRADINGGPT_RESEARCH_TOKEN": "github_pat_test_token_value",
+        },
         opener=fake.open,
     )
     assert result["ok"] is True

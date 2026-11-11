@@ -27,7 +27,9 @@ def _load_tick_sizes(cache_path: Path) -> tuple[dict[str, float], str | None]:
     except FileNotFoundError:
         return {}, "Kite instrument cache is missing; Volume Profile reports cannot be calculated."
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {}, "Kite instrument cache could not be read; Volume Profile reports cannot be calculated."
+        return {}, (
+            "Kite instrument cache could not be read; Volume Profile reports cannot be calculated."
+        )
 
     rows = payload.get("instruments") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
@@ -153,7 +155,9 @@ def write_microstructure_reports(
         "limitations": [
             "Kite WebSocket snapshots are not a guaranteed record of every exchange execution "
             "or order-book event.",
-            "Buy/sell volume and delta are estimates unless an explicit aggressor-side field is supplied.",
+            (
+                "Buy/sell volume and delta are estimates unless an explicit aggressor-side field is supplied."
+            ),
             "Displayed depth is resting quantity and can be cancelled; it is not executed volume.",
             "Snapshot-based top-of-book OFI can miss intermediate book changes.",
         ],

@@ -233,6 +233,38 @@ def test_recorder_writes_jsonl_and_drains_queue_on_shutdown(tmp_path):
 
 
 
+
+def test_compressed_recorder_supports_multiple_appended_gzip_batches(tmp_path):
+    settings = OrderFlowCaptureSettings(
+        enabled=True,
+        directory=tmp_path,
+        queue_size=10,
+        batch_size=1,
+        flush_interval_seconds=10.0,
+    )
+    recorder = KiteTickRecorder(settings)
+    recorder.start()
+
+    assert recorder.submit(
+        kite_tick(last_price=100.0, last_trade_time="2026-11-11T09:20:01"),
+        symbol="SBIN",
+        received_at=stamp("2026-11-11T09:20:02"),
+    )
+    assert recorder.submit(
+        kite_tick(last_price=100.05, last_trade_time="2026-11-11T09:20:03"),
+        symbol="SBIN",
+        received_at=stamp("2026-11-11T09:20:04"),
+    )
+    stats = recorder.stop(timeout_seconds=2)
+
+    target = tmp_path / "2026-11-11" / "SBIN.jsonl.gz"
+    rows = read_order_flow_events(target)
+
+    assert stats["written"] == 2
+    assert [row["last_price"] for row in rows] == pytest.approx([100.0, 100.05])
+
+
+
 def test_mixed_symbol_snapshots_are_rejected_to_prevent_cross_symbol_tick_rules():
     events = [
         {

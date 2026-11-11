@@ -9,16 +9,18 @@ The paper service already subscribes to monitored NSE symbols in Kite FULL WebSo
 - up to five displayed bid and ask depth levels, with price, quantity and order count;
 - exchange timestamp and local receive timestamp.
 
-By default capture is enabled in config/order_flow.yaml. Files are written under .local/order_flow/YYYY-MM-DD/SYMBOL.jsonl, which is ignored by Git. Only the symbols already monitored by the paper service are recorded; the recorder does not subscribe to the entire NSE universe.
+By default capture is enabled in config/order_flow.yaml. Files are written under .local/order_flow/YYYY-MM-DD/SYMBOL.jsonl.gz, which is ignored by Git. Only the symbols already monitored by the paper service are recorded; the recorder does not subscribe to the entire NSE universe.
 
 The callback only performs a bounded, non-blocking queue insertion. A separate daemon writer batches disk writes so disk I/O does not block the existing virtual-position price monitor. If the bounded queue fills, snapshots are dropped and counted. At shutdown, the service logs accepted, written, dropped and failed records.
+
+The writer appends gzip-compressed JSONL. The reader detects compressed files by the `.gz` suffix and reads concatenated gzip members safely. This keeps capture disk usage materially lower during full-session recording.
 
 ## Run analysis
 
 Run from the repository root in PowerShell after a paper-service session has collected data:
 
 ~~~powershell
-python -m src.order_flow --events .local\order_flow\2026-11-11\SBIN.jsonl --output reports\microstructure\SBIN-order-flow.json
+python -m src.order_flow --events .local\order_flow\2026-11-11\SBIN.jsonl.gz --output reports\microstructure\SBIN-order-flow.json
 ~~~
 
 The report includes estimated buy/sell volume, estimated delta, quote/tick-rule classification counts, and displayed top-five depth imbalance.

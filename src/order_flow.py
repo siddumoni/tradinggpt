@@ -6,6 +6,7 @@ tape. Aggressor-side volume and depth pressure from this module are estimates.
 from __future__ import annotations
 
 import argparse
+import gzip
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -253,9 +254,9 @@ class KiteTickRecorder:
         written = 0
         try:
             for (session_date, symbol), records in grouped.items():
-                target = self.settings.directory / session_date / f"{symbol}.jsonl"
+                target = self.settings.directory / session_date / f"{symbol}.jsonl.gz"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with target.open("a", encoding="utf-8", newline="\n") as handle:
+                with gzip.open(target, "at", encoding="utf-8", newline="\n") as handle:
                     for record in records:
                         handle.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False))
                         handle.write("\n")
@@ -318,7 +319,8 @@ def read_order_flow_events(path: Path) -> list[dict[str, Any]]:
     """Read JSONL snapshots; malformed lines fail with their line number."""
     events: list[dict[str, Any]] = []
     try:
-        with Path(path).open("r", encoding="utf-8") as handle:
+        opener = gzip.open if Path(path).suffix.lower() == ".gz" else open
+        with opener(path, "rt", encoding="utf-8") as handle:
             for line_number, raw_line in enumerate(handle, start=1):
                 if not raw_line.strip():
                     continue
@@ -373,7 +375,17 @@ def analyze_order_flow(
         parsed.append((stamp, event))
     parsed.sort(key=lambda item: item[0])
 
-    seen_trade_keys: set[tuple[str, float, float]] = set()
+    symbols = {
+        str(event.get("symbol", "")).strip().upper()
+        for _, event in parsed
+        if str(event.get("symbol", "")).strip()
+    }
+    if len(symbols) > 1:
+        raise OrderFlowError(
+            "Analyse one symbol at a time; do not mix trade and depth snapshots across symbols"
+        )
+
+    seen_trade_keys: set[tuple[str, str, float, float]] = set()
     previous_price: float | None = None
     previous_side: str | None = None
     buy_volume = 0.0
@@ -403,7 +415,8 @@ def analyze_order_flow(
         if trade_time is None:
             missing_trade_time += 1
             continue
-        key = (trade_time, price, quantity)
+        symbol = str(event.get("symbol", "")).strip().upper()
+        key = (symbol, trade_time, price, quantity)
         if key in seen_trade_keys:
             duplicates += 1
             continue
@@ -484,9 +497,7 @@ def analyze_order_flow(
             "This module does not calculate true order-flow imbalance (OFI), iceberg/absorption events or exchange-level trade delta.",
         ],
     }
-    symbols = {str(event.get("symbol", "")).strip().upper() for _, event in parsed}
-    symbols.discard("")
-    if len(symbols) == 1:
+    if symbols:
         result["symbol"] = next(iter(symbols))
     if parsed:
         result["start_time"] = parsed[0][0].isoformat()

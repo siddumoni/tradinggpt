@@ -221,7 +221,7 @@ def test_recorder_writes_jsonl_and_drains_queue_on_shutdown(tmp_path):
     )
     stats = recorder.stop(timeout_seconds=2)
 
-    target = tmp_path / "2026-11-11" / "SBIN.jsonl"
+    target = tmp_path / "2026-11-11" / "SBIN.jsonl.gz"
     rows = read_order_flow_events(target)
 
     assert stats["accepted"] == 1
@@ -230,6 +230,30 @@ def test_recorder_writes_jsonl_and_drains_queue_on_shutdown(tmp_path):
     assert stats["writer_alive"] is False
     assert rows[0]["symbol"] == "SBIN"
     assert rows[0]["last_price"] == pytest.approx(100.0)
+
+
+
+def test_mixed_symbol_snapshots_are_rejected_to_prevent_cross_symbol_tick_rules():
+    events = [
+        {
+            "symbol": "SBIN",
+            "timestamp": "2026-11-11T09:20:00+05:30",
+            "last_trade_time": "2026-11-11T09:20:00+05:30",
+            "last_price": 100.0,
+            "last_quantity": 10,
+        },
+        {
+            "symbol": "INFY",
+            "timestamp": "2026-11-11T09:20:01+05:30",
+            "last_trade_time": "2026-11-11T09:20:01+05:30",
+            "last_price": 1500.0,
+            "last_quantity": 10,
+        },
+    ]
+
+    with pytest.raises(OrderFlowError, match="one symbol at a time"):
+        analyze_order_flow(events)
+
 
 
 def test_jsonl_reader_reports_malformed_line(tmp_path):

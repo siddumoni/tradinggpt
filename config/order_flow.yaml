@@ -1,0 +1,8 @@
+# Capture is limited to symbols already subscribed by the paper service.
+# The recorder is asynchronous and has no access to order-placement methods.
+capture:
+  enabled: true
+  directory: .local/order_flow
+  queue_size: 50000
+  batch_size: 200
+  flush_interval_seconds: 1.0

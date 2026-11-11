@@ -10,6 +10,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from src.auth import load_credentials, load_token_cache
 from src.data_fetcher import KiteMarketData
+from src.order_flow import KiteTickRecorder, load_order_flow_capture_settings
 from src.paper_broker import DEFAULT_DB, PaperBroker
 from src.paper_dashboard import make_server
 from src.paper_daily_report import generate_daily_report
@@ -81,7 +82,21 @@ def _ticker_thread(
     *,
     universe_mode: str = "nse_equity",
 ) -> None:
-    """Monitor top-N screened symbols and all open virtual positions; never place orders."""
+    """Monitor virtual positions and record separate research-only market snapshots."""
+    recorder = None
+    try:
+        capture_settings = load_order_flow_capture_settings()
+        if capture_settings.enabled:
+            recorder = KiteTickRecorder(capture_settings)
+            recorder.start()
+            LOGGER.info(
+                "Research-only Kite snapshot capture enabled at %s",
+                capture_settings.directory,
+            )
+    except Exception:
+        # The optional research recorder must never prevent paper price monitoring.
+        LOGGER.exception("Order-flow capture unavailable; continuing without snapshot recording.")
+
     while not stop.is_set():
         ticker = None
         try:
@@ -184,6 +199,8 @@ def _ticker_thread(
                         age = (now - stamp).total_seconds()
                         if age < -2 or age > 60:
                             continue
+                        if recorder is not None:
+                            recorder.submit(tick, symbol=symbol, received_at=now)
                         last = float(tick.get("last_price"))
                         depth = tick.get("depth") or {}
                         buys = depth.get("buy", []) if isinstance(depth, dict) else []
@@ -257,6 +274,17 @@ def _ticker_thread(
                 except Exception:
                     pass
         stop.wait(5)
+
+    if recorder is not None:
+        stats = recorder.stop()
+        LOGGER.info(
+            "Order-flow snapshot capture stopped: accepted=%s written=%s dropped=%s write_errors=%s pending=%s",
+            stats["accepted"],
+            stats["written"],
+            stats["dropped_queue_full"],
+            stats["write_errors"],
+            stats["pending"],
+        )
 
 
 def _configure_logging(path: Path) -> None:

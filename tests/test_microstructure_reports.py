@@ -95,7 +95,7 @@ def test_missing_sources_still_produce_explicit_no_data_reports(tmp_path):
         json.loads(Path(record["path"]).read_text(encoding="utf-8"))
         for record in records
     ]
-    assert [payload["status"] for payload in payloads] == ["NO_DATA", "NO_DATA"]
+    assert [payload["status"] for payload in payloads] == ["NO_DATA", "NO_DATA", "NOT_TESTED"]
     assert all(record["exists"] and record["upload"] for record in records)
 
 
@@ -108,10 +108,10 @@ def test_eod_refresh_adds_final_session_candles_to_existing_kite_archive(tmp_pat
         for i in range(72)
     ]
     with (archive / "RELIANCE.csv").open("w", encoding="utf-8", newline="") as handle:
-        handle.write("date,open,high,low,close,volume,provider_mode\\n")
+        handle.write("date,open,high,low,close,volume,provider_mode\n")
         for stamp in starts:
             handle.write(
-                f"{stamp.strftime('%Y-%m-%dT%H:%M:%S%z')},100,100.1,99.9,100,1000,kite\\n"
+                f"{stamp.strftime('%Y-%m-%dT%H:%M:%S%z')},100,100.1,99.9,100,1000,kite\n"
             )
 
     class FakeProvider:

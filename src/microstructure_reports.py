@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import gzip
 import json
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -23,6 +23,32 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rendered = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False)
     path.write_text(rendered + "\n", encoding="utf-8")
+
+
+def _session_bar_coverage(rows: list[dict[str, Any]], report_date: str) -> dict[str, Any]:
+    """Check the exact 75-bar regular NSE 5-minute grid, not just row count."""
+    session_day = date.fromisoformat(report_date)
+    expected = {
+        datetime.combine(session_day, time(9, 15), tzinfo=IST) + timedelta(minutes=5 * index)
+        for index in range(75)
+    }
+    actual: set[datetime] = set()
+    for row in rows:
+        raw = str(row.get("date") or row.get("timestamp") or "")
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        stamp = stamp.replace(tzinfo=IST) if stamp.tzinfo is None else stamp.astimezone(IST)
+        actual.add(stamp)
+    missing = sorted(expected - actual)
+    present = sorted(expected & actual)
+    return {
+        "candle_rows": len(rows),
+        "first_bar_start_ist": present[0].strftime("%H:%M") if present else None,
+        "latest_bar_start_ist": present[-1].strftime("%H:%M") if present else None,
+        "expected_final_bar_start_ist": "15:25",
+        "missing_bar_count": len(missing),
+        "missing_bar_starts_ist": [stamp.strftime("%H:%M") for stamp in missing[:10]],
+        "full_session_coverage": not missing,
+    }
 
 
 def _load_tick_sizes(cache_path: Path) -> tuple[dict[str, float], str | None]:
@@ -79,18 +105,8 @@ def _refresh_eod_candles(
             ]
             if len(session_rows) < 50:
                 continue
-            latest = max(
-                datetime.fromisoformat(
-                    str(row.get("date") or row.get("timestamp")).replace("Z", "+00:00")
-                )
-                for row in session_rows
-            )
-            latest_ist = (
-                latest.replace(tzinfo=IST)
-                if latest.tzinfo is None
-                else latest.astimezone(IST)
-            )
-            if len(session_rows) < 75 or latest_ist.time().replace(tzinfo=None) < time(15, 25):
+            coverage = _session_bar_coverage(session_rows, report_date)
+            if not coverage["full_session_coverage"]:
                 candidates.append(path)
         except (OSError, csv.Error, UnicodeDecodeError, ValueError):
             # The profile builder reports the precise archive error separately.
@@ -193,32 +209,14 @@ def write_microstructure_reports(
             ]
             if not session_rows:
                 continue
-            latest_stamp = max(
-                datetime.fromisoformat(
-                    str(row.get("date") or row.get("timestamp")).replace("Z", "+00:00")
-                )
-                for row in session_rows
-            )
-            latest_ist = (
-                latest_stamp.replace(tzinfo=IST)
-                if latest_stamp.tzinfo is None
-                else latest_stamp.astimezone(IST)
-            )
-            full_session_coverage = (
-                latest_ist.time().replace(tzinfo=None) >= time(15, 25)
-                and len(session_rows) >= 75
-            )
-            volume_coverage[symbol] = {
-                "candle_rows": len(session_rows),
-                "latest_bar_start_ist": latest_ist.strftime("%H:%M"),
-                "expected_final_bar_start_ist": "15:25",
-                "full_session_coverage": full_session_coverage,
-            }
+            coverage = _session_bar_coverage(session_rows, report_date)
+            full_session_coverage = coverage["full_session_coverage"]
+            volume_coverage[symbol] = coverage
             if not full_session_coverage:
                 volume_warnings.append(
                     f"{symbol}: archive contains {len(session_rows)} session candle(s), "
-                    f"latest starts at {latest_ist.strftime('%H:%M')} IST; final 15:25 candle "
-                    "and/or full 75-bar session coverage is missing."
+                    f"latest bar starts at {coverage['latest_bar_start_ist'] or 'UNKNOWN'} IST, "
+                    f"and {coverage['missing_bar_count']} of the expected 75 session bars are missing."
                 )
             volume_symbols[symbol] = build_volume_profile(
                 session_rows,

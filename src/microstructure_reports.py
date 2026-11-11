@@ -103,7 +103,7 @@ def _refresh_eod_candles(
                 row for row in rows
                 if str(row.get("date") or row.get("timestamp") or "").startswith(report_date)
             ]
-            if len(session_rows) < 50:
+            if not session_rows:
                 continue
             coverage = _session_bar_coverage(session_rows, report_date)
             if not coverage["full_session_coverage"]:
@@ -244,6 +244,8 @@ def write_microstructure_reports(
             if not volume_symbols
             else "READY"
             if all(item["full_session_coverage"] for item in volume_coverage.values())
+            and not cache_warning
+            and not any("no valid tick size" in warning for warning in volume_warnings)
             else "PARTIAL"
         ),
         "coverage": {

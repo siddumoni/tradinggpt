@@ -92,24 +92,27 @@ def test_archive_accepts_nse_tickers_containing_ampersands(symbol, tmp_path):
     assert result.symbol == symbol
     assert (tmp_path / f"{symbol}.csv").is_file()
 
-def test_archive_keeps_final_modeled_1510_candle_and_excludes_later_bars(tmp_path):
-    index = pd.date_range("2026-10-22 15:05:00", periods=3, freq="5min", tz=IST)
+def test_archive_keeps_final_1525_candle_and_excludes_post_close_bar(tmp_path):
+    index = pd.date_range("2026-10-22 15:05:00", periods=6, freq="5min", tz=IST)
     frame = pd.DataFrame({
-        "open": [100.0, 100.5, 101.0],
-        "high": [101.0, 101.5, 102.0],
-        "low": [99.0, 100.0, 100.5],
-        "close": [100.5, 101.0, 101.5],
-        "volume": [1000, 1100, 1200],
+        "open": [100.0, 100.5, 101.0, 101.5, 102.0, 102.5],
+        "high": [101.0, 101.5, 102.0, 102.5, 103.0, 103.5],
+        "low": [99.0, 100.0, 100.5, 101.0, 101.5, 102.0],
+        "close": [100.5, 101.0, 101.5, 102.0, 102.5, 103.0],
+        "volume": [1000, 1100, 1200, 1300, 1400, 1500],
     }, index=index)
     frame.index.name = "timestamp"
     result = append_completed_candles(
         "INFY", frame.reset_index().rename(columns={"timestamp": "date"}).to_dict("records"),
-        tmp_path, now=datetime(2026, 10, 22, 15, 21, tzinfo=IST), provider_mode="kite",
+        tmp_path, now=datetime(2026, 10, 22, 15, 36, tzinfo=IST), provider_mode="kite",
     )
     saved = pd.read_csv(tmp_path / "INFY.csv")
 
-    assert result.rows_observed == 2
+    assert result.rows_observed == 5
     assert saved["date"].tolist() == [
         "2026-10-22T15:05:00+0530",
         "2026-10-22T15:10:00+0530",
+        "2026-10-22T15:15:00+0530",
+        "2026-10-22T15:20:00+0530",
+        "2026-10-22T15:25:00+0530",
     ]

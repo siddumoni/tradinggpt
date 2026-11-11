@@ -32,6 +32,7 @@ ALLOWED_CATEGORIES = {
     "candles",
     "volume_profile",
     "order_flow",
+    "microstructure_validation",
 }
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")

@@ -375,14 +375,15 @@ def analyze_order_flow(
         parsed.append((stamp, event))
     parsed.sort(key=lambda item: item[0])
 
-    symbols = {
+    event_symbols = [
         str(event.get("symbol", "")).strip().upper()
         for _, event in parsed
-        if str(event.get("symbol", "")).strip()
-    }
-    if len(symbols) > 1:
+    ]
+    symbols = {symbol for symbol in event_symbols if symbol}
+    if len(symbols) > 1 or (symbols and any(not symbol for symbol in event_symbols)):
         raise OrderFlowError(
-            "Analyse one symbol at a time; do not mix trade and depth snapshots across symbols"
+            "Analyse one symbol at a time and provide the symbol on every event; "
+            "do not mix trade and depth snapshots across symbols"
         )
 
     seen_trade_keys: set[tuple[str, str, float, float]] = set()

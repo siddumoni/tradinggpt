@@ -303,6 +303,29 @@ def test_depth_level_count_must_be_positive(depth_levels):
 
 
 
+
+def test_symbol_cannot_be_missing_from_only_part_of_an_analysis_batch():
+    events = [
+        {
+            "symbol": "SBIN",
+            "timestamp": "2026-11-11T09:20:00+05:30",
+            "last_trade_time": "2026-11-11T09:20:00+05:30",
+            "last_price": 100.0,
+            "last_quantity": 10,
+        },
+        {
+            "timestamp": "2026-11-11T09:20:01+05:30",
+            "last_trade_time": "2026-11-11T09:20:01+05:30",
+            "last_price": 100.05,
+            "last_quantity": 10,
+        },
+    ]
+
+    with pytest.raises(OrderFlowError, match="symbol on every event"):
+        analyze_order_flow(events)
+
+
+
 def test_depth_level_limit_uses_only_the_requested_number_of_levels():
     events = [
         {

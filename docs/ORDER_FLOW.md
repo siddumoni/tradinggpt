@@ -23,7 +23,7 @@ Run from the repository root in PowerShell after a paper-service session has col
 python -m src.order_flow --events .local\order_flow\2026-11-11\SBIN.jsonl.gz --output reports\microstructure\SBIN-order-flow.json
 ~~~
 
-The report includes estimated buy/sell volume, estimated delta, quote/tick-rule classification counts, and displayed top-five depth imbalance.
+The report includes estimated buy/sell volume, estimated delta, quote/tick-rule classification counts, displayed top-five depth imbalance, and snapshot-to-snapshot top-of-book OFI estimated from changes in best bid/ask prices and queue quantities.
 
 ## Accuracy boundary
 
@@ -35,7 +35,7 @@ Aggressor side is estimated by:
 3. using the uptick/downtick rule for trades inside the spread; and
 4. carrying the last direction for an unchanged-price update.
 
-The output is therefore labelled ESTIMATED_KITE_WEBSOCKET_SNAPSHOT. The displayed-depth imbalance is the difference between resting bid and ask quantities divided by their sum. It describes visible queue size, not executed buying/selling pressure. It is not true order-flow imbalance (OFI), and it does not claim to detect iceberg orders, absorption or spoofing.
+The output is therefore labelled ESTIMATED_KITE_WEBSOCKET_SNAPSHOT. The displayed-depth imbalance is the difference between resting bid and ask quantities divided by their sum. It describes visible queue size, not executed buying/selling pressure. The top-of-book OFI field estimates queue/price changes between received snapshots using the best bid and ask. Because intermediate order-book changes can be missed, it is not complete exchange-wide OFI. The module does not claim to detect iceberg orders, absorption or spoofing.
 
 For reliable exchange-level trade delta and exact Volume Profile, a complete, timestamped trade-print feed with aggressor-side classification is required. The private research archive currently contains 5-minute OHLCV candles, not historical tick/depth records; it cannot be used to backtest this order-flow estimate retrospectively.
 

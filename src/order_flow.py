@@ -336,6 +336,25 @@ def read_order_flow_events(path: Path) -> list[dict[str, Any]]:
     return events
 
 
+def _best_depth(event: Mapping[str, Any], side: str) -> tuple[float, float] | None:
+    values = event.get(f"depth_{side}")
+    if isinstance(values, list):
+        for level in values:
+            if not isinstance(level, Mapping):
+                continue
+            price = _finite_float(level.get("price"))
+            quantity = _finite_float(level.get("quantity"))
+            if price is not None and quantity is not None and price > 0 and quantity >= 0:
+                return price, quantity
+    price_key = "best_bid" if side == "buy" else "best_ask"
+    quantity_key = "best_bid_quantity" if side == "buy" else "best_ask_quantity"
+    price = _finite_float(event.get(price_key))
+    quantity = _finite_float(event.get(quantity_key))
+    if price is None or quantity is None or price <= 0 or quantity < 0:
+        return None
+    return price, quantity
+
+
 def _depth_quantity(event: Mapping[str, Any], side: str, levels: int) -> float:
     values = event.get(f"depth_{side}")
     if isinstance(values, list):
@@ -399,6 +418,8 @@ def analyze_order_flow(
     depth_imbalances: list[float] = []
     displayed_bid_quantities: list[float] = []
     displayed_ask_quantities: list[float] = []
+    snapshot_ofi_values: list[float] = []
+    previous_book: dict[str, tuple[float, float]] | None = None
 
     for _, event in parsed:
         bid_qty = _depth_quantity(event, "buy", depth_levels)
@@ -407,6 +428,31 @@ def analyze_order_flow(
         displayed_ask_quantities.append(ask_qty)
         if bid_qty + ask_qty > 0:
             depth_imbalances.append((bid_qty - ask_qty) / (bid_qty + ask_qty))
+
+        best_bid = _best_depth(event, "buy")
+        best_ask = _best_depth(event, "sell")
+        current_book = (
+            {"bid": best_bid, "ask": best_ask}
+            if best_bid is not None and best_ask is not None
+            else None
+        )
+        if previous_book is not None and current_book is not None:
+            previous_bid_price, previous_bid_qty = previous_book["bid"]
+            current_bid_price, current_bid_qty = current_book["bid"]
+            previous_ask_price, previous_ask_qty = previous_book["ask"]
+            current_ask_price, current_ask_qty = current_book["ask"]
+
+            snapshot_ofi = 0.0
+            if current_bid_price >= previous_bid_price:
+                snapshot_ofi += current_bid_qty
+            if current_bid_price <= previous_bid_price:
+                snapshot_ofi -= previous_bid_qty
+            if current_ask_price <= previous_ask_price:
+                snapshot_ofi -= current_ask_qty
+            if current_ask_price >= previous_ask_price:
+                snapshot_ofi += previous_ask_qty
+            snapshot_ofi_values.append(snapshot_ofi)
+        previous_book = current_book
 
         price = _finite_float(event.get("last_price", event.get("price")))
         quantity = _finite_float(event.get("last_quantity", event.get("quantity")), 0.0)
@@ -489,13 +535,23 @@ def analyze_order_flow(
         "latest_displayed_ask_quantity": (
             displayed_ask_quantities[-1] if displayed_ask_quantities else 0.0
         ),
+        "top_of_book_ofi_snapshot_count": len(snapshot_ofi_values),
+        "estimated_top_of_book_ofi": (
+            sum(snapshot_ofi_values) if snapshot_ofi_values else None
+        ),
+        "mean_snapshot_ofi": (
+            sum(snapshot_ofi_values) / len(snapshot_ofi_values)
+            if snapshot_ofi_values else None
+        ),
+        "latest_snapshot_ofi": snapshot_ofi_values[-1] if snapshot_ofi_values else None,
         "classification_counts": dict(methods),
         "limitations": [
             "Kite WebSocket messages are market-data snapshots, not a guaranteed record of every exchange execution.",
             "Last-trade quantity can repeat across snapshots; duplicate timestamp/price/quantity keys are suppressed, but two indistinguishable same-second prints cannot be separated.",
             "Aggressor side is estimated from quote touches or the tick rule unless an explicit aggressor_side field is supplied.",
             "Displayed depth is resting order quantity and can be cancelled or changed; it is not executed buying or selling pressure.",
-            "This module does not calculate true order-flow imbalance (OFI), iceberg/absorption events or exchange-level trade delta.",
+            "Top-of-book OFI is a snapshot-to-snapshot estimate; missing intermediate book updates mean it is not complete exchange-wide OFI.",
+            "This module does not detect iceberg/absorption events or calculate guaranteed exchange-level trade delta.",
         ],
     }
     if symbols:

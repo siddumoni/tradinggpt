@@ -70,6 +70,43 @@ def test_kite_tick_without_valid_last_price_is_ignored():
     assert normalise_kite_tick("SBIN", {"last_price": float("nan")}) is None
 
 
+
+def test_snapshot_top_of_book_ofi_uses_price_and_queue_changes():
+    events = [
+        {
+            "symbol": "SBIN",
+            "timestamp": "2026-11-11T09:20:00+05:30",
+            "last_price": 100.0,
+            "depth_buy": [{"price": 99.95, "quantity": 100}],
+            "depth_sell": [{"price": 100.05, "quantity": 100}],
+        },
+        {
+            "symbol": "SBIN",
+            "timestamp": "2026-11-11T09:20:01+05:30",
+            "last_price": 100.0,
+            "depth_buy": [{"price": 100.00, "quantity": 120}],
+            "depth_sell": [{"price": 100.10, "quantity": 110}],
+        },
+        {
+            "symbol": "SBIN",
+            "timestamp": "2026-11-11T09:20:02+05:30",
+            "last_price": 100.0,
+            "depth_buy": [{"price": 99.95, "quantity": 80}],
+            "depth_sell": [{"price": 100.05, "quantity": 130}],
+        },
+    ]
+
+    result = analyze_order_flow(events)
+
+    # First transition: +120 bid queue +100 ask queue = +220.
+    # Second transition: -120 old bid queue -130 new ask queue = -250.
+    assert result["top_of_book_ofi_snapshot_count"] == 2
+    assert result["latest_snapshot_ofi"] == pytest.approx(-250)
+    assert result["estimated_top_of_book_ofi"] == pytest.approx(-30)
+    assert result["mean_snapshot_ofi"] == pytest.approx(-15)
+
+
+
 def test_quote_touch_classifies_estimated_buy_and_sell_volume_and_deduplicates():
     events = [
         {

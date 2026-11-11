@@ -168,6 +168,22 @@ def test_trade_print_profile_is_not_called_exact_without_completeness_attestatio
     assert complete["poc"]["volume"] == pytest.approx(17)
 
 
+
+def test_exact_trade_profile_requires_timestamps_on_every_trade():
+    trades = [
+        {"timestamp": "2026-11-10T09:15:01+05:30", "price": 100.00, "quantity": 12},
+        {"price": 100.05, "quantity": 8},
+    ]
+
+    with pytest.raises(VolumeProfileError, match="timestamp for every trade"):
+        build_trade_volume_profile(
+            trades,
+            tick_size=0.05,
+            complete_trade_feed_verified=True,
+        )
+
+
+
 def test_trade_profile_rejects_prices_off_tick_grid():
     with pytest.raises(VolumeProfileError, match="not aligned"):
         build_trade_volume_profile(

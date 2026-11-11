@@ -68,7 +68,7 @@ def _aligned_price_level(price: float, tick_size: Decimal) -> int:
     aligned_price = _price_from_level(level, tick_size)
     if not math.isclose(price, aligned_price, rel_tol=0.0, abs_tol=float(tick_size) * 1e-6):
         raise VolumeProfileError(
-            f"OHLC price {price} is not aligned to instrument tick size {tick_size}"
+            f"Price {price} is not aligned to instrument tick size {tick_size}"
         )
     return level
 
@@ -318,6 +318,7 @@ def build_trade_volume_profile(
 
     volumes: dict[int, float] = {}
     session_dates: set[str] = set()
+    missing_timestamps = 0
     for row in rows:
         try:
             price = float(row["price"])
@@ -332,10 +333,16 @@ def build_trade_volume_profile(
         stamp_value = row.get("date", row.get("timestamp", row.get("time")))
         if stamp_value is not None:
             session_dates.add(_timestamp(stamp_value).date().isoformat())
+        else:
+            missing_timestamps += 1
         volumes[level] = volumes.get(level, 0.0) + quantity
 
     if len(session_dates) > 1:
         raise VolumeProfileError("Build one trade profile per session; split dates first")
+    if complete_trade_feed_verified and (missing_timestamps or len(session_dates) != 1):
+        raise VolumeProfileError(
+            "A complete trade feed must include a valid timestamp for every trade in one session"
+        )
     quality = bool(complete_trade_feed_verified)
     return _summarize(
         volumes,

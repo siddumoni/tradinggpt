@@ -27,7 +27,7 @@ from src.paper_scan_scheduler import (
 )
 from src.telegram_alerts import TelegramEventNotifier
 from src.risk_engine import load_account_profile, load_phase2_settings
-from src.market_calendar import market_day_status
+from src.market_calendar import is_regular_market_session, market_day_status
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("paper_trading_service")
@@ -199,7 +199,7 @@ def _ticker_thread(
                         age = (now - stamp).total_seconds()
                         if age < -2 or age > 60:
                             continue
-                        if recorder is not None:
+                        if recorder is not None and is_regular_market_session(stamp):
                             recorder.submit(tick, symbol=symbol, received_at=now)
                         last = float(tick.get("last_price"))
                         depth = tick.get("depth") or {}

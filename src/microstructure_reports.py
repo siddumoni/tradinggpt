@@ -13,6 +13,7 @@ from src.candle_archive import append_completed_candles
 from src.data_fetcher import KiteMarketData
 from src.market_calendar import market_day_status
 from src.order_flow import OrderFlowError, analyze_order_flow, read_order_flow_events
+from src.microstructure_validation import evaluate_order_flow_predictive_accuracy
 from src.volume_profile import VolumeProfileError, build_volume_profile
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -309,6 +310,107 @@ def write_microstructure_reports(
     order_flow_path = staging_dir / "order_flow" / "order_flow_summary.json"
     _write_json(order_flow_path, order_flow_payload)
 
+    validation_by_symbol: dict[str, Any] = {}
+    validation_warnings: list[str] = []
+    total_predictions = 0
+    total_correct = 0
+    evaluated_dates: set[str] = set()
+    order_flow_root = root / ".local" / "order_flow"
+    if order_flow_root.is_dir():
+        for session_dir in sorted(path for path in order_flow_root.iterdir() if path.is_dir()):
+            for event_path in sorted(session_dir.glob("*.jsonl.gz")):
+                symbol = event_path.name.removesuffix(".jsonl.gz").upper()
+                candle_path = candle_archive_dir / f"{symbol}.csv"
+                if not candle_path.is_file():
+                    validation_warnings.append(
+                        f"{session_dir.name}/{symbol}: candle archive is missing."
+                    )
+                    continue
+                try:
+                    with candle_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        candle_rows = list(csv.DictReader(handle))
+                    events = read_order_flow_events(event_path)
+                    result = evaluate_order_flow_predictive_accuracy(events, candle_rows)
+                    previous = validation_by_symbol.get(symbol)
+                    if previous is None:
+                        validation_by_symbol[symbol] = result
+                    else:
+                        # Aggregate the disjoint session files without pooling raw trade prints.
+                        previous["predictions"] += result["predictions"]
+                        previous["correct_predictions"] += result["correct_predictions"]
+                        previous["sessions_evaluated"] += result["sessions_evaluated"]
+                        previous["input_snapshot_count"] += result["input_snapshot_count"]
+                        previous["out_of_session_snapshot_count"] += result["out_of_session_snapshot_count"]
+                        previous["session_dates"] = sorted(
+                            set(previous.get("session_dates", [])) | set(result.get("session_dates", []))
+                        )
+                        count = previous["predictions"]
+                        previous["accuracy_pct"] = (
+                            previous["correct_predictions"] / count * 100.0 if count else None
+                        )
+                        previous["status"] = (
+                            "READY_FOR_REVIEW"
+                            if count >= 100 and previous["sessions_evaluated"] >= 20
+                            else "INSUFFICIENT_PROSPECTIVE_EVIDENCE"
+                            if count
+                            else "NOT_TESTED"
+                        )
+                except (OSError, EOFError, gzip.BadGzipFile, csv.Error, OrderFlowError, ValueError) as exc:
+                    validation_warnings.append(
+                        f"{session_dir.name}/{symbol}: {type(exc).__name__}: {exc}"
+                    )
+
+    for result in validation_by_symbol.values():
+        total_predictions += int(result.get("predictions") or 0)
+        total_correct += int(result.get("correct_predictions") or 0)
+        evaluated_dates.update(result.get("session_dates") or [])
+    validation_accuracy = (
+        total_correct / total_predictions * 100.0 if total_predictions else None
+    )
+    validation_sessions = len(evaluated_dates)
+    validation_status = (
+        "NOT_TESTED"
+        if not total_predictions
+        else "READY_FOR_REVIEW"
+        if total_predictions >= 100 and validation_sessions >= 20
+        else "INSUFFICIENT_PROSPECTIVE_EVIDENCE"
+    )
+    validation_payload = {
+        "report_type": "MICROSTRUCTURE_PREDICTIVE_VALIDATION",
+        "report_date": report_date,
+        "generated_at": current.isoformat(),
+        "research_only": True,
+        "status": validation_status,
+        "order_flow": {
+            "method": "ORDER_FLOW_DELTA_SIGN_VS_NEXT_5M_CLOSE",
+            "predictions": total_predictions,
+            "correct_predictions": total_correct,
+            "accuracy_pct": validation_accuracy,
+            "sessions_evaluated": validation_sessions,
+            "session_dates": sorted(evaluated_dates),
+            "minimum_predictions_required": 100,
+            "minimum_independent_sessions_required": 20,
+            "symbols": validation_by_symbol,
+        },
+        "volume_profile": {
+            "status": "NOT_TESTED",
+            "reason": (
+                "The current POC/value-area report is calculated from the completed full session. "
+                "Using it to predict movements earlier in that same session would introduce look-ahead "
+                "bias. Time-sliced, point-in-time profiles are required first."
+            ),
+        },
+        "warnings": validation_warnings,
+        "limitations": [
+            "This is a preliminary directional diagnostic, not a net-P&L or executable-fill backtest.",
+            "Kite snapshot aggressor-side classification is estimated and may omit exchange events.",
+            "Accuracy remains insufficient evidence until at least 100 predictions across 20 independent sessions.",
+            "No output from this report is connected to Champion entries, exits, ranking or sizing.",
+        ],
+    }
+    validation_path = staging_dir / "microstructure_validation" / "microstructure_validation_summary.json"
+    _write_json(validation_path, validation_payload)
+
     return [
         {
             "label": "Daily Volume Profile summary",
@@ -333,5 +435,17 @@ def write_microstructure_reports(
             ),
             "category": "order_flow",
             "upload": order_flow_path.is_file(),
+        },
+        {
+            "label": "Microstructure predictive validation summary",
+            "path": str(validation_path),
+            "required": False,
+            "exists": validation_path.is_file(),
+            "purpose": (
+                "Research-only next-candle directional accuracy diagnostics with explicit "
+                "sample-size and look-ahead-bias gates"
+            ),
+            "category": "microstructure_validation",
+            "upload": validation_path.is_file(),
         },
     ]

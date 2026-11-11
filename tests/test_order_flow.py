@@ -246,6 +246,36 @@ def test_depth_level_count_must_be_positive(depth_levels):
         analyze_order_flow([{"timestamp": "2026-11-11T09:20:00", "last_price": 100}], depth_levels=depth_levels)
 
 
+
+def test_depth_level_limit_uses_only_the_requested_number_of_levels():
+    events = [
+        {
+            "timestamp": "2026-11-11T09:20:00+05:30",
+            "last_price": 100.0,
+            "depth_buy": [
+                {"price": 100.00, "quantity": 100},
+                {"price": 99.95, "quantity": 50},
+                {"price": 99.90, "quantity": 25},
+            ],
+            "depth_sell": [
+                {"price": 100.05, "quantity": 50},
+                {"price": 100.10, "quantity": 25},
+                {"price": 100.15, "quantity": 15},
+            ],
+            # Precomputed totals cover all five levels and must not override
+            # an explicit, narrower depth_levels argument.
+            "buy_depth_quantity": 175,
+            "sell_depth_quantity": 90,
+        }
+    ]
+
+    result = analyze_order_flow(events, depth_levels=1)
+
+    assert result["latest_displayed_bid_quantity"] == pytest.approx(100)
+    assert result["latest_displayed_ask_quantity"] == pytest.approx(50)
+    assert result["latest_displayed_depth_imbalance"] == pytest.approx(1 / 3)
+
+
 def test_empty_order_flow_input_fails_closed():
     with pytest.raises(OrderFlowError, match="At least one"):
         analyze_order_flow([])

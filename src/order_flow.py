@@ -335,18 +335,16 @@ def read_order_flow_events(path: Path) -> list[dict[str, Any]]:
 
 
 def _depth_quantity(event: Mapping[str, Any], side: str, levels: int) -> float:
+    values = event.get(f"depth_{side}")
+    if isinstance(values, list):
+        return sum(
+            max(0.0, _finite_float(level.get("quantity"), 0.0) or 0.0)
+            for level in values[:levels]
+            if isinstance(level, Mapping)
+        )
     total_key = "buy_depth_quantity" if side == "buy" else "sell_depth_quantity"
     total = _finite_float(event.get(total_key))
-    if total is not None:
-        return max(0.0, total)
-    values = event.get(f"depth_{side}")
-    if not isinstance(values, list):
-        return 0.0
-    return sum(
-        max(0.0, _finite_float(level.get("quantity"), 0.0) or 0.0)
-        for level in values[:levels]
-        if isinstance(level, Mapping)
-    )
+    return max(0.0, total or 0.0)
 
 
 def analyze_order_flow(

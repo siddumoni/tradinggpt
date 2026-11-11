@@ -15,7 +15,7 @@ from src.market_scanner import candles_to_frame, completed_candles
 IST = ZoneInfo("Asia/Kolkata")
 OHLCV = ("open", "high", "low", "close", "volume")
 SESSION_START = dtime(9, 15)
-LAST_BAR_START = dtime(15, 10)
+LAST_BAR_START = dtime(15, 25)
 
 
 @dataclass(frozen=True)

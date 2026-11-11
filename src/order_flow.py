@@ -9,7 +9,7 @@ import argparse
 import gzip
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time as dtime
 import json
 import logging
 import math
@@ -387,11 +387,24 @@ def analyze_order_flow(
         raise OrderFlowError("At least one order-flow event is required")
 
     parsed: list[tuple[datetime, Mapping[str, Any]]] = []
+    out_of_session_snapshots = 0
+    session_dates: set[str] = set()
     for event in rows:
         stamp = _parse_datetime(event.get("timestamp") or event.get("exchange_timestamp"))
         if stamp is None:
             raise OrderFlowError("Every event must include a valid timestamp")
+        session_dates.add(stamp.date().isoformat())
+        clock = stamp.time().replace(tzinfo=None)
+        if not (dtime(9, 15) <= clock <= dtime(15, 30)):
+            out_of_session_snapshots += 1
+            continue
         parsed.append((stamp, event))
+    if len(session_dates) > 1:
+        raise OrderFlowError("Analyse one regular NSE trading session at a time")
+    if not parsed:
+        raise OrderFlowError(
+            "No order-flow events fall within regular NSE cash-market hours (09:15–15:30 IST)"
+        )
     parsed.sort(key=lambda item: item[0])
 
     event_symbols = [
@@ -515,6 +528,8 @@ def analyze_order_flow(
     result = {
         "data_quality": "ESTIMATED_KITE_WEBSOCKET_SNAPSHOT",
         "snapshot_count": len(parsed),
+        "input_snapshot_count": len(rows),
+        "out_of_session_snapshot_count": out_of_session_snapshots,
         "unique_trade_updates": trade_updates,
         "duplicate_trade_snapshots_skipped": duplicates,
         "trade_updates_missing_last_trade_time": missing_trade_time,

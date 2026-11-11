@@ -395,3 +395,42 @@ def test_depth_level_limit_uses_only_the_requested_number_of_levels():
 def test_empty_order_flow_input_fails_closed():
     with pytest.raises(OrderFlowError, match="At least one"):
         analyze_order_flow([])
+
+
+def test_order_flow_analysis_excludes_pre_and_post_market_snapshots():
+    base = {
+        "symbol": "SBIN",
+        "last_trade_time": "2026-11-11T09:20:00+05:30",
+        "last_price": 100.10,
+        "last_quantity": 10,
+        "best_bid": 100.00,
+        "best_ask": 100.10,
+        "depth_buy": [{"price": 100.00, "quantity": 500}],
+        "depth_sell": [{"price": 100.10, "quantity": 200}],
+    }
+    events = [
+        {**base, "timestamp": "2026-11-11T08:59:59+05:30"},
+        {**base, "timestamp": "2026-11-11T09:20:00+05:30"},
+        {**base, "timestamp": "2026-11-11T15:31:00+05:30"},
+    ]
+
+    result = analyze_order_flow(events)
+
+    assert result["input_snapshot_count"] == 3
+    assert result["snapshot_count"] == 1
+    assert result["out_of_session_snapshot_count"] == 2
+    assert result["start_time"] == "2026-11-11T09:20:00+05:30"
+
+
+def test_order_flow_analysis_rejects_all_out_of_session_snapshots():
+    events = [
+        {
+            "symbol": "SBIN",
+            "timestamp": "2026-11-11T08:59:59+05:30",
+            "last_price": 100.0,
+            "last_quantity": 10,
+        }
+    ]
+
+    with pytest.raises(OrderFlowError, match="regular NSE cash-market hours"):
+        analyze_order_flow(events)

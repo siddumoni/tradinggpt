@@ -215,8 +215,10 @@ def test_required_artifact_over_github_api_limit_fails_closed(tmp_path, monkeypa
 def test_upload_accepts_volume_profile_and_order_flow_report_categories(tmp_path):
     profile = tmp_path / "volume_profile_summary.json"
     flow = tmp_path / "order_flow_summary.json"
+    validation = tmp_path / "microstructure_validation_summary.json"
     profile.write_text('{"report_type":"VOLUME_PROFILE"}', encoding="utf-8")
     flow.write_text('{"report_type":"ORDER_FLOW"}', encoding="utf-8")
+    validation.write_text('{"report_type":"MICROSTRUCTURE_PREDICTIVE_VALIDATION"}', encoding="utf-8")
     fake = FakeGitHub()
     result = upload_daily_artifacts(
         root=tmp_path,
@@ -235,6 +237,13 @@ def test_upload_accepts_volume_profile_and_order_flow_report_categories(tmp_path
                 "required": False,
                 "upload": True,
             },
+            {
+                "path": str(validation),
+                "category": "microstructure_validation",
+                "exists": True,
+                "required": False,
+                "upload": True,
+            },
         ],
         report_date="2026-11-11",
         environ={
@@ -247,3 +256,4 @@ def test_upload_accepts_volume_profile_and_order_flow_report_categories(tmp_path
     paths = {item["path"] for item in fake.tree_entries}
     assert "daily/2026-11-11/volume_profile/volume_profile_summary.json" in paths
     assert "daily/2026-11-11/order_flow/order_flow_summary.json" in paths
+    assert "daily/2026-11-11/microstructure_validation/microstructure_validation_summary.json" in paths

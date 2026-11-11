@@ -7,7 +7,9 @@ TradingGPT generates two optional, research-only JSON summaries during daily fin
 
 ## Timing and data quality
 
-Daily finalisation runs at 15:35 IST, after the regular NSE cash-market close. This allows the 5-minute candle archive and asynchronous Order Flow writer to settle before the reports are read.
+Daily finalisation runs at 15:35 IST, after the regular NSE cash-market close. This allows the asynchronous Order Flow writer to settle before the reports are read.
+
+**Volume Profile coverage limitation:** the existing candle archive intentionally keeps completed bars only through the 15:10 bar (ending at 15:15). The report therefore marks the profile as `PARTIAL` unless the archive contains all 75 regular-session bars through the 15:25 bar. It records each symbol's latest archived bar and warns when the final 15 minutes are absent. This preserves the existing scanner/archive cutoff rather than changing scanner behaviour.
 
 Volume Profile requires the local daily NSE instrument cache at `.local/nse_instruments.json` for each symbol's tick size. Symbols without a valid tick size or usable session candles are listed as warnings and omitted from calculated profiles.
 

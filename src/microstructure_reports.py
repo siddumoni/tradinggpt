@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import gzip
 import json
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -65,6 +65,7 @@ def write_microstructure_reports(
     tick_sizes, cache_warning = _load_tick_sizes(root / ".local" / "nse_instruments.json")
 
     volume_symbols: dict[str, Any] = {}
+    volume_coverage: dict[str, Any] = {}
     volume_warnings: list[str] = []
     if cache_warning:
         volume_warnings.append(cache_warning)
@@ -87,6 +88,33 @@ def write_microstructure_reports(
             ]
             if not session_rows:
                 continue
+            latest_stamp = max(
+                datetime.fromisoformat(
+                    str(row.get("date") or row.get("timestamp")).replace("Z", "+00:00")
+                )
+                for row in session_rows
+            )
+            latest_ist = (
+                latest_stamp.replace(tzinfo=IST)
+                if latest_stamp.tzinfo is None
+                else latest_stamp.astimezone(IST)
+            )
+            full_session_coverage = (
+                latest_ist.time().replace(tzinfo=None) >= time(15, 25)
+                and len(session_rows) >= 75
+            )
+            volume_coverage[symbol] = {
+                "candle_rows": len(session_rows),
+                "latest_bar_start_ist": latest_ist.strftime("%H:%M"),
+                "expected_final_bar_start_ist": "15:25",
+                "full_session_coverage": full_session_coverage,
+            }
+            if not full_session_coverage:
+                volume_warnings.append(
+                    f"{symbol}: archive contains {len(session_rows)} session candle(s), "
+                    f"latest starts at {latest_ist.strftime('%H:%M')} IST; final 15:25 candle "
+                    "and/or full 75-bar session coverage is missing."
+                )
             volume_symbols[symbol] = build_volume_profile(
                 session_rows,
                 tick_size=tick_size,
@@ -108,7 +136,19 @@ def write_microstructure_reports(
         "report_date": report_date,
         "generated_at": current.isoformat(),
         "research_only": True,
-        "status": "READY" if volume_symbols else "NO_DATA",
+        "status": (
+            "NO_DATA"
+            if not volume_symbols
+            else "READY"
+            if all(item["full_session_coverage"] for item in volume_coverage.values())
+            else "PARTIAL"
+        ),
+        "coverage": {
+            "symbols": volume_coverage,
+            "expected_regular_session_bars": 75,
+            "expected_final_bar_start_ist": "15:25",
+            "market_close_ist": "15:30",
+        },
         "method": "UNIFORM_OHLC_RANGE_ESTIMATE",
         "symbols_processed": len(volume_symbols),
         "symbols": volume_symbols,

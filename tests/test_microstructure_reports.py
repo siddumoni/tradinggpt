@@ -72,7 +72,8 @@ def test_writes_volume_profile_and_order_flow_summaries_for_session(tmp_path):
     volume = json.loads(by_category["volume_profile"].read_text(encoding="utf-8"))
     flow = json.loads(by_category["order_flow"].read_text(encoding="utf-8"))
 
-    assert volume["status"] == "READY"
+    assert volume["status"] == "PARTIAL"
+    assert volume["coverage"]["symbols"]["RELIANCE"]["full_session_coverage"] is False
     assert volume["symbols"]["RELIANCE"]["approximate"] is True
     assert "poc" in volume["symbols"]["RELIANCE"]
     assert flow["status"] == "READY"

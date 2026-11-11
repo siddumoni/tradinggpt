@@ -12,7 +12,7 @@ Daily finalisation runs at 15:35 IST, after the regular NSE cash-market close. B
 
 The archive accepts regular-session bar starts from 09:15 through 15:25. A profile is marked `READY` only when all 75 expected 5-minute bar timestamps are present. Merely having 75 rows or a late final timestamp is not sufficient. If Kite credentials, the instrument master, historical data, or a symbol's candle history is unavailable, the existing data is retained and the profile remains `PARTIAL` or `NO_DATA`; the main daily paper report is not blocked.
 
-The refresh only touches symbols already present in the provider-pure Kite candle archive and having at least 50 current-session bars. It does not add new symbols to the scanner universe or modify Champion decisions.
+The refresh only touches symbols already present in the provider-pure Kite candle archive. It does not add new symbols to the scanner universe or modify Champion decisions.
 
 Volume Profile requires the local NSE instrument cache at `.local/nse_instruments.json` for each symbol's tick size. Symbols without a valid tick size or usable session candles are listed as warnings and omitted from calculated profiles.
 

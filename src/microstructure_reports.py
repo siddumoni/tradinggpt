@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from src.candle_archive import append_completed_candles
+from src.data_fetcher import KiteMarketData
+from src.market_calendar import market_day_status
 from src.order_flow import OrderFlowError, analyze_order_flow, read_order_flow_events
 from src.volume_profile import VolumeProfileError, build_volume_profile
 
@@ -49,6 +52,101 @@ def _load_tick_sizes(cache_path: Path) -> tuple[dict[str, float], str | None]:
     return tick_sizes, None
 
 
+def _refresh_eod_candles(
+    *,
+    root: Path,
+    candle_archive_dir: Path,
+    report_date: str,
+    current: datetime,
+) -> list[str]:
+    """Refresh incomplete archived symbols after the cash close; never blocks reporting."""
+    if (
+        current.date().isoformat() != report_date
+        or current.time().replace(tzinfo=None) < time(15, 30)
+        or not market_day_status(current.date()).get("is_open")
+    ):
+        return []
+
+    candidates: list[Path] = []
+    for path in sorted(candle_archive_dir.glob("*.csv")):
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            session_rows = [
+                row for row in rows
+                if str(row.get("date") or row.get("timestamp") or "").startswith(report_date)
+            ]
+            if len(session_rows) < 50:
+                continue
+            latest = max(
+                datetime.fromisoformat(
+                    str(row.get("date") or row.get("timestamp")).replace("Z", "+00:00")
+                )
+                for row in session_rows
+            )
+            latest_ist = (
+                latest.replace(tzinfo=IST)
+                if latest.tzinfo is None
+                else latest.astimezone(IST)
+            )
+            if len(session_rows) < 75 or latest_ist.time().replace(tzinfo=None) < time(15, 25):
+                candidates.append(path)
+        except (OSError, csv.Error, UnicodeDecodeError, ValueError) as exc:
+            # The profile builder reports the precise archive error separately.
+            continue
+
+    if not candidates:
+        return []
+
+    warnings: list[str] = []
+    try:
+        provider = KiteMarketData.from_cached_session()
+        instruments = provider.instruments(now=current)
+        instrument_map = {
+            str(row.get("tradingsymbol") or "").strip().upper(): row
+            for row in instruments
+            if row.get("segment") == "NSE"
+            and row.get("instrument_type") == "EQ"
+            and row.get("instrument_token")
+        }
+    except Exception as exc:
+        return [
+            "End-of-day candle refresh unavailable; existing archives were retained: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+
+    start = datetime.combine(current.date(), time(9, 15), tzinfo=IST)
+    refreshed = 0
+    for path in candidates:
+        symbol = path.stem.upper()
+        instrument = instrument_map.get(symbol)
+        if instrument is None:
+            warnings.append(f"{symbol}: no NSE EQ instrument token for end-of-day refresh.")
+            continue
+        try:
+            candles = provider.historical_candles(
+                int(instrument["instrument_token"]), start, current, "5minute"
+            )
+            result = append_completed_candles(
+                symbol,
+                candles,
+                candle_archive_dir,
+                now=current,
+                provider_mode="kite",
+            )
+            refreshed += 1
+            if result.rows_observed == 0:
+                warnings.append(f"{symbol}: Kite returned no additional completed session bars.")
+        except Exception as exc:
+            warnings.append(f"{symbol}: end-of-day candle refresh failed: {type(exc).__name__}: {exc}")
+    warnings.insert(
+        0,
+        f"End-of-day candle refresh attempted for {len(candidates)} symbol(s); "
+        f"updated {refreshed}.",
+    )
+    return warnings
+
+
 def write_microstructure_reports(
     *,
     root: Path,
@@ -62,11 +160,17 @@ def write_microstructure_reports(
     candle_archive_dir = Path(candle_archive_dir)
     staging_dir = Path(staging_dir)
     current = now.replace(tzinfo=IST) if now.tzinfo is None else now.astimezone(IST)
+    refresh_warnings = _refresh_eod_candles(
+        root=root,
+        candle_archive_dir=candle_archive_dir,
+        report_date=report_date,
+        current=current,
+    )
     tick_sizes, cache_warning = _load_tick_sizes(root / ".local" / "nse_instruments.json")
 
     volume_symbols: dict[str, Any] = {}
     volume_coverage: dict[str, Any] = {}
-    volume_warnings: list[str] = []
+    volume_warnings: list[str] = list(refresh_warnings)
     if cache_warning:
         volume_warnings.append(cache_warning)
 

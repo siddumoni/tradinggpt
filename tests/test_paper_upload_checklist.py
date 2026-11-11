@@ -84,6 +84,10 @@ def test_upload_checklist_builds_date_scoped_artifact_exports(tmp_path):
     assert by_label["Daily Markdown report"]["upload"] is True
     assert by_label["SQLite paper account database (excluded from automatic upload)"]["upload"] is False
     assert by_label["Daily upload checklist"]["exists"] is True
+    assert by_label["Daily Volume Profile summary"]["category"] == "volume_profile"
+    assert by_label["Daily Volume Profile summary"]["upload"] is True
+    assert by_label["Daily Order Flow summary"]["category"] == "order_flow"
+    assert by_label["Daily Order Flow summary"]["upload"] is True
 
     candle_export = Path(by_label["RELIANCE daily Kite candle extract"]["path"])
     with candle_export.open(encoding="utf-8", newline="") as handle:

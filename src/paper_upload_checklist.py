@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import csv
+import logging
 import json
 import re
 import shutil
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from src.microstructure_reports import write_microstructure_reports
 
 IST = ZoneInfo("Asia/Kolkata")
+LOGGER = logging.getLogger(__name__)
 LOG_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2} ")
 
 
@@ -124,6 +127,15 @@ def write_upload_checklist(
         shutil.rmtree(staging)
     staging.mkdir(parents=True, exist_ok=True)
 
+    try:
+        microstructure_records = write_microstructure_reports(
+            root=Path(root), report_date=day, candle_archive_dir=Path(candle_archive_dir),
+            staging_dir=staging, now=current,
+        )
+    except Exception:
+        microstructure_records = []
+        LOGGER.exception("Could not generate optional microstructure reports.")
+
     # label, upload path, required, purpose, category, upload automatically, source path
     artifacts: list[tuple[str, Path, bool, str, str, bool, Path | None]] = [
         ("Daily Markdown report", Path(report_result.get("markdown_path", reports_dir / f"{prefix}.md")), True,
@@ -236,6 +248,13 @@ def write_upload_checklist(
         False,
         None,
     ))
+
+    for record in microstructure_records:
+        artifacts.append((
+            str(record["label"]), Path(record["path"]), False,
+            str(record["purpose"]), str(record["category"]),
+            bool(record.get("upload", True)), None,
+        ))
 
     def display_path(path: Path) -> str:
         try:

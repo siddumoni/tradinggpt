@@ -116,7 +116,7 @@ def test_finalization_uploads_only_after_report_and_checklist_generation(tmp_pat
  monkeypatch.setattr(service,"WatchShadowPortfolio",FakeWatch)
  monkeypatch.setattr(service,"write_upload_checklist",make_checklist)
  monkeypatch.setattr(service,"upload_daily_artifacts",upload)
- now=datetime(2026,11,3,15,20,tzinfo=ZoneInfo("Asia/Kolkata"))
+ now=datetime(2026,11,3,15,35,tzinfo=ZoneInfo("Asia/Kolkata"))
 
  result=service._finalize_reports(
   root=tmp_path,db_path=tmp_path/"data"/"paper.sqlite3",

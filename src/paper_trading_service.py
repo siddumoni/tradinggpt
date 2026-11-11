@@ -756,7 +756,7 @@ def main(argv=None) -> int:
                     )
                 if market_day_status(now.date())["status"] == "OPEN" and now.time().replace(
                     tzinfo=None
-                ) >= dtime(15, 20):
+                ) >= dtime(15, 35):
                     date_key = now.date().isoformat()
                     if date_key not in reported_dates:
                         _finalize_reports(

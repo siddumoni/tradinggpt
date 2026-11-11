@@ -9,7 +9,7 @@ import argparse
 import gzip
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time as dtime
 import json
 import logging
 import math
@@ -395,7 +395,7 @@ def analyze_order_flow(
             raise OrderFlowError("Every event must include a valid timestamp")
         session_dates.add(stamp.date().isoformat())
         clock = stamp.time().replace(tzinfo=None)
-        if not (datetime.strptime("09:15", "%H:%M").time() <= clock <= datetime.strptime("15:30", "%H:%M").time()):
+        if not (dtime(9, 15) <= clock <= dtime(15, 30)):
             out_of_session_snapshots += 1
             continue
         parsed.append((stamp, event))

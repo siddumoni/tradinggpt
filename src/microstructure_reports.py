@@ -246,6 +246,7 @@ def write_microstructure_reports(
             if all(item["full_session_coverage"] for item in volume_coverage.values())
             and not cache_warning
             and not any("no valid tick size" in warning for warning in volume_warnings)
+            and len(volume_symbols) == len(volume_coverage)
             else "PARTIAL"
         ),
         "coverage": {

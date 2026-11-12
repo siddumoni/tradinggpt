@@ -183,80 +183,75 @@ class GitHubPrivateResearchUploader:
             raise GitHubUploadError("Could not resolve the current research repository tree.")
 
         remote_root = f"daily/{day}"
-        categories = sorted({str(item["category"]) for item in files})
-        remote_items: dict[str, dict] = {}
-
-        # List the dated root as well as category folders. The root listing
-        # contains manifest.json, which allows unchanged daily batches to be
-        # recognized without producing another Git commit on graceful shutdown.
-        root_endpoint = (
-            f"{repo_path}/contents/{remote_root}"
-            f"?ref={urllib.parse.quote(branch, safe='')}"
+        snapshot_time = (
+            generated_at.replace(tzinfo=IST)
+            if generated_at.tzinfo is None
+            else generated_at.astimezone(IST)
         )
-        root_entries = self._get_optional(root_endpoint) or []
-        if isinstance(root_entries, list):
-            for item in root_entries:
-                if item.get("type") == "file" and item.get("path"):
-                    remote_items[str(item["path"])] = item
-
+        snapshot_id = snapshot_time.strftime("%Y%m%dT%H%M%S%f%z")
+        snapshot_root = f"{remote_root}/snapshots/{snapshot_id}"
+        latest_root = f"{remote_root}/latest"
+        categories = sorted({str(item["category"]) for item in files})
         for category in categories:
             if category not in ALLOWED_CATEGORIES:
                 raise GitHubUploadError(f"Unsupported upload category: {category}")
+
+        remote_items: dict[str, dict] = {}
+
+        def load_directory(path: str) -> list[str]:
             endpoint = (
-                f"{repo_path}/contents/{remote_root}/{category}"
+                f"{repo_path}/contents/{path}"
                 f"?ref={urllib.parse.quote(branch, safe='')}"
             )
-            existing = self._get_optional(endpoint) or []
-            if isinstance(existing, list):
-                for item in existing:
-                    if item.get("type") == "file" and item.get("path"):
-                        remote_items[str(item["path"])] = item
+            entries = self._get_optional(endpoint) or []
+            directories: list[str] = []
+            if isinstance(entries, list):
+                for entry in entries:
+                    entry_path = entry.get("path")
+                    if entry.get("type") == "file" and entry_path:
+                        remote_items[str(entry_path)] = entry
+                    elif entry.get("type") == "dir" and entry.get("name"):
+                        directories.append(str(entry["name"]))
+            return directories
 
-        tree_entries: list[dict] = []
+        # Keep the original date-root files as a compatibility alias. New
+        # consumers should use latest/ for the current view and snapshots/
+        # for immutable point-in-time research packages.
+        load_directory(remote_root)
+        latest_categories = load_directory(latest_root)
+        snapshot_categories = load_directory(snapshot_root)
+
+        for category in categories:
+            load_directory(f"{remote_root}/{category}")
+            load_directory(f"{latest_root}/{category}")
+            load_directory(f"{snapshot_root}/{category}")
+        for category in latest_categories:
+            load_directory(f"{latest_root}/{category}")
+        for category in snapshot_categories:
+            load_directory(f"{snapshot_root}/{category}")
+
         manifest_files: list[dict] = []
-        unchanged = 0
-        uploaded = 0
         for item in files:
             category = str(item["category"])
             name = Path(str(item["path"])).name
-            remote_path = f"{remote_root}/{category}/{name}"
             content = item["content"]
-            sha256 = hashlib.sha256(content).hexdigest()
             manifest_files.append({
-                "path": remote_path,
+                "path": f"{remote_root}/{category}/{name}",
+                "snapshot_path": f"{snapshot_root}/{category}/{name}",
+                "latest_path": f"{latest_root}/{category}/{name}",
                 "category": category,
                 "size_bytes": len(content),
-                "sha256": sha256,
+                "sha256": hashlib.sha256(content).hexdigest(),
                 "required": bool(item.get("required")),
             })
-            blob_sha = _git_blob_sha(content)
-            existing = remote_items.get(remote_path)
-            if existing and existing.get("sha") == blob_sha:
-                unchanged += 1
-                continue
-
-            blob = self._request(
-                "POST",
-                f"{repo_path}/git/blobs",
-                {
-                    "content": base64.b64encode(content).decode("ascii"),
-                    "encoding": "base64",
-                },
-            )
-            new_blob_sha = str(blob.get("sha") or "")
-            if not new_blob_sha:
-                raise GitHubUploadError(f"GitHub did not return a blob SHA for {name}.")
-            tree_entries.append({
-                "path": remote_path,
-                "mode": "100644",
-                "type": "blob",
-                "sha": new_blob_sha,
-            })
-            uploaded += 1
 
         manifest = {
             "project": "TradingGPT",
             "report_date": day,
+            "generated_at": snapshot_time.isoformat(),
+            "snapshot_id": snapshot_id,
+            "snapshot_folder": snapshot_root,
+            "latest_folder": latest_root,
             "repository": self.repository,
             "research_only": True,
             "orders_sent_to_broker": False,
@@ -271,12 +266,95 @@ class GitHubPrivateResearchUploader:
         manifest_bytes = json.dumps(
             manifest, indent=2, ensure_ascii=False, allow_nan=False
         ).encode("utf-8")
-        manifest_path = f"{remote_root}/manifest.json"
+
+        snapshot_expected = {
+            f"{snapshot_root}/{item['category']}/{Path(str(item['path'])).name}"
+            for item in files
+        }
+        snapshot_expected.add(f"{snapshot_root}/manifest.json")
+        snapshot_existing = {
+            path for path in remote_items if path.startswith(f"{snapshot_root}/")
+        }
+        if snapshot_existing and snapshot_existing != snapshot_expected:
+            raise GitHubUploadError(
+                "Refusing to modify an existing immutable snapshot with a different file set."
+            )
+
+        tree_entries: list[dict] = []
+        unchanged = 0
+        uploaded = 0
+        removed_latest = 0
+        latest_expected = {
+            f"{latest_root}/{item['category']}/{Path(str(item['path'])).name}"
+            for item in files
+        }
+        latest_expected.add(f"{latest_root}/manifest.json")
+        latest_existing = {
+            path for path in remote_items if path.startswith(f"{latest_root}/")
+        }
+        for stale_path in sorted(latest_existing - latest_expected):
+            tree_entries.append({
+                "path": stale_path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": None,
+            })
+            removed_latest += 1
+
+        destinations = (
+            (remote_root, False),
+            (latest_root, False),
+            (snapshot_root, True),
+        )
+        for item in files:
+            category = str(item["category"])
+            name = Path(str(item["path"])).name
+            content = item["content"]
+            blob_sha = _git_blob_sha(content)
+            for destination, immutable in destinations:
+                remote_path = f"{destination}/{category}/{name}"
+                existing = remote_items.get(remote_path)
+                if immutable and existing and existing.get("sha") != blob_sha:
+                    raise GitHubUploadError(
+                        "Refusing to overwrite content in an immutable report snapshot."
+                    )
+                if existing and existing.get("sha") == blob_sha:
+                    unchanged += 1
+                    continue
+                blob = self._request(
+                    "POST",
+                    f"{repo_path}/git/blobs",
+                    {
+                        "content": base64.b64encode(content).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                )
+                new_blob_sha = str(blob.get("sha") or "")
+                if not new_blob_sha:
+                    raise GitHubUploadError(f"GitHub did not return a blob SHA for {name}.")
+                tree_entries.append({
+                    "path": remote_path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": new_blob_sha,
+                })
+                uploaded += 1
+
         manifest_sha = _git_blob_sha(manifest_bytes)
-        existing_manifest = remote_items.get(manifest_path)
-        if existing_manifest and existing_manifest.get("sha") == manifest_sha:
-            unchanged += 1
-        else:
+        for destination, immutable in (
+            (remote_root, False),
+            (latest_root, False),
+            (snapshot_root, True),
+        ):
+            manifest_path = f"{destination}/manifest.json"
+            existing_manifest = remote_items.get(manifest_path)
+            if immutable and existing_manifest and existing_manifest.get("sha") != manifest_sha:
+                raise GitHubUploadError(
+                    "Refusing to overwrite the manifest in an immutable report snapshot."
+                )
+            if existing_manifest and existing_manifest.get("sha") == manifest_sha:
+                unchanged += 1
+                continue
             blob = self._request(
                 "POST",
                 f"{repo_path}/git/blobs",
@@ -302,10 +380,14 @@ class GitHubPrivateResearchUploader:
                 "repository": self.repository,
                 "branch": branch,
                 "remote_folder": remote_root,
+                "remote_snapshot_folder": snapshot_root,
+                "remote_latest_folder": latest_root,
+                "snapshot_id": snapshot_id,
                 "uploaded_files": 0,
                 "unchanged_files": unchanged,
+                "removed_latest_files": removed_latest,
                 "commit_sha": None,
-                "message": "All daily artifacts are already up to date.",
+                "message": "This report snapshot and latest view are already up to date.",
             }
 
         new_tree = self._request(
@@ -320,7 +402,7 @@ class GitHubPrivateResearchUploader:
             "POST",
             f"{repo_path}/git/commits",
             {
-                "message": f"Add TradingGPT paper research artifacts for {day}",
+                "message": f"Snapshot TradingGPT paper research artifacts for {day} ({snapshot_id})",
                 "tree": new_tree_sha,
                 "parents": [parent_sha],
             },
@@ -338,10 +420,14 @@ class GitHubPrivateResearchUploader:
             "repository": self.repository,
             "branch": branch,
             "remote_folder": remote_root,
+            "remote_snapshot_folder": snapshot_root,
+            "remote_latest_folder": latest_root,
+            "snapshot_id": snapshot_id,
             "uploaded_files": uploaded,
             "unchanged_files": unchanged,
+            "removed_latest_files": removed_latest,
             "commit_sha": commit_sha,
-            "message": "Daily research artifacts uploaded in one commit.",
+            "message": "Daily research snapshot uploaded; latest view refreshed in one commit.",
         }
 
 

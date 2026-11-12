@@ -57,31 +57,34 @@ Repeated finalization on the same day is safe: files with unchanged Git blob has
 
 ## Folder layout
 
-Each report date gets its own folder:
+Every report date has an immutable snapshot archive, a refreshed latest view, and the original date-root layout retained as a compatibility alias:
 
 ~~~text
 daily/
 └── 2026-11-03/
-    ├── manifest.json
-    ├── reports/
-    │   ├── paper_daily_2026-11-03.md
-    │   ├── paper_daily_2026-11-03.json
-    │   ├── paper_daily_2026-11-03_trades.csv
-    │   └── paper_upload_checklist_2026-11-03.txt
-    ├── scans/
-    │   └── phase6_scan_20261103_*.json
-    ├── diagnostics/
-    │   ├── paper_daily_report_state.json
-    │   ├── paper_scan_runs.csv
-    │   ├── paper_signals.csv
-    │   └── paper_scan_scheduler_state.json
-    ├── logs/
-    │   └── paper_trading_service.log
-    └── candles/
-        ├── RELIANCE.csv
-        ├── HDFCBANK.csv
-        └── ...
+    ├── manifest.json                 # compatibility alias; refreshed
+    ├── reports/                      # compatibility alias; refreshed
+    ├── scans/                         # compatibility alias; refreshed/accumulated
+    ├── latest/
+    │   ├── manifest.json
+    │   ├── reports/
+    │   ├── scans/
+    │   ├── diagnostics/
+    │   ├── logs/
+    │   └── candles/
+    └── snapshots/
+        ├── 20261103T152000000000+0530/
+        │   ├── manifest.json
+        │   ├── reports/
+        │   ├── scans/
+        │   ├── diagnostics/
+        │   ├── logs/
+        │   └── candles/
+        └── 20261103T155000000000+0530/
+            └── ...
 ~~~
+
+The timestamp is derived from the report-generation time in Asia/Kolkata. Each snapshot is immutable: the uploader refuses to change an existing snapshot directory if its contents differ. A repeated upload with the same timestamp and same content is idempotent. The `latest/` directory is refreshed to match the newest upload and stale files are removed **only from that latest view**. The original date-root files remain as a compatibility alias for existing links and older tooling; use `snapshots/` for historical comparisons and `latest/` for the newest package.
 
 The exact stock archives depend on the screened/open symbols and candle files updated on that IST date.
 

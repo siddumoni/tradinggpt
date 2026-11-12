@@ -1,6 +1,8 @@
 """Opening-range breakout strategy using completed 5-minute candles."""
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 
 from .models import StrategySignal
@@ -20,7 +22,7 @@ def opening_range_quality_diagnostics(
     max_extension_range_multiple: float = 0.50,
     min_directional_close_location: float = 0.65,
     min_body_fraction: float = 0.30,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Describe breakout quality for research; flags never block a signal.
 
     Thresholds are research-only and require validation on unseen sessions

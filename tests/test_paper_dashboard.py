@@ -126,3 +126,14 @@ def test_dashboard_manual_close_requires_json_content_type(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+
+def test_dashboard_has_dedicated_microstructure_shadow_strategy_section():
+    from src.paper_dashboard import DASHBOARD_HTML
+
+    assert 'id="microstructure-strategy-cards"' in DASHBOARD_HTML
+    assert 'id="microstructure-count"' in DASHBOARD_HTML
+    assert "Microstructure shadow strategies" in DASHBOARD_HTML
+    assert "MICROSTRUCTURE_SHADOW" in DASHBOARD_HTML
+    assert "Not validated yet" in DASHBOARD_HTML

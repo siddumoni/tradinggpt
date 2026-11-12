@@ -207,7 +207,7 @@ td{color:#d5deec;border-bottom-color:#223147}tbody tr:hover td{background:#17263
       </div>
       <div class="section-head"><div><div class="section-kicker">Research tracks</div><h2>What the other sections mean</h2><p>These are separate experiments. Do not add their results to Champion's P&amp;L.</p></div></div>
       <div class="track-grid">
-        <button class="track-card" type="button" data-view-target="challenger"><h3>⚗ Challenger Lab</h3><p>Three alternative strategies are tested with simulated trades. “Shadow” simply means paper-only and separate from Champion.</p><div class="track-meta"><span id="overview-challenger-meta">3 experimental strategies</span><span class="track-arrow">View lab →</span></div></button>
+        <button class="track-card" type="button" data-view-target="challenger"><h3>⚗ Challenger Lab</h3><p>Classic indicator strategies and three microstructure experiments are tested in separate paper-only shadow books, away from Champion.</p><div class="track-meta"><span id="overview-challenger-meta">6 experimental strategies</span><span class="track-arrow">View lab →</span></div></button>
         <button class="track-card" type="button" data-view-target="watch"><h3>◉ Watch Book</h3><p>Tracks eligible scanner candidates Champion skipped, mainly because their Target 1 net reward-to-risk was too low.</p><div class="track-meta"><span id="overview-watch-meta">Separate what-if book</span><span class="track-arrow">View watch →</span></div></button>
       </div>
     </section>
@@ -225,11 +225,13 @@ td{color:#d5deec;border-bottom-color:#223147}tbody tr:hover td{background:#17263
 
     <section class="view" data-view="challenger">
       <div class="info-box"><strong>Challenger = alternative strategies. Shadow = how they are tested.</strong><p>Each Challenger strategy has its own simulated paper book. These trades do not use Champion's cash and do not change Champion's profit/loss. A strategy marked “Review candidate” has only passed an initial screen; it is not automatically promoted.</p></div>
-      <div class="section-head"><div><div class="section-kicker">Three experiments</div><h2>Challenger strategies</h2><p>Compare their results individually. More trades and more market days make the comparison more useful.</p></div><span class="pill blue" id="challenger-count">3 strategies</span></div>
+      <div class="section-head"><div><div class="section-kicker">Classic shadow experiments</div><h2>Challenger strategies</h2><p>Classic indicator-based strategies are shown separately from the new microstructure research experiments.</p></div><span class="pill blue" id="challenger-count">3 strategies</span></div>
       <div class="strategy-grid" id="challenger-strategy-cards"></div>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Open Challenger positions</h3><p>Both target levels and after-cost RRR for each experimental strategy.</p></div><span class="pill" id="challenger-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Unrealised net</th><th>Status</th></tr></thead><tbody id="challenger-open-rows"></tbody></table></div></section>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Challenger trade history</h3><p>Closed shadow trades. Use this to compare each experimental strategy over time.</p></div><input class="search" type="search" placeholder="Search history…" aria-label="Search Challenger history" data-filter-for="challenger-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="challenger-history-rows"></tbody></table></div></section>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Strategy status</h3><p>What each strategy is currently being considered for.</p></div><span class="pill">No automatic promotion</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Status</th><th>What it means</th></tr></thead><tbody id="challenger-registry-rows"></tbody></table></div><div class="footer">Initial review screen: at least 50 closed trades across 20 exit dates, positive net P&amp;L, profit factor ≥ 1.2 and drawdown ≤ 10%. Passing this screen only makes a strategy a review candidate. It still needs untouched out-of-sample validation and manual review.</div></section>
+      <div class="section-head"><div><div class="section-kicker">Volume Profile + Order Flow</div><h2>Microstructure shadow strategies</h2><p>These three paper-only experiments use estimated Volume Profile and Order Flow inputs. Their results are not validated and are kept separate from Champion.</p></div><span class="pill blue" id="microstructure-count">3 strategies</span></div>
+      <div class="strategy-grid" id="microstructure-strategy-cards"></div>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Open Shadow positions</h3><p>Positions across classic Challenger and microstructure shadow experiments; both target levels and after-cost RRR are shown.</p></div><span class="pill" id="challenger-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Unrealised net</th><th>Status</th></tr></thead><tbody id="challenger-open-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Shadow trade history</h3><p>Closed trades across classic Challenger and microstructure shadow experiments.</p></div><input class="search" type="search" placeholder="Search history…" aria-label="Search Challenger history" data-filter-for="challenger-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Strategy</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="challenger-history-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Strategy status</h3><p>What each strategy is currently being considered for.</p></div><span class="pill">No automatic promotion</span></div><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Status</th><th>What it means</th></tr></thead><tbody id="challenger-registry-rows"></tbody></table></div><div class="footer">Classic Challenger review screen: at least 50 closed trades across 20 exit dates, positive net P&amp;L, profit factor ≥ 1.2 and drawdown ≤ 10%. Microstructure strategies remain labelled “Not validated yet” until they have sufficient same-bar data coverage, enough closed trades, untouched out-of-sample validation and manual review. No strategy is promoted automatically.</div></section>
     </section>
 
     <section class="view" data-view="watch">
@@ -338,7 +340,9 @@ function render(s){
   const a=s.account||{},opens=s.open_positions||[],closed=s.closed_trades||[];
   const watch=s.watch_shadow||{},wa=watch.account||{};
   const shadowOpen=s.shadow_open_positions||[],shadowClosed=s.shadow_closed_trades||[];
-  const strategies=(s.strategies||[]).filter(x=>String(x.track).toUpperCase()==="SHADOW");
+  const shadowStrategies=(s.strategies||[]).filter(x=>["SHADOW","MICROSTRUCTURE_SHADOW"].includes(String(x.track).toUpperCase()));
+  const strategies=shadowStrategies.filter(x=>String(x.track).toUpperCase()==="SHADOW");
+  const microStrategies=shadowStrategies.filter(x=>String(x.track).toUpperCase()==="MICROSTRUCTURE_SHADOW");
   const championNet=(val(a.realized_pnl)||0)+(val(a.unrealized_net_pnl)||0);
 
   setMetrics("overview-kpis",[
@@ -359,7 +363,7 @@ function render(s){
   renderTable("overview-open-rows",opens.slice(0,5),[
     {key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},{value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)}
   ],"No open Champion positions right now.");
-  byId("overview-challenger-meta").textContent=strategies.length+" strategies · "+fmtNum(strategies.reduce((n,x)=>n+(val(x.trades)||0),0))+" closed trades";
+  byId("overview-challenger-meta").textContent=shadowStrategies.length+" strategies · "+fmtNum(shadowStrategies.reduce((n,x)=>n+(val(x.trades)||0),0))+" closed trades";
   byId("overview-watch-meta").textContent=fmtNum(wa.candidate_count)+" candidates recorded · separate book";
 
   setMetrics("champion-kpis",[
@@ -400,34 +404,50 @@ function render(s){
 
   const registry=s.strategy_registry||[];
   const registryByVersion=new Map(registry.map(x=>[x.strategy_version,x]));
-  byId("challenger-count").textContent=strategies.length+" strategies";
-  const cards=byId("challenger-strategy-cards");cards.replaceChildren();
-  const descriptions={
+  const classicDescriptions={
     challenger_ema_9_21_v1:"EMA 9/21 crossover with VWAP and MACD confirmation.",
     challenger_vwap_momentum_v1:"VWAP crossover confirmed by EMA direction and MACD.",
     challenger_ema_pullback_v1:"Trend-aligned pullback toward EMA 21 with ATR-based levels."
   };
-  strategies.forEach(st=>{
-    const reg=registryByVersion.get(st.strategy_version)||{};
-    const card=document.createElement("article");card.className="strategy-card";
-    const top=document.createElement("div");top.className="strategy-top";
-    const title=document.createElement("h3");title.textContent=safeText(st.strategy);
-    const rawStatus=String(reg.status||"TESTING");
-    const badge=document.createElement("span");badge.className="pill "+(rawStatus==="REVIEW_CANDIDATE"?"amber":"blue");
-    badge.textContent=rawStatus==="REVIEW_CANDIDATE"?"Review candidate":rawStatus==="ACTIVE"?"Active":"Testing";
-    top.append(title,badge);
-    const desc=document.createElement("p");desc.className="desc";desc.textContent=descriptions[st.strategy_version]||"Experimental Challenger strategy.";
-    const stats=document.createElement("div");stats.className="strategy-stats";
-    const values=[
-      ["Closed trades",fmtNum(st.trades)],
-      ["Win rate",fmtPct(st.win_rate_pct)],
-      ["Expectancy",fmtMoney(st.expectancy)],
-      ["Net P&L",fmtMoney(st.net_pnl)]
-    ];
-    values.forEach(pair=>{const box=document.createElement("div");const l=document.createElement("span");l.textContent=pair[0];const v=document.createElement("strong");v.textContent=pair[1];if(pair[0]==="Net P&L")v.className=pnlClass(st.net_pnl);box.append(l,v);stats.append(box);});
-    card.append(top,desc,stats);cards.append(card);
-  });
-  if(!strategies.length){const note=document.createElement("div");note.className="panel";note.textContent="Challenger strategy results will appear after the strategy lab processes archived completed candles.";cards.append(note);}
+  const microstructureDescriptions={
+    micro_vp_value_rejection_ofi_v1:"Prior-bars-only estimated VAL/VAH rejection with same-bar estimated Order Flow confirmation.",
+    micro_vp_value_acceptance_breakout_v1:"Price acceptance beyond the estimated value area with same-bar Order Flow and volume confirmation.",
+    micro_orderflow_price_continuation_v1:"Estimated trade delta checked against candle structure, VWAP, EMA alignment and relative volume."
+  };
+  const renderStrategyCards=(containerId,items,descriptions,emptyMessage)=>{
+    const cards=byId(containerId);cards.replaceChildren();
+    items.forEach(st=>{
+      const reg=registryByVersion.get(st.strategy_version)||{};
+      const card=document.createElement("article");card.className="strategy-card";
+      const top=document.createElement("div");top.className="strategy-top";
+      const title=document.createElement("h3");title.textContent=safeText(st.strategy);
+      const rawStatus=String(reg.status||"TESTING");
+      const badge=document.createElement("span");
+      badge.className="pill "+(["REVIEW_CANDIDATE","SHADOW_ENABLED_NOT_VALIDATED"].includes(rawStatus)?"amber":"blue");
+      badge.textContent=rawStatus==="REVIEW_CANDIDATE"?"Review candidate":
+        rawStatus==="SHADOW_ENABLED_NOT_VALIDATED"?"Not validated yet":
+        rawStatus==="ACTIVE"?"Active":"Testing";
+      top.append(title,badge);
+      const desc=document.createElement("p");desc.className="desc";
+      desc.textContent=descriptions[st.strategy_version]||"Experimental shadow strategy.";
+      const stats=document.createElement("div");stats.className="strategy-stats";
+      const values=[
+        ["Closed trades",fmtNum(st.trades)],
+        ["Win rate",fmtPct(st.win_rate_pct)],
+        ["Expectancy",fmtMoney(st.expectancy)],
+        ["Net P&L",fmtMoney(st.net_pnl)]
+      ];
+      values.forEach(pair=>{const box=document.createElement("div");const l=document.createElement("span");l.textContent=pair[0];const v=document.createElement("strong");v.textContent=pair[1];if(pair[0]==="Net P&L")v.className=pnlClass(st.net_pnl);box.append(l,v);stats.append(box);});
+      card.append(top,desc,stats);cards.append(card);
+    });
+    if(!items.length){const note=document.createElement("div");note.className="panel";note.textContent=emptyMessage;cards.append(note);}
+  };
+  byId("challenger-count").textContent=strategies.length+" strategies";
+  byId("microstructure-count").textContent=microStrategies.length+" strategies";
+  renderStrategyCards("challenger-strategy-cards",strategies,classicDescriptions,
+    "Classic Challenger results will appear after the strategy lab processes completed candles.");
+  renderStrategyCards("microstructure-strategy-cards",microStrategies,microstructureDescriptions,
+    "Microstructure shadow cards are registered but no current results are available.");
   byId("challenger-open-count").textContent=shadowOpen.length+" open";
   renderTable("challenger-open-rows",shadowOpen,[
     {key:"strategy_name"},{key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},
@@ -436,16 +456,20 @@ function render(s){
     {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)},
     {value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)},
     {render:(td,x)=>statusCell(td,"Shadow paper","blue")}
-  ],"No open Challenger positions at the moment.");
+  ],"No open shadow positions at the moment.");
   renderTable("challenger-history-rows",shadowClosed,[
     {value:x=>fmtTime(x.exit_time)},{key:"strategy_name"},{key:"symbol"},{render:sideCell},{value:x=>fmtNum(x.quantity)},
     {value:x=>fmtMoney(x.entry_fill_price)},{value:x=>fmtMoney(x.exit_fill_price)},
     {value:x=>fmtMoney(x.transaction_charges)},{value:x=>fmtMoney(x.slippage_cost)},
     {value:x=>fmtMoney(x.net_pnl),cls:x=>pnlClass(x.net_pnl)},{key:"exit_reason",cls:()=>"wrap"}
   ],"No completed Challenger shadow trades yet. Keep the service running to collect prospective results.");
-  renderTable("challenger-registry-rows",registry.filter(x=>String(x.track).toUpperCase()==="CHALLENGER"),[
+  renderTable("challenger-registry-rows",registry.filter(x=>["CHALLENGER","MICROSTRUCTURE_SHADOW"].includes(String(x.track).toUpperCase())),[
     {key:"strategy_name"},
-    {render:(td,x)=>{const st=String(x.status||"TESTING");statusCell(td,st==="REVIEW_CANDIDATE"?"Review candidate":st==="ACTIVE"?"Active":"Testing",st==="REVIEW_CANDIDATE"?"amber":"blue");}},
+    {render:(td,x)=>{const st=String(x.status||"TESTING");statusCell(td,
+      st==="REVIEW_CANDIDATE"?"Review candidate":
+      st==="SHADOW_ENABLED_NOT_VALIDATED"?"Not validated yet":
+      st==="ACTIVE"?"Active":"Testing",
+      ["REVIEW_CANDIDATE","SHADOW_ENABLED_NOT_VALIDATED"].includes(st)?"amber":"blue");}},
     {value:x=>x.description||"Still collecting paper observations.",cls:()=>"wrap"}
   ],"No strategy registry entries are available yet.");
 

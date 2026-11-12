@@ -33,11 +33,16 @@ CHALLENGER_VERSION_NAMES = {
     "challenger_ema_9_21_atr_seed_v2": "EMA 9/21 momentum (ATR-seeded)",
     "challenger_vwap_momentum_atr_seed_v2": "VWAP + MACD momentum (ATR-seeded)",
     "challenger_ema_pullback_atr_seed_v2": "EMA trend pullback (ATR-seeded)",
+    "micro_vp_value_rejection_ofi_v1": "Volume Profile value-edge rejection + Order Flow",
+    "micro_vp_value_acceptance_breakout_v1": "Volume Profile value-area breakout + Order Flow",
+    "micro_orderflow_price_continuation_v1": "Order Flow delta + price confirmation",
 }
 CHALLENGER_VERSION_TRACKS = {
     version: (
         "CHALLENGER_ARCHIVE"
         if version.startswith("challenger_") and version.endswith("_v1")
+        else "MICROSTRUCTURE_SHADOW"
+        if version.startswith("micro_")
         else "SHADOW"
     )
     for version in CHALLENGER_VERSION_NAMES
@@ -251,6 +256,27 @@ class PaperBroker:
                     "CHALLENGER",
                     "SHADOW",
                     "Research-only alternative; plain 1 ATR stop retained; separate version evidence.",
+                ),
+                (
+                    "micro_vp_value_rejection_ofi_v1",
+                    "Volume Profile value-edge rejection + Order Flow",
+                    "MICROSTRUCTURE_SHADOW",
+                    "SHADOW_ENABLED_NOT_VALIDATED",
+                    "Research-only shadow strategy; prior-bars-only OHLCV profile and same-bar estimated Order Flow confirmation. Volume-at-price and aggressor-side metrics are estimates.",
+                ),
+                (
+                    "micro_vp_value_acceptance_breakout_v1",
+                    "Volume Profile value-area breakout + Order Flow",
+                    "MICROSTRUCTURE_SHADOW",
+                    "SHADOW_ENABLED_NOT_VALIDATED",
+                    "Research-only shadow strategy; estimated value-area breakout with same-bar Order Flow and volume confirmation. Profile and aggressor-side metrics are estimates.",
+                ),
+                (
+                    "micro_orderflow_price_continuation_v1",
+                    "Order Flow delta + price confirmation",
+                    "MICROSTRUCTURE_SHADOW",
+                    "SHADOW_ENABLED_NOT_VALIDATED",
+                    "Research-only shadow strategy; estimated trade delta checked against candle structure, VWAP, EMA alignment and relative volume. Order Flow metrics are estimates.",
                 ),
             ]
             for row in defaults:

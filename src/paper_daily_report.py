@@ -8,6 +8,7 @@ import sqlite3
 from math import isfinite
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.paper_broker import DEFAULT_DB, PAPER_BASELINE_VERSION, PaperBroker
@@ -17,7 +18,7 @@ from src.candidate_outcome_tracker import CandidateOutcomeTracker
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _distance_pct(entry: object, level: object) -> float | None:
+def _distance_pct(entry: Any, level: Any) -> float | None:
     try:
         entry_value = float(entry)
         level_value = float(level)

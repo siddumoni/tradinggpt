@@ -768,6 +768,15 @@ def evaluate_symbol_bundle(
             company_specific_risk=company_specific_risk,
         )
     signal = sorted(signals, key=lambda s: s.confidence, reverse=True)[0]
+    if signal.strategy in {"opening_range_breakout", "opening_range_breakdown"}:
+        trigger_rule = "ABOVE" if signal.side == "LONG" else "BELOW"
+        if signal.trigger_price is not None:
+            market_safety_validation["strategy_trigger"] = {
+                "price": float(signal.trigger_price),
+                "rule": trigger_rule,
+                "strategy": signal.strategy,
+                "source": "opening_range_boundary",
+            }
     if (signal.side == "LONG" and stock_regime != "BULLISH") or (signal.side == "SHORT" and stock_regime != "BEARISH"):
         reasons.append(f"5-minute {signal.side} setup conflicts with the 15-minute stock trend ({stock_regime}); no trade.")
         return _no_trade_candidate(

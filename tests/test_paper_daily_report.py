@@ -1,6 +1,7 @@
 import csv
 import json
 import sqlite3
+import pytest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -33,6 +34,10 @@ def test_daily_report_writes_json_csv_markdown_and_separate_tracks(tmp_path):
         reader = csv.DictReader(handle)
         assert "source_rejection_reason" in reader.fieldnames
         assert "risk_budget_inr" in reader.fieldnames
+        assert "stop_loss" in reader.fieldnames
+        assert "target_1" in reader.fieldnames
+        assert "target_2" in reader.fieldnames
+        assert "stop_distance_pct_from_entry_fill" in reader.fieldnames
     markdown = base.with_suffix(".md").read_text(encoding="utf-8")
     assert "## Champion account" in markdown
     assert "## Challenger strategy lab" in markdown
@@ -162,3 +167,8 @@ def test_daily_report_separates_new_champion_from_archived_foundation_candidate(
     tracks = {row["symbol"]: row["track"] for row in rows}
     assert tracks["TCS"] == "CHAMPION"
     assert tracks["INFY"] == "CHAMPION_ARCHIVE"
+    tcs = next(row for row in rows if row["symbol"] == "TCS")
+    assert float(tcs["stop_loss"]) == 98.0
+    assert float(tcs["target_1"]) == 104.0
+    assert float(tcs["target_2"]) == 108.0
+    assert float(tcs["stop_distance_pct_from_entry_fill"]) == pytest.approx(2.049, abs=0.001)

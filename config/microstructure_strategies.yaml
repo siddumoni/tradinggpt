@@ -1,0 +1,17 @@
+# Research-only microstructure strategy settings.
+# These thresholds are for independent shadow paper books; they do not alter Champion.
+microstructure:
+  enabled: true
+  minimum_profile_bars: 12
+  minimum_bucket_snapshots: 15
+  minimum_trade_updates: 5
+  value_area_pct: 0.70
+  value_rejection_delta_pct: 8.0
+  breakout_delta_pct: 12.0
+  continuation_delta_pct: 15.0
+  minimum_relative_volume: 1.20
+  minimum_body_atr: 0.35
+  value_edge_buffer_atr: 0.15
+  breakout_buffer_atr: 0.10
+  stop_buffer_atr: 0.15
+  minimum_book_imbalance: 0.03

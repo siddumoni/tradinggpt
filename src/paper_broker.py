@@ -35,7 +35,11 @@ CHALLENGER_VERSION_NAMES = {
     "challenger_ema_pullback_atr_seed_v2": "EMA trend pullback (ATR-seeded)",
 }
 CHALLENGER_VERSION_TRACKS = {
-    version: ("CHALLENGER_ARCHIVE" if version.endswith("_v1") else "SHADOW")
+    version: (
+        "CHALLENGER_ARCHIVE"
+        if version.startswith("challenger_") and version.endswith("_v1")
+        else "SHADOW"
+    )
     for version in CHALLENGER_VERSION_NAMES
 }
 MAX_ENTRY_QUOTE_AGE_SECONDS = 120.0

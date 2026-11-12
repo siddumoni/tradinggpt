@@ -27,8 +27,8 @@ def test_daily_report_writes_json_csv_markdown_and_separate_tracks(tmp_path):
     assert (tmp_path / "reports" / "paper_daily_2026-10-26_trades.csv").is_file()
     payload = json.loads(base.with_suffix(".json").read_text(encoding="utf-8"))
     assert payload["orders_sent_to_broker"] is False
-    assert {"champion", "challengers", "watch_shadow", "candidate_outcomes"} <= payload.keys()
-    assert {"champion", "challengers", "watch_shadow", "candidate_outcomes"} <= payload["summary"].keys()
+    assert {"champion", "challengers", "microstructure_shadow", "watch_shadow", "candidate_outcomes"} <= payload.keys()
+    assert {"champion", "challengers", "microstructure_shadow", "watch_shadow", "candidate_outcomes"} <= payload["summary"].keys()
     with (tmp_path / "reports" / "paper_daily_2026-10-26_trades.csv").open(
         encoding="utf-8", newline=""
     ) as handle:
@@ -42,6 +42,7 @@ def test_daily_report_writes_json_csv_markdown_and_separate_tracks(tmp_path):
     markdown = base.with_suffix(".md").read_text(encoding="utf-8")
     assert "## Champion account" in markdown
     assert "## Challenger strategy lab" in markdown
+    assert "## Volume Profile + Order Flow shadow book" in markdown
     assert "## Watch-candidate shadow book" in markdown
 
 
@@ -173,3 +174,48 @@ def test_daily_report_separates_new_champion_from_archived_foundation_candidate(
     assert float(tcs["target_1"]) == 104.0
     assert float(tcs["target_2"]) == 108.0
     assert float(tcs["stop_distance_pct_from_entry_fill"]) == pytest.approx(2.049, abs=0.001)
+
+
+def test_daily_report_keeps_microstructure_strategies_in_separate_shadow_book(tmp_path):
+    from src.paper_broker import PaperBroker
+
+    db_path = tmp_path / "paper.sqlite3"
+    PaperBroker(db_path)
+    now = datetime(2026, 11, 12, 16, 0, tzinfo=IST)
+    signal_time = datetime(2026, 11, 12, 10, 0, tzinfo=IST).isoformat()
+    exit_time = datetime(2026, 11, 12, 10, 15, tzinfo=IST).isoformat()
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """INSERT INTO shadow_signals(
+                signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+                stop_loss,target_1,target_2,status,entry_time,entry_reference_price,
+                entry_fill_price,quantity,exit_time,exit_fill_price,exit_reason,net_pnl,
+                reason,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,'CLOSED',?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "micro-vp-test", "micro_vp_value_rejection_ofi_v1",
+                "Volume Profile value-edge rejection + estimated Order Flow",
+                "SBIN", "LONG", signal_time, 100.0, 99.0, 101.0, 102.0,
+                signal_time, 100.05, 100.05, 10, exit_time, 101.0,
+                "TARGET_2", 100.0, "test microstructure candidate", signal_time,
+            ),
+        )
+
+    output_dir = tmp_path / "reports"
+    out = generate_daily_report(db_path, output_dir, now)
+    base = output_dir / "paper_daily_2026-11-12"
+    payload = json.loads(base.with_suffix(".json").read_text(encoding="utf-8"))
+
+    assert out["microstructure_shadow_closed_trades"] == 1
+    assert out["microstructure_shadow_net_pnl"] == 100.0
+    assert out["shadow_closed_trades"] == 0
+    assert payload["summary"]["microstructure_shadow"]["closed_trades"] == 1
+    assert payload["summary"]["microstructure_shadow"]["net_pnl"] == 100.0
+    assert payload["challengers"]["closed_trades_today"] == 0
+
+    with (output_dir / "paper_daily_2026-11-12_trades.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    row = next(row for row in rows if row["symbol"] == "SBIN")
+    assert row["track"] == "MICROSTRUCTURE_SHADOW"

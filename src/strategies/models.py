@@ -15,6 +15,7 @@ class StrategySignal:
     invalidation: str
     confidence: int
     reason: str
+    trigger_price: float | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.confidence <= 100:

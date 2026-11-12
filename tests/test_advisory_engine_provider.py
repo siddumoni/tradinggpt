@@ -470,6 +470,7 @@ def _run_directional_kite_scan(
             invalidation="test invalidation",
             confidence=70,
             reason="deterministic integration-test candidate",
+            trigger_price=10.7,
         ),
     )
     monkeypatch.setattr(

@@ -5,8 +5,10 @@ import argparse
 import csv
 import json
 import sqlite3
+from math import isfinite
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.paper_broker import DEFAULT_DB, PAPER_BASELINE_VERSION, PaperBroker
@@ -14,6 +16,17 @@ from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.candidate_outcome_tracker import CandidateOutcomeTracker
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _distance_pct(entry: Any, level: Any) -> float | None:
+    try:
+        entry_value = float(entry)
+        level_value = float(level)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not isfinite(entry_value) or not isfinite(level_value) or entry_value <= 0:
+        return None
+    return round(abs(level_value - entry_value) / entry_value * 100.0, 4)
 
 
 def generate_daily_report(
@@ -224,7 +237,9 @@ def generate_daily_report(
     columns = [
         "track", "strategy", "strategy_version", "symbol", "side", "status", "signal_time",
         "scan_as_of", "signal_available_at", "method_version", "entry_time", "entry_reference_price",
-        "entry_fill_price", "quantity", "exit_time", "exit_fill_price",
+        "entry_fill_price", "stop_loss", "target_1", "target_2",
+        "stop_distance_pct_from_entry_fill", "target_1_distance_pct_from_entry_fill",
+        "target_2_distance_pct_from_entry_fill", "quantity", "exit_time", "exit_fill_price",
         "exit_reason", "gross_pnl", "transaction_charges", "slippage_cost",
         "total_estimated_costs", "net_pnl", "risk_budget_inr", "reason",
         "source_rejection_reason", "exclusion_reason", "assessed_net_rr_t1",
@@ -240,7 +255,12 @@ def generate_daily_report(
             ), "strategy": row.get("strategy"),
             "strategy_version": row.get("strategy_version"), "symbol": row.get("symbol"),
             "side": row.get("side"), "status": row.get("status"), "signal_time": row.get("signal_time"),
-            "entry_time": row.get("entry_time"), "entry_fill_price": row.get("entry_fill_price"),
+            "entry_time": row.get("entry_time"), "entry_reference_price": row.get("entry_reference_price"),
+            "entry_fill_price": row.get("entry_fill_price"), "stop_loss": row.get("stop_loss"),
+            "target_1": row.get("target_1"), "target_2": row.get("target_2"),
+            "stop_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("stop_loss")),
+            "target_1_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_1")),
+            "target_2_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_2")),
             "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
             "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
             "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),
@@ -253,7 +273,12 @@ def generate_daily_report(
             "track": "CHALLENGER", "strategy": row.get("strategy_name"),
             "strategy_version": row.get("strategy_version"), "symbol": row.get("symbol"),
             "side": row.get("side"), "status": row.get("status"), "signal_time": row.get("signal_time"),
-            "entry_time": row.get("entry_time"), "entry_fill_price": row.get("entry_fill_price"),
+            "entry_time": row.get("entry_time"), "entry_reference_price": row.get("entry_reference_price"),
+            "entry_fill_price": row.get("entry_fill_price"), "stop_loss": row.get("stop_loss"),
+            "target_1": row.get("target_1"), "target_2": row.get("target_2"),
+            "stop_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("stop_loss")),
+            "target_1_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_1")),
+            "target_2_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_2")),
             "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
             "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
             "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),
@@ -268,6 +293,10 @@ def generate_daily_report(
             "scan_as_of": row.get("scan_as_of"), "signal_available_at": row.get("signal_available_at"),
             "method_version": row.get("method_version"), "entry_time": row.get("entry_time"),
             "entry_reference_price": row.get("entry_reference_price"), "entry_fill_price": row.get("entry_fill_price"),
+            "stop_loss": row.get("stop_loss"), "target_1": row.get("target_1"), "target_2": row.get("target_2"),
+            "stop_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("stop_loss")),
+            "target_1_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_1")),
+            "target_2_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_2")),
             "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
             "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
             "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),
@@ -288,6 +317,10 @@ def generate_daily_report(
             "scan_as_of": row.get("scan_as_of"), "signal_available_at": row.get("signal_available_at"),
             "method_version": row.get("method_version"), "entry_time": row.get("entry_time"),
             "entry_reference_price": row.get("entry_reference_price"), "entry_fill_price": row.get("entry_fill_price"),
+            "stop_loss": row.get("stop_loss"), "target_1": row.get("target_1"), "target_2": row.get("target_2"),
+            "stop_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("stop_loss")),
+            "target_1_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_1")),
+            "target_2_distance_pct_from_entry_fill": _distance_pct(row.get("entry_fill_price"), row.get("target_2")),
             "quantity": row.get("quantity"), "exit_time": row.get("exit_time"),
             "exit_fill_price": row.get("exit_fill_price"), "exit_reason": row.get("exit_reason"),
             "gross_pnl": row.get("gross_pnl"), "transaction_charges": row.get("transaction_charges"),

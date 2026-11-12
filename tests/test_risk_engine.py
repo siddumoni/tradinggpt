@@ -237,3 +237,54 @@ def test_account_profile_cannot_lower_minimum_net_rr_below_1_5(tmp_path):
     )
     with pytest.raises(ValueError, match="cannot be below 1.5"):
         load_account_profile("research", path)
+
+
+
+@pytest.mark.parametrize(
+    ("side", "entry", "stop", "target_1", "target_2"),
+    [
+        ("LONG", 100.0, 99.8, 102.0, 103.0),
+        ("SHORT", 100.0, 100.2, 98.0, 97.0),
+    ],
+)
+def test_configured_minimum_stop_distance_is_enforced(
+    side: str, entry: float, stop: float, target_1: float, target_2: float
+) -> None:
+    settings = RiskSettings(
+        capital_inr=20_000,
+        risk_per_trade_inr=500,
+        minimum_net_risk_reward=1.5,
+        minimum_stop_distance_pct=0.25,
+    )
+    result = assess_trade(
+        side=side,
+        entry_price=entry,
+        stop_loss=stop,
+        target_1=target_1,
+        target_2=target_2,
+        settings=settings,
+        estimated_margin_per_share=50,
+    )
+    assert not result.accepted
+    assert result.quantity == 0
+    assert "Stop distance" in result.reason
+    assert "0.250%" in result.reason
+
+
+def test_stop_distance_exactly_at_configured_minimum_is_allowed() -> None:
+    settings = RiskSettings(
+        capital_inr=20_000,
+        risk_per_trade_inr=500,
+        minimum_net_risk_reward=1.5,
+        minimum_stop_distance_pct=0.25,
+    )
+    result = assess_trade(
+        side="LONG",
+        entry_price=100.0,
+        stop_loss=99.75,
+        target_1=102.0,
+        target_2=103.0,
+        settings=settings,
+        estimated_margin_per_share=50,
+    )
+    assert result.accepted

@@ -98,11 +98,20 @@ def test_upload_creates_one_private_daily_commit_and_dated_folder(tmp_path):
     )
     assert result["ok"] is True
     assert result["remote_folder"] == "daily/2026-11-03"
-    assert result["uploaded_files"] == 2  # report plus manifest
+    assert result["uploaded_files"] == 6  # report + manifest in legacy, latest and snapshot views
     assert fake.committed is True
     paths = {item["path"] for item in fake.tree_entries}
     assert "daily/2026-11-03/reports/paper_daily_2026-11-03.md" in paths
     assert "daily/2026-11-03/manifest.json" in paths
+    assert "daily/2026-11-03/latest/reports/paper_daily_2026-11-03.md" in paths
+    assert "daily/2026-11-03/latest/manifest.json" in paths
+    snapshot_paths = [path for path in paths if "/snapshots/20261103T152000000000+0530/" in path]
+    assert "daily/2026-11-03/snapshots/20261103T152000000000+0530/reports/paper_daily_2026-11-03.md" in paths
+    assert "daily/2026-11-03/snapshots/20261103T152000000000+0530/manifest.json" in paths
+    assert result["remote_latest_folder"] == "daily/2026-11-03/latest"
+    assert result["remote_snapshot_folder"] == "daily/2026-11-03/snapshots/20261103T152000000000+0530"
+    assert result["snapshot_id"] == "20261103T152000000000+0530"
+    assert len(snapshot_paths) == 2
     assert any(
         method == "GET" and path == "/repos/acme/research/contents/daily/2026-11-03"
         for method, path, *_ in fake.calls

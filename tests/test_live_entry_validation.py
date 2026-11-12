@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from dataclasses import replace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -143,3 +144,38 @@ def test_quote_inspection_rejects_crossed_market():
     result = inspect_executable_quote(quote(100.2, 100.1, now), "LONG", now=now)
     assert result["valid"] is False
     assert "crossed" in result["reason"].lower()
+
+
+def test_orb_long_is_rejected_when_executable_quote_retraces_below_trigger():
+    now = datetime(2026, 11, 2, 11, 5, tzinfo=IST)
+    item = replace(
+        candidate("LONG"),
+        strategy="opening_range_breakout",
+        entry_validation={"strategy_trigger": {"price": 100.5, "rule": "ABOVE"}},
+    )
+    result = validate(item, quote(100.0, 100.1, now), now)
+    assert result.action == "WATCH_CANDIDATE"
+    assert result.entry_validation["status"] == "REJECTED_BREAKOUT_RETRACEMENT"
+    assert result.quantity == 0
+
+
+def test_orb_short_is_rejected_when_executable_quote_retraces_above_trigger():
+    now = datetime(2026, 11, 2, 11, 5, tzinfo=IST)
+    item = replace(
+        candidate("SHORT"),
+        strategy="opening_range_breakdown",
+        entry_validation={"strategy_trigger": {"price": 99.5, "rule": "BELOW"}},
+    )
+    result = validate(item, quote(99.9, 100.0, now), now)
+    assert result.action == "WATCH_CANDIDATE"
+    assert result.entry_validation["status"] == "REJECTED_BREAKOUT_RETRACEMENT"
+    assert result.quantity == 0
+
+
+def test_orb_entry_fails_closed_when_trigger_metadata_is_missing():
+    now = datetime(2026, 11, 2, 11, 5, tzinfo=IST)
+    item = replace(candidate("LONG"), strategy="opening_range_breakout")
+    result = validate(item, quote(100.0, 100.1, now), now)
+    assert result.action == "WATCH_CANDIDATE"
+    assert result.entry_validation["status"] == "REJECTED_MISSING_BREAKOUT_LEVEL"
+    assert result.quantity == 0

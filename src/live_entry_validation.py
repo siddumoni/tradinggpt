@@ -200,6 +200,32 @@ def revalidate_candidate_at_quote(
 
     entry_price = float(details["executable_entry_price"])
     drift_pct = ((entry_price / reference_entry) - 1.0) * 100.0
+    strategy_name = str(getattr(candidate, "strategy", "") or "").strip().lower()
+    if strategy_name in {"opening_range_breakout", "opening_range_breakdown"}:
+        trigger = prior_validation.get("strategy_trigger")
+        if not isinstance(trigger, dict):
+            return failed(
+                "REJECTED_MISSING_BREAKOUT_LEVEL",
+                "Opening-range setup is missing its original breakout/breakdown level; entry fails closed.",
+            )
+        try:
+            trigger_price = float(trigger.get("price"))
+        except (TypeError, ValueError, OverflowError):
+            trigger_price = float("nan")
+        expected_rule = "ABOVE" if candidate.side == "LONG" else "BELOW"
+        trigger_rule = str(trigger.get("rule") or "").strip().upper()
+        if not isfinite(trigger_price) or trigger_price <= 0 or trigger_rule != expected_rule:
+            return failed(
+                "REJECTED_INVALID_BREAKOUT_LEVEL",
+                "Opening-range trigger metadata is invalid or inconsistent with trade direction; entry fails closed.",
+            )
+        trigger_still_valid = entry_price > trigger_price if expected_rule == "ABOVE" else entry_price < trigger_price
+        if not trigger_still_valid:
+            return failed(
+                "REJECTED_BREAKOUT_RETRACEMENT",
+                f"Opening-range trigger invalidated before entry: executable price ₹{entry_price:.2f} "
+                f"is not {expected_rule.lower()} the original level ₹{trigger_price:.2f}.",
+            )
     stop = float(candidate.stop_loss)
     target_1 = float(candidate.target_1)
     target_2 = float(candidate.target_2)

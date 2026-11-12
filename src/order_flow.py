@@ -299,7 +299,7 @@ class KiteTickRecorder:
                 with gzip.open(target, "at", encoding="utf-8", newline="") as handle:
                     for record in records:
                         handle.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False))
-                        handle.write("\\n")
+                        handle.write("\n")
                         bucket_written += 1
             with self._lock:
                 self._bucket_written += bucket_written

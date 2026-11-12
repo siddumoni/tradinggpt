@@ -281,3 +281,30 @@ def test_failed_pre_entry_alert_withholds_paper_entry(tmp_path):
  assert r["opened"]==0 and r["rejected"]==1
  assert b.snapshot()["account"]["open_positions"]==0
  assert any("trade-plan alert was not delivered" in row["message"] for row in b.snapshot()["events"])
+
+
+
+def test_snapshot_exposes_microstructure_strategies_on_separate_shadow_track(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    snapshot = broker.snapshot()
+
+    expected = {
+        "micro_vp_value_rejection_ofi_v1",
+        "micro_vp_value_acceptance_breakout_v1",
+        "micro_orderflow_price_continuation_v1",
+    }
+    displayed = {
+        item["strategy_version"]: item
+        for item in snapshot["strategies"]
+    }
+    registered = {
+        item["strategy_version"]: item
+        for item in snapshot["strategy_registry"]
+    }
+
+    assert expected.issubset(displayed)
+    assert expected.issubset(registered)
+    for version in expected:
+        assert displayed[version]["track"] == "MICROSTRUCTURE_SHADOW"
+        assert registered[version]["track"] == "MICROSTRUCTURE_SHADOW"
+        assert registered[version]["status"] == "SHADOW_ENABLED_NOT_VALIDATED"

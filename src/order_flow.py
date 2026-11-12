@@ -296,7 +296,7 @@ class KiteTickRecorder:
             for (session_date, symbol, bucket_name), records in bucket_groups.items():
                 target = bucket_root / session_date / symbol / f"{bucket_name}.jsonl.gz"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with gzip.open(target, "at", encoding="utf-8", newline="\\n") as handle:
+                with gzip.open(target, "at", encoding="utf-8", newline="") as handle:
                     for record in records:
                         handle.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False))
                         handle.write("\\n")

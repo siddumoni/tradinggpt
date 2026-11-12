@@ -179,3 +179,14 @@ def test_orb_entry_fails_closed_when_trigger_metadata_is_missing():
     assert result.action == "WATCH_CANDIDATE"
     assert result.entry_validation["status"] == "REJECTED_MISSING_BREAKOUT_LEVEL"
     assert result.quantity == 0
+
+
+
+def test_live_entry_rejects_stop_tighter_than_configured_minimum():
+    now = datetime(2026, 11, 2, 11, 5, tzinfo=IST)
+    item = replace(candidate("LONG"), stop_loss=99.9)
+    result = validate(item, quote(100.0, 100.1, now), now)
+    assert result.action == "WATCH_CANDIDATE"
+    assert result.entry_validation["status"] == "REJECTED_RISK_GATE"
+    assert "Stop distance" in result.entry_validation["reason"]
+    assert result.quantity == 0

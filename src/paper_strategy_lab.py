@@ -264,7 +264,7 @@ def process_archive(
  order_flow_bar_dir:Path|None=None,
  tick_size_cache:Path|None=None,
  microstructure_config:Path|None=None,
-)->dict[str,int]:
+)->dict[str,Any]:
  """Generate prospective challenger observations from completed Kite candles.
 
  When finalize_session is true, any still-pending eligible entry is classified as

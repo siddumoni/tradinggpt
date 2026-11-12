@@ -1,9 +1,10 @@
 import csv
 import json
 import sqlite3
-import pytest
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from src.paper_daily_report import generate_daily_report
 from src.watch_shadow_portfolio import WatchShadowPortfolio

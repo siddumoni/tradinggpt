@@ -289,6 +289,42 @@ def write_microstructure_reports(
     else:
         order_flow_warnings.append("No Order Flow capture directory exists for this session.")
 
+    observed_coverage: dict[str, Any] = {}
+    for symbol, stats in order_flow_symbols.items():
+        start_value = stats.get("start_time")
+        end_value = stats.get("end_time")
+        span_minutes = None
+        try:
+            if start_value and end_value:
+                span_minutes = max(
+                    0.0,
+                    (
+                        datetime.fromisoformat(str(end_value).replace("Z", "+00:00"))
+                        - datetime.fromisoformat(str(start_value).replace("Z", "+00:00"))
+                    ).total_seconds() / 60.0,
+                )
+        except (TypeError, ValueError):
+            span_minutes = None
+        observed_coverage[symbol] = {
+            "snapshot_count": int(stats.get("snapshot_count") or 0),
+            "unique_trade_updates": int(stats.get("unique_trade_updates") or 0),
+            "first_snapshot_ist": start_value,
+            "last_snapshot_ist": end_value,
+            "observed_first_to_last_span_minutes": round(span_minutes, 2) if span_minutes is not None else None,
+            "span_is_not_continuous_coverage": True,
+        }
+
+    short_span_symbols = [
+        symbol for symbol, item in observed_coverage.items()
+        if item["observed_first_to_last_span_minutes"] is not None
+        and item["observed_first_to_last_span_minutes"] < 60
+    ]
+    if short_span_symbols:
+        order_flow_warnings.append(
+            f"{len(short_span_symbols)} symbol(s) have less than 60 minutes between their first and last captured snapshot; "
+            "this span does not establish continuous capture."
+        )
+
     order_flow_payload = {
         "report_type": "ORDER_FLOW",
         "report_date": report_date,
@@ -297,6 +333,11 @@ def write_microstructure_reports(
         "status": "READY" if order_flow_symbols else "NO_DATA",
         "symbols_processed": len(order_flow_symbols),
         "symbols": order_flow_symbols,
+        "coverage": {
+            "by_symbol": observed_coverage,
+            "symbols_with_observed_span_under_60_minutes": len(short_span_symbols),
+            "note": "First-to-last snapshot span is descriptive only and must not be interpreted as continuous data coverage.",
+        },
         "warnings": order_flow_warnings,
         "limitations": [
             "Kite WebSocket snapshots are not a guaranteed record of every exchange execution "

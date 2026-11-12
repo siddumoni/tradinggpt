@@ -199,7 +199,10 @@ class KiteTickRecorder:
         self._written = 0
         self._dropped = 0
         self._write_errors = 0
+        self._bucket_written = 0
+        self._bucket_write_errors = 0
         self._last_error: str | None = None
+        self._last_bucket_error: str | None = None
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -270,6 +273,44 @@ class KiteTickRecorder:
         with self._lock:
             self._written += written
 
+        # Write a second, compact lookup layout keyed by completed 5-minute
+        # candle start. The daily archive above remains the canonical EOD file.
+        bucket_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for record in batch:
+            stamp = _parse_datetime(record.get("timestamp"))
+            if stamp is None:
+                continue
+            clock = stamp.time().replace(tzinfo=None)
+            if not (dtime(9, 15) <= clock <= dtime(15, 30)):
+                continue
+            bucket_start = stamp.replace(
+                minute=(stamp.minute // 5) * 5, second=0, microsecond=0
+            )
+            bucket_groups[
+                (stamp.date().isoformat(), str(record["symbol"]).upper(), bucket_start.strftime("%H%M"))
+            ].append(record)
+
+        bucket_written = 0
+        bucket_root = self.settings.directory.with_name(self.settings.directory.name + "_bars")
+        try:
+            for (session_date, symbol, bucket_name), records in bucket_groups.items():
+                target = bucket_root / session_date / symbol / f"{bucket_name}.jsonl.gz"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with gzip.open(target, "at", encoding="utf-8", newline="") as handle:
+                    for record in records:
+                        handle.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False))
+                        handle.write("\n")
+                        bucket_written += 1
+            with self._lock:
+                self._bucket_written += bucket_written
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            # This derived index is optional. Preserve the canonical daily feed
+            # and never let a research-index failure stop paper price monitoring.
+            with self._lock:
+                self._bucket_write_errors += len(batch)
+                self._last_bucket_error = str(exc)
+            LOGGER.exception("Could not persist five-minute order-flow bucket index")
+
     def _writer_loop(self) -> None:
         batch: list[dict[str, Any]] = []
         last_flush = time.monotonic()
@@ -310,6 +351,9 @@ class KiteTickRecorder:
                 "dropped_queue_full": self._dropped,
                 "write_errors": self._write_errors,
                 "last_error": self._last_error,
+                "bucket_written": self._bucket_written,
+                "bucket_write_errors": self._bucket_write_errors,
+                "last_bucket_error": self._last_bucket_error,
                 "pending": self._queue.qsize(),
                 "writer_alive": bool(self._thread and self._thread.is_alive()),
             }

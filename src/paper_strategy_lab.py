@@ -12,6 +12,13 @@ from src.paper_outcomes import load_candles
 from src.risk_engine import RiskSettings, assess_trade, load_phase2_settings
 from src.research_timing import next_five_minute_bar_after, to_ist
 from src.exit_policy import evaluate_ohlc_exit, load_exit_policy, plan_policy_levels
+from src.microstructure_strategy import (
+    MicrostructureSettings,
+    generate_microstructure_signals,
+    load_microstructure_settings,
+    load_tick_size_lookup,
+)
+from src.order_flow import OrderFlowError, read_order_flow_events
 IST=ZoneInfo("Asia/Kolkata")
 SHADOW_CAPITAL=100_000.0
 SHADOW_RISK=500.0
@@ -20,11 +27,17 @@ MIN_NET_RR=1.5
 SLIPPAGE_BPS=5.0
 ENTRY_CUTOFF=dtime(14,45)
 EXIT_POLICY=load_exit_policy()
-DEFINITIONS={"challenger_ema_9_21_atr_seed_v2":"EMA 9/21 crossover with VWAP and MACD confirmation (plain 1 ATR stop control)","challenger_vwap_momentum_atr_seed_v2":"VWAP crossover with EMA and MACD confirmation (plain 1 ATR stop control)","challenger_ema_pullback_atr_seed_v2":"Trend-aligned EMA21 pullback with ATR-scaled levels (plain 1 ATR stop control)"}
+DEFINITIONS={"challenger_ema_9_21_atr_seed_v2":"EMA 9/21 crossover with VWAP and MACD confirmation (plain 1 ATR stop control)","challenger_vwap_momentum_atr_seed_v2":"VWAP crossover with EMA and MACD confirmation (plain 1 ATR stop control)","challenger_ema_pullback_atr_seed_v2":"Trend-aligned EMA21 pullback with ATR-scaled levels (plain 1 ATR stop control)",
+ "micro_vp_value_rejection_ofi_v1":"Volume Profile value-edge rejection with estimated Order Flow confirmation",
+ "micro_vp_value_acceptance_breakout_v1":"Volume Profile value-area acceptance breakout with estimated Order Flow confirmation",
+ "micro_orderflow_price_continuation_v1":"Estimated Order Flow delta with candle, VWAP, EMA and relative-volume confirmation"}
 VERSION_FAMILY={
  "challenger_ema_9_21_atr_seed_v2":("challenger_ema_9_21_v1","challenger_ema_9_21_atr_seed_v2"),
  "challenger_vwap_momentum_atr_seed_v2":("challenger_vwap_momentum_v1","challenger_vwap_momentum_atr_seed_v2"),
  "challenger_ema_pullback_atr_seed_v2":("challenger_ema_pullback_v1","challenger_ema_pullback_atr_seed_v2"),
+ "micro_vp_value_rejection_ofi_v1":("micro_vp_value_rejection_ofi_v1",),
+ "micro_vp_value_acceptance_breakout_v1":("micro_vp_value_acceptance_breakout_v1",),
+ "micro_orderflow_price_continuation_v1":("micro_orderflow_price_continuation_v1",),
 }
 def _signal_id(version:str,symbol:str,side:str,stamp:str)->str:
  return hashlib.sha256("|".join((version,symbol.upper(),side.upper(),stamp)).encode()).hexdigest()[:32]
@@ -94,6 +107,27 @@ def _insert_new_signals(db:sqlite3.Connection,symbol:str,frame:pd.DataFrame)->in
   cur=db.execute("""INSERT OR IGNORE INTO shadow_signals(signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,stop_loss,target_1,target_2,status,reason,created_at)
   VALUES(?,?,?,?,?,?,?,?,?,?,'PENDING_ENTRY',?,?)""",
    (x["signal_id"],x["strategy_version"],x["strategy_name"],x["symbol"],x["side"],x["signal_time"],x["signal_close"],x["stop_loss"],x["target_1"],x["target_2"],x["reason"],pd.Timestamp.now(tz=IST).isoformat()))
+  count+=cur.rowcount
+ return count
+
+def _insert_microstructure_signals(
+    db:sqlite3.Connection,
+    symbol:str,
+    frame:pd.DataFrame,
+    events:list[dict[str,Any]],
+    *,
+    tick_size:float,
+    settings,
+)->int:
+ count=0
+ for x in generate_microstructure_signals(symbol,frame,events,tick_size=tick_size,settings=settings):
+  cur=db.execute("""INSERT OR IGNORE INTO shadow_signals(
+   signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
+   stop_loss,target_1,target_2,status,reason,created_at
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,'PENDING_ENTRY',?,?)""",
+   (x["signal_id"],x["strategy_version"],x["strategy_name"],x["symbol"],x["side"],
+    x["signal_time"],x["signal_close"],x["stop_loss"],x["target_1"],x["target_2"],
+    x["reason"],pd.Timestamp.now(tz=IST).isoformat()))
   count+=cur.rowcount
  return count
 def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->None:
@@ -222,8 +256,15 @@ def _update_review_status(db:sqlite3.Connection,version:str)->None:
   db.execute("UPDATE strategy_registry SET status='REVIEW_CANDIDATE',description=? WHERE strategy_version=?",
    ("Initial paper screen passed (50+ closed trades, 20+ exit dates, positive net P&L, PF >=1.2, drawdown <=10%). Requires untouched out-of-sample review; never auto-promoted.",version))
 def process_archive(
- archive_dir:Path,db_path:Path,*,now:datetime|pd.Timestamp|None=None,finalize_session:bool=False
-)->dict[str,int]:
+ archive_dir:Path,
+ db_path:Path,
+ *,
+ now:datetime|pd.Timestamp|None=None,
+ finalize_session:bool=False,
+ order_flow_bar_dir:Path|None=None,
+ tick_size_cache:Path|None=None,
+ microstructure_config:Path|None=None,
+)->dict[str,Any]:
  """Generate prospective challenger observations from completed Kite candles.
 
  When finalize_session is true, any still-pending eligible entry is classified as
@@ -231,7 +272,19 @@ def process_archive(
  """
  from src.paper_broker import PaperBroker
  PaperBroker(db_path);archive=Path(archive_dir)
- inserted=closed=0;symbols=0;last_archived_by_symbol={}
+ repo_root=archive.resolve().parent.parent
+ bar_root=Path(order_flow_bar_dir) if order_flow_bar_dir is not None else repo_root/".local"/"order_flow_bars"
+ tick_file=Path(tick_size_cache) if tick_size_cache is not None else repo_root/".local"/"nse_instruments.json"
+ micro_config_error=None
+ try:
+  micro_settings=load_microstructure_settings(microstructure_config)
+ except (OSError,ValueError,TypeError) as exc:
+  micro_settings=MicrostructureSettings(enabled=False)
+  micro_config_error=str(exc)
+ tick_sizes=load_tick_size_lookup(tick_file)
+ scan_now=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=IST)
+ scan_now=scan_now.tz_localize(IST) if scan_now.tzinfo is None else scan_now.tz_convert(IST)
+ inserted=closed=0;symbols=0;micro_inserted=0;micro_buckets=0;micro_missing_buckets=0;micro_errors=0;micro_missing_tick_sizes=0;last_archived_by_symbol={}
  with sqlite3.connect(db_path,timeout=15) as db:
   db.row_factory=sqlite3.Row;ensure_shadow_schema(db)
   if archive.is_dir():
@@ -244,6 +297,31 @@ def process_archive(
     symbols+=1;symbol=path.stem.upper();frame=add_scanner_indicators(candles)
     if not frame.empty:last_archived_by_symbol[symbol]=frame.index[-1].isoformat()
     inserted+=_insert_new_signals(db,symbol,frame)
+    if micro_settings.enabled and not frame.empty:
+     if symbol not in tick_sizes:
+      micro_missing_tick_sizes+=1
+     else:
+      latest_stamp=frame.index[-1]
+      latest_ist=latest_stamp.tz_localize(IST) if latest_stamp.tzinfo is None else latest_stamp.tz_convert(IST)
+      bar_is_complete=(latest_ist+pd.Timedelta(minutes=5))<=scan_now
+      if latest_ist.date()!=scan_now.date() or not bar_is_complete:
+       micro_missing_buckets+=1
+       latest_stamp=None
+      if latest_stamp is not None:
+       bucket_path=bar_root/latest_ist.date().isoformat()/symbol/f"{latest_ist:%H%M}.jsonl.gz"
+      else:
+       bucket_path=None
+      if bucket_path is not None and bucket_path.is_file():
+       try:
+        bucket_events=read_order_flow_events(bucket_path)
+        micro_buckets+=1
+        micro_inserted+=_insert_microstructure_signals(
+         db,symbol,frame,bucket_events,tick_size=tick_sizes[symbol],settings=micro_settings
+        )
+       except (OSError,EOFError,OrderFlowError,ValueError):
+        micro_errors+=1
+      elif bucket_path is not None:
+       micro_missing_buckets+=1
     before=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
     pending=list(db.execute("SELECT * FROM shadow_signals WHERE symbol=? AND status IN ('PENDING_ENTRY','OPEN')",(symbol,)))
     for row in pending:
@@ -268,6 +346,13 @@ def process_archive(
   opens=db.execute("SELECT COUNT(*) FROM shadow_signals WHERE status IN ('OPEN','PENDING_ENTRY')").fetchone()[0]
  return {
   "symbols":symbols,"new_signals":inserted,"newly_closed":closed,
+  "microstructure_bucket_files":micro_buckets,
+  "microstructure_missing_buckets":micro_missing_buckets,
+  "microstructure_bucket_errors":micro_errors,
+  "microstructure_symbols_without_tick_size":micro_missing_tick_sizes,
+  "microstructure_enabled":bool(micro_settings.enabled),
+  "microstructure_config_error":micro_config_error,
+  "microstructure_new_signals":micro_inserted,
   "open_or_pending":int(opens),"incomplete_open":incomplete_open,**pending_result
  }
 if __name__=="__main__":

@@ -260,9 +260,15 @@ def test_recorder_writes_jsonl_and_drains_queue_on_shutdown(tmp_path):
 
     target = tmp_path / "2026-11-11" / "SBIN.jsonl.gz"
     rows = read_order_flow_events(target)
+    bucket_target = tmp_path.with_name(tmp_path.name + "_bars") / "2026-11-11" / "SBIN" / "0920.jsonl.gz"
+    bucket_rows = read_order_flow_events(bucket_target)
 
     assert stats["accepted"] == 1
     assert stats["written"] == 1
+    assert stats["bucket_written"] == 1
+    assert stats["bucket_write_errors"] == 0
+    assert len(bucket_rows) == 1
+    assert bucket_rows[0]["symbol"] == "SBIN"
     assert stats["pending"] == 0
     assert stats["writer_alive"] is False
     assert rows[0]["symbol"] == "SBIN"

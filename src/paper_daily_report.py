@@ -85,8 +85,18 @@ def generate_daily_report(
         and row.get("strategy_version") != PAPER_BASELINE_VERSION
         and str(row.get("exit_time") or "").startswith(day)
     ]
+    microstructure_rows = [
+        row for row in shadows if str(row.get("strategy_version") or "").startswith("micro_")
+    ]
+    classic_challenger_rows = [
+        row for row in shadows if not str(row.get("strategy_version") or "").startswith("micro_")
+    ]
     challenger_closed = [
-        row for row in shadows
+        row for row in classic_challenger_rows
+        if row["status"] == "CLOSED" and str(row.get("exit_time") or "").startswith(day)
+    ]
+    microstructure_closed = [
+        row for row in microstructure_rows
         if row["status"] == "CLOSED" and str(row.get("exit_time") or "").startswith(day)
     ]
     watch_closed = [
@@ -100,12 +110,25 @@ def generate_daily_report(
         return round(sum(float(row.get("net_pnl") or 0) for row in items), 2)
 
     challenger_strategies = []
-    for version in sorted({row.get("strategy_version") for row in shadows if row.get("strategy_version")}):
+    for version in sorted({row.get("strategy_version") for row in classic_challenger_rows if row.get("strategy_version")}):
         items = [row for row in challenger_closed if row.get("strategy_version") == version]
         challenger_strategies.append({
             "strategy_version": version,
             "strategy_name": next(
                 (row.get("strategy_name") for row in shadows if row.get("strategy_version") == version),
+                version,
+            ),
+            "closed_trades": len(items),
+            "net_pnl": pnl(items),
+        })
+
+    microstructure_strategies = []
+    for version in sorted({row.get("strategy_version") for row in microstructure_rows if row.get("strategy_version")}):
+        items = [row for row in microstructure_closed if row.get("strategy_version") == version]
+        microstructure_strategies.append({
+            "strategy_version": version,
+            "strategy_name": next(
+                (row.get("strategy_name") for row in microstructure_rows if row.get("strategy_version") == version),
                 version,
             ),
             "closed_trades": len(items),
@@ -135,7 +158,17 @@ def generate_daily_report(
         "net_pnl_today": pnl(challenger_closed),
         "strategy_summary": challenger_strategies,
         "closed_trades": challenger_closed,
-        "signals_today": shadows,
+        "signals_today": classic_challenger_rows,
+    }
+    microstructure_shadow = {
+        "closed_trades_today": len(microstructure_closed),
+        "net_pnl_today": pnl(microstructure_closed),
+        "strategy_summary": microstructure_strategies,
+        "closed_trades": microstructure_closed,
+        "signals_today": microstructure_rows,
+        "research_only": True,
+        "orders_sent_to_broker": False,
+        "method_note": "Point-in-time prior-bar OHLCV Volume Profile estimate plus same-bar estimated Kite order-flow confirmation; not exact exchange volume-at-price or complete order-book flow.",
     }
     watch_shadow = {
         "account": watch_book["account"],
@@ -156,6 +189,7 @@ def generate_daily_report(
         ("CHAMPION", champion_closed),
         ("CHAMPION_ARCHIVE", champion_archive_closed),
         ("CHALLENGER", challenger_closed),
+        ("MICROSTRUCTURE_SHADOW", microstructure_closed),
         ("WATCH_SHADOW", watch_closed),
         ("CANDIDATE_OUTCOME", [row for row in candidate_outcomes["observations"] if row.get("status") == "CLOSED"]),
     ):
@@ -198,6 +232,11 @@ def generate_daily_report(
                 "closed_trades": challengers["closed_trades_today"],
                 "net_pnl": challengers["net_pnl_today"],
             },
+            "microstructure_shadow": {
+                "closed_trades": microstructure_shadow["closed_trades_today"],
+                "net_pnl": microstructure_shadow["net_pnl_today"],
+                "signals": len(microstructure_rows),
+            },
             "watch_shadow": {
                 "closed_trades": watch_shadow["closed_trades_today"],
                 "net_pnl": watch_shadow["net_pnl_today"],
@@ -220,6 +259,7 @@ def generate_daily_report(
         "champion": champion,
         "champion_archive": champion_archive,
         "challengers": challengers,
+        "microstructure_shadow": microstructure_shadow,
         "watch_shadow": watch_shadow,
         "candidate_outcomes": candidate_outcomes,
         "risk_overruns": risk_overruns,
@@ -270,7 +310,8 @@ def generate_daily_report(
         })
     for row in shadows:
         rows.append({
-            "track": "CHALLENGER", "strategy": row.get("strategy_name"),
+            "track": ("MICROSTRUCTURE_SHADOW" if str(row.get("strategy_version") or "").startswith("micro_") else "CHALLENGER"),
+            "strategy": row.get("strategy_name"),
             "strategy_version": row.get("strategy_version"), "symbol": row.get("symbol"),
             "side": row.get("side"), "status": row.get("status"), "signal_time": row.get("signal_time"),
             "entry_time": row.get("entry_time"), "entry_reference_price": row.get("entry_reference_price"),
@@ -341,8 +382,13 @@ def generate_daily_report(
     challenger_lines = "\n".join(
         f"| {row.get('strategy_name') or row.get('strategy_version')} | {row.get('symbol')} | "
         f"{row.get('side')} | {row.get('status')} | {row.get('net_pnl') if row.get('net_pnl') is not None else '—'} |"
-        for row in shadows
+        for row in classic_challenger_rows
     ) or "| No challenger observations | — | — | — | — |"
+    microstructure_lines = "\n".join(
+        f"| {row.get('strategy_name') or row.get('strategy_version')} | {row.get('symbol')} | "
+        f"{row.get('side')} | {row.get('status')} | {row.get('net_pnl') if row.get('net_pnl') is not None else '—'} |"
+        for row in microstructure_rows
+    ) or "| No Volume Profile / Order Flow shadow candidates | — | — | — | — |"
     watch_lines = "\n".join(
         f"| {row.get('symbol')} | {row.get('side')} | {row.get('status')} | "
         f"{row.get('net_pnl') if row.get('net_pnl') is not None else '—'} | "
@@ -385,6 +431,16 @@ Generated: {current.isoformat()}
 | Strategy | Symbol | Side | Status | Net P&L |
 |---|---|---|---|---:|
 {challenger_lines}
+
+## Volume Profile + Order Flow shadow book
+- Trades closed today: {microstructure_shadow['closed_trades_today']}
+- Net P&L today: INR {microstructure_shadow['net_pnl_today']:,.2f}
+- Candidate observations today: {len(microstructure_rows)}
+- Status: research-only; point-in-time prior-bar estimated Volume Profile and same-bar estimated Kite Order Flow.
+
+| Strategy | Symbol | Side | Status | Net P&L |
+|---|---|---|---|---:|
+{microstructure_lines}
 
 ## Watch-candidate shadow book
 - Virtual starting capital: INR {watch_shadow['account']['starting_capital']:,.2f}
@@ -435,6 +491,9 @@ Positive paper results are not a guarantee of future profitability. Watch-shadow
         "champion_net_pnl": pnl(champion_closed),
         "shadow_closed_trades": len(challenger_closed),
         "shadow_net_pnl": pnl(challenger_closed),
+        "microstructure_shadow_closed_trades": len(microstructure_closed),
+        "microstructure_shadow_net_pnl": pnl(microstructure_closed),
+        "microstructure_shadow_candidates": len(microstructure_rows),
         "watch_shadow_closed_trades": len(watch_closed),
         "watch_shadow_net_pnl": pnl(watch_closed),
         "watch_shadow_open_positions": len(watch_book.get("open_positions", [])),

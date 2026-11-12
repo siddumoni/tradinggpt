@@ -278,11 +278,14 @@ def _ticker_thread(
     if recorder is not None:
         stats = recorder.stop()
         LOGGER.info(
-            "Order-flow snapshot capture stopped: accepted=%s written=%s dropped=%s write_errors=%s pending=%s",
+            "Order-flow capture stopped: accepted=%s written=%s bucket_written=%s "
+            "dropped=%s write_errors=%s bucket_write_errors=%s pending=%s",
             stats["accepted"],
             stats["written"],
+            stats.get("bucket_written", 0),
             stats["dropped_queue_full"],
             stats["write_errors"],
+            stats.get("bucket_write_errors", 0),
             stats["pending"],
         )
 
@@ -323,7 +326,12 @@ def _finalize_reports(
             tzinfo=None
         ) >= dtime(15, 15)
         shadow_update = process_archive(
-            archive, db_path, now=now, finalize_session=finalize_session
+            archive,
+            db_path,
+            now=now,
+            finalize_session=finalize_session,
+            order_flow_bar_dir=root / ".local" / "order_flow_bars",
+            tick_size_cache=root / ".local" / "nse_instruments.json",
         )
         LOGGER.info("Challenger lab final update: %s", shadow_update)
     except Exception as exc:
@@ -696,9 +704,16 @@ def main(argv=None) -> int:
                         LOGGER.exception(
                             "Independent candidate outcome ingestion failed; other paper books continue."
                         )
-                    result = process_archive(archive, db_path)
+                    result = process_archive(
+                        archive,
+                        db_path,
+                        order_flow_bar_dir=root / ".local" / "order_flow_bars",
+                        tick_size_cache=root / ".local" / "nse_instruments.json",
+                    )
                     LOGGER.info(
-                        "Challenger lab updated from archive after %s: %s", path.name, result
+                        "Challenger and microstructure shadow books updated after %s: %s",
+                        path.name,
+                        result,
                     )
                     try:
                         outcome_result = candidate_outcomes.process_archive(archive)

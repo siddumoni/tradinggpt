@@ -177,6 +177,15 @@ def assess_trade(
     if not valid_levels:
         raise ValueError("invalid price levels for side; check stop-loss and target ordering")
 
+    stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100.0
+    if stop_distance_pct + 1e-9 < settings.minimum_stop_distance_pct:
+        return _rejected(
+            side,
+            prices,
+            f"Stop distance {stop_distance_pct:.3f}% is below the configured minimum "
+            f"{settings.minimum_stop_distance_pct:.3f}% of entry.",
+        )
+
     if estimated_margin_per_share is None or estimated_margin_per_share <= 0:
         if settings.require_margin_verification or settings.skip_if_margin_unavailable:
             return _rejected(side, prices, "Margin estimate unavailable; skipped by fail-closed policy.")

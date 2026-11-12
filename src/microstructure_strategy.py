@@ -59,9 +59,7 @@ def load_microstructure_settings(path: Path | None = None) -> MicrostructureSett
     try:
         raw = yaml.safe_load(selected.read_text(encoding="utf-8")) or {}
     except FileNotFoundError as exc:
-        if path is not None:
-            raise ValueError(f"Microstructure config file does not exist: {selected}") from exc
-        return MicrostructureSettings()
+        raise ValueError(f"Microstructure config file does not exist: {selected}") from exc
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f"Could not load microstructure strategy settings: {exc}") from exc
     block = raw.get("microstructure", raw)

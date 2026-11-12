@@ -275,14 +275,16 @@ def process_archive(
  repo_root=archive.resolve().parent.parent
  bar_root=Path(order_flow_bar_dir) if order_flow_bar_dir is not None else repo_root/".local"/"order_flow_bars"
  tick_file=Path(tick_size_cache) if tick_size_cache is not None else repo_root/".local"/"nse_instruments.json"
+ micro_config_error=None
  try:
   micro_settings=load_microstructure_settings(microstructure_config)
- except (OSError,ValueError,TypeError):
+ except (OSError,ValueError,TypeError) as exc:
   micro_settings=MicrostructureSettings(enabled=False)
+  micro_config_error=str(exc)
  tick_sizes=load_tick_size_lookup(tick_file)
  scan_now=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=IST)
  scan_now=scan_now.tz_localize(IST) if scan_now.tzinfo is None else scan_now.tz_convert(IST)
- inserted=closed=0;symbols=0;micro_inserted=0;micro_buckets=0;micro_missing_buckets=0;micro_errors=0;last_archived_by_symbol={}
+ inserted=closed=0;symbols=0;micro_inserted=0;micro_buckets=0;micro_missing_buckets=0;micro_errors=0;micro_missing_tick_sizes=0;last_archived_by_symbol={}
  with sqlite3.connect(db_path,timeout=15) as db:
   db.row_factory=sqlite3.Row;ensure_shadow_schema(db)
   if archive.is_dir():
@@ -295,28 +297,31 @@ def process_archive(
     symbols+=1;symbol=path.stem.upper();frame=add_scanner_indicators(candles)
     if not frame.empty:last_archived_by_symbol[symbol]=frame.index[-1].isoformat()
     inserted+=_insert_new_signals(db,symbol,frame)
-    if micro_settings.enabled and not frame.empty and symbol in tick_sizes:
-     latest_stamp=frame.index[-1]
-     latest_ist=latest_stamp.tz_localize(IST) if latest_stamp.tzinfo is None else latest_stamp.tz_convert(IST)
-     bar_is_complete=(latest_ist+pd.Timedelta(minutes=5))<=scan_now
-     if latest_ist.date()!=scan_now.date() or not bar_is_complete:
-      micro_missing_buckets+=1
-      latest_stamp=None
-     if latest_stamp is not None:
-      bucket_path=bar_root/latest_ist.date().isoformat()/symbol/f"{latest_ist:%H%M}.jsonl.gz"
+    if micro_settings.enabled and not frame.empty:
+     if symbol not in tick_sizes:
+      micro_missing_tick_sizes+=1
      else:
-      bucket_path=None
-     if bucket_path is not None and bucket_path.is_file():
-      try:
-       bucket_events=read_order_flow_events(bucket_path)
-       micro_buckets+=1
-       micro_inserted+=_insert_microstructure_signals(
-        db,symbol,frame,bucket_events,tick_size=tick_sizes[symbol],settings=micro_settings
-       )
-      except (OSError,EOFError,OrderFlowError,ValueError):
-       micro_errors+=1
-     elif bucket_path is not None:
-      micro_missing_buckets+=1
+      latest_stamp=frame.index[-1]
+      latest_ist=latest_stamp.tz_localize(IST) if latest_stamp.tzinfo is None else latest_stamp.tz_convert(IST)
+      bar_is_complete=(latest_ist+pd.Timedelta(minutes=5))<=scan_now
+      if latest_ist.date()!=scan_now.date() or not bar_is_complete:
+       micro_missing_buckets+=1
+       latest_stamp=None
+      if latest_stamp is not None:
+       bucket_path=bar_root/latest_ist.date().isoformat()/symbol/f"{latest_ist:%H%M}.jsonl.gz"
+      else:
+       bucket_path=None
+      if bucket_path is not None and bucket_path.is_file():
+       try:
+        bucket_events=read_order_flow_events(bucket_path)
+        micro_buckets+=1
+        micro_inserted+=_insert_microstructure_signals(
+         db,symbol,frame,bucket_events,tick_size=tick_sizes[symbol],settings=micro_settings
+        )
+       except (OSError,EOFError,OrderFlowError,ValueError):
+        micro_errors+=1
+      elif bucket_path is not None:
+       micro_missing_buckets+=1
     before=db.execute("SELECT COUNT(*) n FROM shadow_signals WHERE symbol=? AND status='CLOSED'",(symbol,)).fetchone()["n"]
     pending=list(db.execute("SELECT * FROM shadow_signals WHERE symbol=? AND status IN ('PENDING_ENTRY','OPEN')",(symbol,)))
     for row in pending:
@@ -344,6 +349,9 @@ def process_archive(
   "microstructure_bucket_files":micro_buckets,
   "microstructure_missing_buckets":micro_missing_buckets,
   "microstructure_bucket_errors":micro_errors,
+  "microstructure_symbols_without_tick_size":micro_missing_tick_sizes,
+  "microstructure_enabled":bool(micro_settings.enabled),
+  "microstructure_config_error":micro_config_error,
   "microstructure_new_signals":micro_inserted,
   "open_or_pending":int(opens),"incomplete_open":incomplete_open,**pending_result
  }

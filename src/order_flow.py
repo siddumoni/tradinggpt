@@ -303,7 +303,7 @@ class KiteTickRecorder:
                         bucket_written += 1
             with self._lock:
                 self._bucket_written += bucket_written
-        except OSError as exc:
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
             # This derived index is optional. Preserve the canonical daily feed
             # and never let a research-index failure stop paper price monitoring.
             with self._lock:

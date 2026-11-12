@@ -10,6 +10,77 @@ from .market_regime import Regime
 _OPENING_TIMES = ("09:15", "09:20", "09:25")
 
 
+def opening_range_quality_diagnostics(
+    session: pd.DataFrame,
+    range_high: float,
+    range_low: float,
+    latest: pd.Series,
+    side: str,
+    *,
+    max_extension_range_multiple: float = 0.50,
+    min_directional_close_location: float = 0.65,
+    min_body_fraction: float = 0.30,
+) -> dict[str, object]:
+    """Describe breakout quality for research; flags never block a signal.
+
+    Thresholds are research-only and require validation on unseen sessions
+    before they can become entry gates.
+    """
+    direction = str(side).strip().upper()
+    if direction not in {"LONG", "SHORT"}:
+        raise ValueError("side must be LONG or SHORT")
+    opening_width = float(range_high) - float(range_low)
+    bar_width = float(latest["high"]) - float(latest["low"])
+    if opening_width <= 0 or bar_width <= 0:
+        return {
+            "status": "NOT_EVALUATED", "flags": ["INVALID_RANGE"],
+            "extension_in_range_widths": None, "directional_close_location": None,
+            "body_fraction": None, "prior_failed_breakout": False,
+            "research_only_non_blocking": True,
+        }
+    close = float(latest["close"])
+    open_price = float(latest["open"])
+    close_location = (close - float(latest["low"])) / bar_width
+    directional_close_location = close_location if direction == "LONG" else 1.0 - close_location
+    extension = (
+        max(0.0, close - float(range_high)) / opening_width
+        if direction == "LONG" else max(0.0, float(range_low) - close) / opening_width
+    )
+    body_fraction = abs(close - open_price) / bar_width
+    saw_prior_breakout = False
+    prior_failed_breakout = False
+    for _, bar in session.iloc[3:-1].iterrows():
+        prior_close = float(bar["close"])
+        crossed = prior_close > range_high if direction == "LONG" else prior_close < range_low
+        back_inside = prior_close <= range_high if direction == "LONG" else prior_close >= range_low
+        if crossed:
+            saw_prior_breakout = True
+        elif saw_prior_breakout and back_inside:
+            prior_failed_breakout = True
+    flags: list[str] = []
+    if extension > max_extension_range_multiple:
+        flags.append("OVEREXTENDED_FROM_OPENING_RANGE")
+    if directional_close_location < min_directional_close_location:
+        flags.append("WEAK_CLOSE_LOCATION")
+    if body_fraction < min_body_fraction:
+        flags.append("SMALL_BREAKOUT_BODY")
+    if prior_failed_breakout:
+        flags.append("PRIOR_BREAKOUT_FAILED_RETRY")
+    return {
+        "status": "REVIEW" if flags else "PASS",
+        "flags": flags,
+        "extension_in_range_widths": round(extension, 4),
+        "directional_close_location": round(directional_close_location, 4),
+        "body_fraction": round(body_fraction, 4),
+        "prior_failed_breakout": prior_failed_breakout,
+        "thresholds": {
+            "max_extension_range_multiple": max_extension_range_multiple,
+            "min_directional_close_location": min_directional_close_location,
+            "min_body_fraction": min_body_fraction,
+        },
+        "research_only_non_blocking": True,
+    }
+
 def opening_range_signal(
     symbol: str,
     candles: pd.DataFrame,
@@ -104,22 +175,42 @@ def opening_range_signal(
     if close > range_high:
         if market_regime == "BEARISH":
             return reject("price broke above the opening range, but the BEARISH NIFTY regime blocks a long signal.")
+        quality = opening_range_quality_diagnostics(session, range_high, range_low, latest, "LONG")
+        quality_note = (
+            f" ORB research-only quality={quality['status']}; "
+            f"extension={quality.get('extension_in_range_widths')}x range; "
+            f"directional_close={quality.get('directional_close_location')}; "
+            f"body={quality.get('body_fraction')}; "
+            f"prior_failed_breakout={quality.get('prior_failed_breakout')}; "
+            f"flags={','.join(quality.get('flags', [])) or 'none'}. This is non-blocking diagnostics."
+        )
         return StrategySignal(
             symbol=symbol, side="LONG", strategy="opening_range_breakout",
             trigger=f"Enter only after a completed 5-minute close above ₹{range_high:.2f}",
             invalidation=f"Setup invalid if price closes back below ₹{range_high:.2f}",
             confidence=65 if market_regime == "BULLISH" else 55,
-            reason=f"Close ₹{close:.2f} broke opening-range high ₹{range_high:.2f} with volume confirmation; regime={market_regime}.",
+            reason=f"Close ₹{close:.2f} broke opening-range high ₹{range_high:.2f} with volume confirmation; regime={market_regime}.{quality_note}",
+            trigger_price=range_high,
         )
     if close < range_low:
         if market_regime == "BULLISH":
             return reject("price broke below the opening range, but the BULLISH NIFTY regime blocks a short signal.")
+        quality = opening_range_quality_diagnostics(session, range_high, range_low, latest, "SHORT")
+        quality_note = (
+            f" ORB research-only quality={quality['status']}; "
+            f"extension={quality.get('extension_in_range_widths')}x range; "
+            f"directional_close={quality.get('directional_close_location')}; "
+            f"body={quality.get('body_fraction')}; "
+            f"prior_failed_breakout={quality.get('prior_failed_breakout')}; "
+            f"flags={','.join(quality.get('flags', [])) or 'none'}. This is non-blocking diagnostics."
+        )
         return StrategySignal(
             symbol=symbol, side="SHORT", strategy="opening_range_breakdown",
             trigger=f"Enter only after a completed 5-minute close below ₹{range_low:.2f}",
             invalidation=f"Setup invalid if price closes back above ₹{range_low:.2f}",
             confidence=65 if market_regime == "BEARISH" else 55,
-            reason=f"Close ₹{close:.2f} broke opening-range low ₹{range_low:.2f} with volume confirmation; regime={market_regime}.",
+            reason=f"Close ₹{close:.2f} broke opening-range low ₹{range_low:.2f} with volume confirmation; regime={market_regime}.{quality_note}",
+            trigger_price=range_low,
         )
     return reject(
         f"latest close ₹{close:.2f} remains inside the opening range "

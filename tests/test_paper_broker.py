@@ -308,3 +308,25 @@ def test_snapshot_exposes_microstructure_strategies_on_separate_shadow_track(tmp
         assert displayed[version]["track"] == "MICROSTRUCTURE_SHADOW"
         assert registered[version]["track"] == "MICROSTRUCTURE_SHADOW"
         assert registered[version]["status"] == "SHADOW_ENABLED_NOT_VALIDATED"
+
+
+
+def test_out_of_order_market_tick_cannot_overwrite_newer_position_mark(tmp_path):
+    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    broker.process_scan_report(report_file(tmp_path, [candidate()], {"INFY": quote()}))
+    received = datetime.now(IST)
+    broker.update_market_price(
+        "INFY", 101.0, bid=100.99, ask=101.01,
+        market_time=received, received_at=received,
+    )
+
+    accepted = broker.update_market_price(
+        "INFY", 99.0, bid=98.99, ask=99.01,
+        market_time=received - timedelta(seconds=10), received_at=received,
+    )
+
+    snapshot = broker.snapshot()
+    assert accepted == 0
+    assert snapshot["open_positions"][0]["last_price"] == pytest.approx(101.0)
+    assert snapshot["open_positions"][0]["market_age_seconds"] is not None
+    assert snapshot["open_positions"][0]["market_age_seconds"] < 5

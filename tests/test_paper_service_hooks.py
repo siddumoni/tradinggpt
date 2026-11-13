@@ -164,3 +164,116 @@ def test_finalization_skips_upload_when_required_artifacts_are_missing(tmp_path,
   symbols=["RELIANCE"],reason="market close daily summary",
  )
  assert called==[]
+
+
+
+def test_websocket_naive_sdk_timestamp_is_converted_from_host_timezone():
+    from datetime import timedelta
+    from src import paper_trading_service as service
+
+    received_at = datetime.now(ZoneInfo("Asia/Kolkata"))
+    sdk_local_naive = datetime.now().replace(microsecond=0)
+    stamp = service._websocket_quote_timestamp(
+        {
+            "exchange_timestamp": sdk_local_naive,
+            "last_trade_time": received_at - timedelta(minutes=5),
+        },
+        received_at,
+    )
+
+    assert stamp is not None
+    assert abs((received_at - stamp).total_seconds()) < 3
+
+
+def test_old_last_trade_time_is_not_used_as_websocket_quote_timestamp():
+    from datetime import timedelta
+    from src import paper_trading_service as service
+
+    received_at = datetime.now(ZoneInfo("Asia/Kolkata"))
+    stamp = service._websocket_quote_timestamp(
+        {"last_trade_time": received_at - timedelta(minutes=10)},
+        received_at,
+    )
+
+    assert stamp == received_at
+
+
+def test_stale_open_position_quote_is_refreshed_from_kite_rest_snapshot():
+    from src import paper_trading_service as service
+
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    quote_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    class FakeProvider:
+        requested = None
+        def quotes(self, symbols):
+            self.requested = list(symbols)
+            return {
+                "NSE:TDPOWERSYS": {
+                    "timestamp": quote_timestamp,
+                    "last_price": 663.10,
+                    "depth": {
+                        "buy": [{"price": 663.05, "quantity": 100}],
+                        "sell": [{"price": 663.15, "quantity": 90}],
+                    },
+                }
+            }
+
+    class FakeBroker:
+        def __init__(self):
+            self.updates = []
+        def snapshot(self):
+            return {"open_positions": [{"symbol": "TDPowersys"}]}
+        def update_market_price(self, symbol, last, **kwargs):
+            self.updates.append((symbol, last, kwargs))
+            return 0
+
+    class FakeWatch:
+        def open_symbols(self):
+            return []
+        def update_market_price(self, symbol, last, **kwargs):
+            return 0
+
+    provider, broker, watch = FakeProvider(), FakeBroker(), FakeWatch()
+    refreshed = service._refresh_stale_position_quotes(
+        provider, broker, watch, {}, now=now
+    )
+
+    assert refreshed == 1
+    assert provider.requested == ["TDPOWERSYS"]
+    assert broker.updates[0][0] == "TDPOWERSYS"
+    assert broker.updates[0][1] == 663.10
+    assert broker.updates[0][2]["bid"] == 663.05
+    assert broker.updates[0][2]["ask"] == 663.15
+
+
+def test_rest_fallback_rejects_stale_quote_timestamp():
+    from datetime import timedelta
+    from src import paper_trading_service as service
+
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    stale_timestamp = (now - timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S")
+    class FakeProvider:
+        def quotes(self, symbols):
+            return {"NSE:INFY": {"timestamp": stale_timestamp, "last_price": 100.0}}
+
+    class FakeBroker:
+        def __init__(self):
+            self.updates = []
+        def snapshot(self):
+            return {"open_positions": [{"symbol": "INFY"}]}
+        def update_market_price(self, *args, **kwargs):
+            self.updates.append((args, kwargs))
+            return 0
+
+    class FakeWatch:
+        def open_symbols(self):
+            return []
+        def update_market_price(self, *args, **kwargs):
+            return 0
+
+    broker = FakeBroker()
+    refreshed = service._refresh_stale_position_quotes(
+        FakeProvider(), broker, FakeWatch(), {}, now=now
+    )
+    assert refreshed == 0
+    assert broker.updates == []

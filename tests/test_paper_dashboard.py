@@ -137,3 +137,11 @@ def test_dashboard_has_dedicated_microstructure_shadow_strategy_section():
     assert "Microstructure shadow strategies" in DASHBOARD_HTML
     assert "MICROSTRUCTURE_SHADOW" in DASHBOARD_HTML
     assert "Not validated yet" in DASHBOARD_HTML
+
+
+
+def test_champion_dashboard_shows_live_quote_age_column():
+    from src.paper_dashboard import DASHBOARD_HTML
+
+    assert "<th>Quote age</th>" in DASHBOARD_HTML
+    assert "fmtAge(x.market_age_seconds)" in DASHBOARD_HTML

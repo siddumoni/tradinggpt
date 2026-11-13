@@ -550,9 +550,23 @@ def main(argv=None):
     parser.add_argument("--db-path", type=Path, default=DEFAULT_DB)
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
     parser.add_argument("--candle-archive-dir", type=Path, default=Path("data/paper_candles_kite"))
+    parser.add_argument(
+        "--report-date",
+        help="Regenerate a past report date (YYYY-MM-DD) from the existing paper DB and archived candles.",
+    )
     args = parser.parse_args(argv)
+    report_now = None
+    if args.report_date:
+        try:
+            report_day = date.fromisoformat(args.report_date)
+        except ValueError:
+            parser.error("--report-date must use YYYY-MM-DD.")
+        report_now = datetime.combine(report_day, dtime(15, 35), tzinfo=IST)
     print(json.dumps(generate_daily_report(
-        args.db_path, args.output_dir, candle_archive_dir=args.candle_archive_dir
+        args.db_path,
+        args.output_dir,
+        report_now,
+        candle_archive_dir=args.candle_archive_dir,
     ), indent=2))
     return 0
 

@@ -313,11 +313,15 @@ def test_snapshot_exposes_microstructure_strategies_on_separate_shadow_track(tmp
 
 def test_out_of_order_market_tick_cannot_overwrite_newer_position_mark(tmp_path):
     broker = PaperBroker(tmp_path / "paper.sqlite3")
+    received = datetime.now(IST)
     broker.process_scan_report(
-        report_file(tmp_path, [candidate()], {"INFY": quote()}),
+        report_file(
+            tmp_path,
+            [candidate(signal_time=received.isoformat())],
+            {"INFY": quote(timestamp=received.isoformat())},
+        ),
         before_entry_callback=lambda plan: True,
     )
-    received = datetime.now(IST)
     broker.update_market_price(
         "INFY", 101.0, bid=100.99, ask=101.01,
         market_time=received, received_at=received,

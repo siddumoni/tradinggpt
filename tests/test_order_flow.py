@@ -69,6 +69,37 @@ def test_kite_tick_without_valid_last_price_is_ignored():
     assert normalise_kite_tick("SBIN", {"last_price": None}) is None
     assert normalise_kite_tick("SBIN", {"last_price": float("nan")}) is None
 
+def test_recorder_buckets_snapshot_by_receive_time_when_exchange_time_is_missing(tmp_path):
+    settings = OrderFlowCaptureSettings(
+        enabled=True,
+        directory=tmp_path,
+        queue_size=10,
+        batch_size=1,
+        flush_interval_seconds=0.1,
+    )
+    recorder = KiteTickRecorder(settings)
+    recorder.start()
+
+    tick = kite_tick(last_trade_time="2026-11-11T09:19:59")
+    tick["exchange_timestamp"] = None
+    assert recorder.submit(
+        tick,
+        symbol="SBIN",
+        received_at=stamp("2026-11-11T09:20:02"),
+    )
+    stats = recorder.stop(timeout_seconds=2)
+
+    bucket_root = tmp_path.with_name(tmp_path.name + "_bars") / "2026-11-11" / "SBIN"
+    current_bucket = bucket_root / "0920.jsonl.gz"
+    stale_trade_bucket = bucket_root / "0915.jsonl.gz"
+    rows = read_order_flow_events(current_bucket)
+
+    assert stats["bucket_written"] == 1
+    assert current_bucket.is_file()
+    assert not stale_trade_bucket.exists()
+    assert rows[0]["timestamp"] == "2026-11-11T09:20:02+05:30"
+    assert rows[0]["last_trade_time"] == "2026-11-11T09:19:59+05:30"
+
 
 
 def test_snapshot_top_of_book_ofi_uses_price_and_queue_changes():

@@ -1,8 +1,10 @@
 import json
+from dataclasses import replace
 from datetime import datetime,timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import pytest
+from src.exit_policy import load_exit_policy
 from src.paper_broker import PaperBroker
 from src import paper_broker as paper_broker_module
 IST=ZoneInfo("Asia/Kolkata")
@@ -312,7 +314,10 @@ def test_snapshot_exposes_microstructure_strategies_on_separate_shadow_track(tmp
 
 
 def test_out_of_order_market_tick_cannot_overwrite_newer_position_mark(tmp_path):
-    broker = PaperBroker(tmp_path / "paper.sqlite3")
+    broker = PaperBroker(
+        tmp_path / "paper.sqlite3",
+        exit_policy=replace(load_exit_policy(), time_exit_ist="23:59"),
+    )
     signal_time = datetime.now(IST)
     broker.process_scan_report(
         report_file(

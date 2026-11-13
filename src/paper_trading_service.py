@@ -111,7 +111,7 @@ def _refresh_stale_position_quotes(
 ) -> int:
     """REST-refresh only open-position marks whose WebSocket feed has gone quiet."""
     current = now or datetime.now(IST)
-    current = current.astimezone(IST) if current.tzinfo else current.astimezone(IST)
+    current = current.astimezone(IST)
     symbols = {
         str(row.get("symbol") or "").strip().upper()
         for row in broker.snapshot().get("open_positions", [])

@@ -209,7 +209,7 @@ def test_stale_open_position_quote_is_refreshed_from_kite_rest_snapshot():
         def quotes(self, symbols):
             self.requested = list(symbols)
             return {
-                "NSE:TDPowersys": {
+                "NSE:TDPOWERSYS": {
                     "timestamp": quote_timestamp,
                     "last_price": 663.10,
                     "depth": {
@@ -240,7 +240,7 @@ def test_stale_open_position_quote_is_refreshed_from_kite_rest_snapshot():
     )
 
     assert refreshed == 1
-    assert provider.requested == ["TDPOWER SYS".replace(" ", "")]
+    assert provider.requested == ["TDPOWERSYS"]
     assert broker.updates[0][0] == "TDPowersys"
     assert broker.updates[0][1] == 663.10
     assert broker.updates[0][2]["bid"] == 663.05

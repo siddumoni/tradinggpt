@@ -292,6 +292,7 @@ def audit_shadow_observations(
             "observations": len(observations),
             "closed_trades_replayed": 0,
             "closed_replays_matched": 0,
+            "closed_replay_mismatches": 0,
             "by_strategy": {},
             "details": [],
             "note": "No candle archive directory was available; no outcomes were inferred.",

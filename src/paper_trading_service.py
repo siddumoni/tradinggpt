@@ -31,6 +31,144 @@ from src.market_calendar import is_regular_market_session, market_day_status
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger("paper_trading_service")
+WS_POSITION_STALE_AFTER_SECONDS = 15.0
+REST_POSITION_QUOTE_INTERVAL_SECONDS = 5.0
+MAX_MARKET_QUOTE_AGE_SECONDS = 60.0
+
+
+def _parse_kite_timestamp(value, *, naive_is_local: bool) -> datetime | None:
+    """Parse a Kite timestamp and normalize it to IST.
+
+    WebSocket SDK datetimes are created with datetime.fromtimestamp(), so a
+    naive datetime represents the host computer's local timezone. REST quote
+    timestamps are timezone-less strings documented by Kite as IST.
+    """
+    try:
+        if isinstance(value, datetime):
+            stamp = value
+        elif isinstance(value, str) and value.strip():
+            stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        else:
+            return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if stamp.tzinfo is None:
+        return stamp.astimezone(IST) if naive_is_local else stamp.replace(tzinfo=IST)
+    return stamp.astimezone(IST)
+
+
+def _websocket_quote_timestamp(
+    tick: dict, received_at: datetime
+) -> datetime | None:
+    """Return the packet timestamp; never mistake last_trade_time for quote time."""
+    saw_timestamp = False
+    for key in ("exchange_timestamp", "timestamp"):
+        raw = tick.get(key)
+        if raw is None or raw == "":
+            continue
+        saw_timestamp = True
+        stamp = _parse_kite_timestamp(raw, naive_is_local=True)
+        if stamp is None:
+            continue
+        age = (received_at - stamp).total_seconds()
+        if -2.0 <= age <= MAX_MARKET_QUOTE_AGE_SECONDS:
+            return stamp
+    # Missing/invalid timestamp metadata is common in partial packets. The
+    # arrival time is safer than last_trade_time, which can legitimately lag.
+    return None if saw_timestamp else received_at
+
+
+def _rest_quote_timestamp(quote: dict, received_at: datetime) -> datetime | None:
+    """Validate the timestamp of a REST quote snapshot; it is not last_trade_time."""
+    stamp = _parse_kite_timestamp(quote.get("timestamp"), naive_is_local=False)
+    if stamp is None:
+        return None
+    age = (received_at - stamp).total_seconds()
+    return stamp if -2.0 <= age <= MAX_MARKET_QUOTE_AGE_SECONDS else None
+
+
+def _best_depth_price(levels) -> float | None:
+    if not isinstance(levels, list) or not levels:
+        return None
+    first = levels[0]
+    if not isinstance(first, dict):
+        return None
+    try:
+        value = float(first.get("price"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def _refresh_stale_position_quotes(
+    provider: KiteMarketData,
+    broker: PaperBroker,
+    watch_shadow: WatchShadowPortfolio,
+    last_ws_tick_received: dict[str, datetime],
+    *,
+    now: datetime | None = None,
+    stale_after_seconds: float = WS_POSITION_STALE_AFTER_SECONDS,
+) -> int:
+    """REST-refresh only open-position marks whose WebSocket feed has gone quiet."""
+    current = now or datetime.now(IST)
+    current = current.astimezone(IST) if current.tzinfo else current.astimezone(IST)
+    symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in broker.snapshot().get("open_positions", [])
+        if row.get("symbol")
+    }
+    symbols.update(
+        str(symbol).strip().upper()
+        for symbol in watch_shadow.open_symbols()
+        if str(symbol).strip()
+    )
+    stale = sorted(
+        symbol for symbol in symbols
+        if symbol not in last_ws_tick_received
+        or (current - last_ws_tick_received[symbol]).total_seconds() >= stale_after_seconds
+    )
+    if not stale:
+        return 0
+    try:
+        quotes = provider.quotes(stale)
+    except Exception:
+        LOGGER.exception("Kite REST quote fallback failed for stale open position(s): %s", ",".join(stale))
+        return 0
+
+    refreshed = 0
+    for symbol in stale:
+        quote = quotes.get(f"NSE:{symbol}") if isinstance(quotes, dict) else None
+        if not isinstance(quote, dict):
+            LOGGER.warning("Kite REST quote fallback returned no quote for open position %s", symbol)
+            continue
+        quote_time = _rest_quote_timestamp(quote, current)
+        if quote_time is None:
+            LOGGER.warning("Kite REST quote fallback rejected missing/stale timestamp for %s", symbol)
+            continue
+        try:
+            last = float(quote.get("last_price"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(last) or last <= 0:
+            continue
+        depth = quote.get("depth") or {}
+        depth = depth if isinstance(depth, dict) else {}
+        bid = _best_depth_price(depth.get("buy"))
+        ask = _best_depth_price(depth.get("sell"))
+        broker.update_market_price(
+            symbol, last, bid=bid, ask=ask, market_time=quote_time, received_at=current
+        )
+        watch_shadow.update_market_price(
+            symbol, last, bid=bid, ask=ask, market_time=quote_time, received_at=current
+        )
+        refreshed += 1
+    if refreshed:
+        LOGGER.info(
+            "Kite REST quote fallback refreshed %s stale open-position mark(s): %s",
+            refreshed,
+            ",".join(stale),
+        )
+    return refreshed
 
 
 def _desired_market_symbols(
@@ -146,6 +284,7 @@ def _ticker_thread(
             active_tokens: set[int] = set()
             subscription_lock = threading.Lock()
             ticker = KiteTicker(api_key, cached.access_token)
+            last_ws_tick_received: dict[str, datetime] = {}
 
             def sync(ws):
                 with subscription_lock:
@@ -184,20 +323,12 @@ def _ticker_thread(
                         symbol = token_to_symbol.get(int(tick.get("instrument_token", 0)))
                         if not symbol:
                             continue
-                        stamp = (
-                            tick.get("exchange_timestamp")
-                            or tick.get("last_trade_time")
-                            or tick.get("timestamp")
-                        )
+                        stamp = _websocket_quote_timestamp(tick, now)
                         if stamp is None:
-                            continue
-                        stamp = (
-                            stamp.replace(tzinfo=IST)
-                            if stamp.tzinfo is None
-                            else stamp.astimezone(IST)
-                        )
-                        age = (now - stamp).total_seconds()
-                        if age < -2 or age > 60:
+                            LOGGER.debug(
+                                "Ignored stale/future Kite WebSocket packet for %s; REST fallback will refresh its mark if open.",
+                                symbol,
+                            )
                             continue
                         if recorder is not None and is_regular_market_session(stamp):
                             recorder.submit(tick, symbol=symbol, received_at=now)
@@ -221,6 +352,7 @@ def _ticker_thread(
                         shadow_closed = watch_shadow.update_market_price(
                             symbol, last, bid=bid, ask=ask, market_time=stamp, received_at=now
                         )
+                        last_ws_tick_received[symbol] = now
                         if closed:
                             LOGGER.info(
                                 "Kite ticks triggered %s Champion paper exit(s) for %s",
@@ -258,12 +390,30 @@ def _ticker_thread(
                 len(initial_tokens),
             )
             ticker.connect(threaded=True)
+            last_rest_quote_refresh = 0.0
             while not stop.is_set() and not reconnect_exhausted.wait(1):
                 if connected.is_set():
                     try:
                         sync(ticker)
                     except Exception:
                         LOGGER.exception("Could not update dynamic Kite WebSocket subscriptions.")
+                monotonic_now = time.monotonic()
+                market_now = datetime.now(IST)
+                if (
+                    monotonic_now - last_rest_quote_refresh >= REST_POSITION_QUOTE_INTERVAL_SECONDS
+                    and is_regular_market_session(market_now)
+                ):
+                    try:
+                        _refresh_stale_position_quotes(
+                            provider,
+                            broker,
+                            watch_shadow,
+                            last_ws_tick_received,
+                            now=market_now,
+                        )
+                    except Exception:
+                        LOGGER.exception("Live quote fallback cycle failed; WebSocket monitoring continues.")
+                    last_rest_quote_refresh = monotonic_now
                 stop.wait(4)
         except Exception:
             LOGGER.exception("Kite tick monitor could not start; retrying after a short delay")

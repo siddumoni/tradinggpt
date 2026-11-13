@@ -111,7 +111,7 @@ def generate_daily_report(
         shadows, candle_archive_dir or Path("data/paper_candles_kite")
     )
 
-    def pnl(items: list[dict])
+    def pnl(items: list[dict]) -> float:
         return round(sum(float(row.get("net_pnl") or 0) for row in items), 2)
 
     challenger_strategies = []

@@ -334,7 +334,7 @@ def test_microstructure_capture_subscription_limit_is_bounded():
 
     class FakeBroker:
         def monitored_symbols(self):
-            return ["S500"]
+            return [f"S{i}" for i in range(1, service.MAX_RESEARCH_CAPTURE_SYMBOLS + 2)]
     class FakeWatch:
         def open_symbols(self):
             return []
@@ -350,5 +350,5 @@ def test_microstructure_capture_subscription_limit_is_bounded():
         FakeTicker(), symbols, active, FakeBroker(), FakeWatch(), [], "nse_equity",
         capture_symbols=captured, quote_symbols=quoted,
     )
-    assert len(captured) == 1
-    assert quoted == {"S500"}
+    assert len(captured) == service.MAX_RESEARCH_CAPTURE_SYMBOLS
+    assert len(quoted) == service.MAX_RESEARCH_CAPTURE_SYMBOLS + 1

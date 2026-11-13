@@ -34,6 +34,9 @@ LOGGER = logging.getLogger("paper_trading_service")
 WS_POSITION_STALE_AFTER_SECONDS = 15.0
 REST_POSITION_QUOTE_INTERVAL_SECONDS = 5.0
 MAX_MARKET_QUOTE_AGE_SECONDS = 60.0
+# Retain screened symbols for the session so a stock that leaves the top-N
+# screen still has its five-minute Order Flow bucket captured.
+MAX_RESEARCH_CAPTURE_SYMBOLS = 500
 
 
 def _parse_kite_timestamp(value, *, naive_is_local: bool) -> datetime | None:
@@ -186,16 +189,49 @@ def _desired_market_symbols(
 
 
 def _sync_websocket_subscriptions(
-    ws, symbol_to_token, active_tokens, broker, watch_shadow, symbols, universe_mode
+    ws,
+    symbol_to_token,
+    active_tokens,
+    broker,
+    watch_shadow,
+    symbols,
+    universe_mode,
+    *,
+    capture_symbols: set[str] | None = None,
+    quote_symbols: set[str] | None = None,
 ):
+    """Keep live quote subscriptions current while retaining today's capture universe."""
     desired_symbols = _desired_market_symbols(broker, watch_shadow, symbols, universe_mode)
+    if quote_symbols is not None:
+        quote_symbols.clear()
+        quote_symbols.update(desired_symbols)
+
+    if capture_symbols is not None:
+        capture_candidates = sorted(
+            symbol
+            for symbol in desired_symbols
+            if symbol in symbol_to_token and symbol not in capture_symbols
+        )
+        remaining = max(0, MAX_RESEARCH_CAPTURE_SYMBOLS - len(capture_symbols))
+        capture_symbols.update(capture_candidates[:remaining])
+        if len(capture_candidates) > remaining:
+            LOGGER.warning(
+                "Order-flow session capture reached its %s-symbol limit; %s newly screened symbol(s) "
+                "will receive live quote monitoring but may not have retained research buckets.",
+                MAX_RESEARCH_CAPTURE_SYMBOLS,
+                len(capture_candidates) - remaining,
+            )
+        subscribed_symbols = set(desired_symbols) | capture_symbols
+    else:
+        subscribed_symbols = set(desired_symbols)
+
     missing = sorted(set(desired_symbols) - set(symbol_to_token))
     if missing:
         LOGGER.warning(
             "Selected/open symbols absent from Kite NSE EQ instrument list: %s", ",".join(missing)
         )
     desired_tokens = {
-        symbol_to_token[symbol] for symbol in desired_symbols if symbol in symbol_to_token
+        symbol_to_token[symbol] for symbol in subscribed_symbols if symbol in symbol_to_token
     }
     additions = sorted(desired_tokens - active_tokens)
     removals = sorted(active_tokens - desired_tokens)
@@ -204,13 +240,15 @@ def _sync_websocket_subscriptions(
         ws.set_mode(ws.MODE_FULL, additions)
         active_tokens.update(additions)
         LOGGER.info(
-            "Kite WebSocket subscribed to %s additional selected/open symbol(s).", len(additions)
+            "Kite WebSocket subscribed to %s additional selected/open/session-capture symbol(s).",
+            len(additions),
         )
     if removals:
         ws.unsubscribe(removals)
         active_tokens.difference_update(removals)
         LOGGER.info(
-            "Kite WebSocket unsubscribed %s symbols no longer selected or open.", len(removals)
+            "Kite WebSocket unsubscribed %s symbols no longer monitored or retained for capture.",
+            len(removals),
         )
     return active_tokens
 
@@ -238,6 +276,8 @@ def _ticker_thread(
         # The optional research recorder must never prevent paper price monitoring.
         LOGGER.exception("Order-flow capture unavailable; continuing without snapshot recording.")
 
+    capture_symbols: set[str] = set()
+    quote_symbols: set[str] = set()
     while not stop.is_set():
         ticker = None
         try:
@@ -272,7 +312,17 @@ def _ticker_thread(
                 and row.get("segment") == "NSE"
                 and row.get("instrument_type") == "EQ"
             }
-            initial_tokens = sorted({symbol_to_token[s] for s in desired if s in symbol_to_token})
+            initial_capture = sorted(symbol for symbol in desired if symbol in symbol_to_token)
+            capture_symbols.update(
+                initial_capture[: max(0, MAX_RESEARCH_CAPTURE_SYMBOLS - len(capture_symbols))]
+            )
+            initial_tokens = sorted(
+                {
+                    symbol_to_token[symbol]
+                    for symbol in (set(desired) | capture_symbols)
+                    if symbol in symbol_to_token
+                }
+            )
             if not initial_tokens:
                 LOGGER.warning(
                     "No monitored symbols resolve to current Kite NSE EQ instruments: %s",
@@ -299,6 +349,8 @@ def _ticker_thread(
                         watch_shadow,
                         fallback,
                         universe_mode,
+                        capture_symbols=capture_symbols,
+                        quote_symbols=quote_symbols,
                     )
 
             def on_connect(ws, response):
@@ -313,10 +365,15 @@ def _ticker_thread(
                         watch_shadow,
                         fallback,
                         universe_mode,
+                        capture_symbols=capture_symbols,
+                        quote_symbols=quote_symbols,
                     )
                 LOGGER.info(
-                    "Kite WebSocket connected; subscribed to %s current selected/open symbols.",
+                    "Kite WebSocket connected; subscribed to %s live/session-capture symbols "
+                    "(%s currently selected/open, %s retained for research capture).",
                     len(active_tokens),
+                    len(quote_symbols),
+                    len(capture_symbols),
                 )
 
             def on_ticks(ws, ticks):
@@ -333,8 +390,16 @@ def _ticker_thread(
                                 symbol,
                             )
                             continue
-                        if recorder is not None and is_regular_market_session(stamp):
+                        if (
+                            recorder is not None
+                            and (symbol in capture_symbols or symbol in quote_symbols)
+                            and is_regular_market_session(stamp)
+                        ):
                             recorder.submit(tick, symbol=symbol, received_at=now)
+                        # Retained capture-only symbols must not create DB market marks or
+                        # participate in Champion/Watch exit checks after leaving the live screen.
+                        if symbol not in quote_symbols:
+                            continue
                         last = float(tick.get("last_price"))
                         depth = tick.get("depth") or {}
                         buys = depth.get("buy", []) if isinstance(depth, dict) else []

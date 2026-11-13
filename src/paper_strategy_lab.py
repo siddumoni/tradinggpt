@@ -110,6 +110,15 @@ def _insert_new_signals(db:sqlite3.Connection,symbol:str,frame:pd.DataFrame)->in
   count+=cur.rowcount
  return count
 
+def _late_microstructure_entry(signal_time:Any,published_at:Any)->pd.Timestamp|None:
+ sig=to_ist(signal_time)
+ available=to_ist(published_at)
+ entry_ts=next_five_minute_bar_after(sig,available)
+ if entry_ts.date()!=sig.date() or entry_ts.time().replace(tzinfo=None)>=ENTRY_CUTOFF:
+  return entry_ts
+ return None
+
+
 def _insert_microstructure_signals(
     db:sqlite3.Connection,
     symbol:str,
@@ -118,18 +127,30 @@ def _insert_microstructure_signals(
     *,
     tick_size:float,
     settings,
-)->int:
- count=0
+    published_at:Any,
+)->tuple[int,int]:
+ count=late_count=0
+ created_at=to_ist(published_at).isoformat()
  for x in generate_microstructure_signals(symbol,frame,events,tick_size=tick_size,settings=settings):
+  late_entry=_late_microstructure_entry(x["signal_time"],created_at)
+  status="EXPIRED_NO_ENTRY" if late_entry is not None else "PENDING_ENTRY"
+  reason=str(x["reason"])
+  if late_entry is not None:
+   reason += (
+    f" No entry was simulated: next eligible bar at {late_entry.strftime('%H:%M')} IST "
+    f"is outside the same-session entry window (must be before {ENTRY_CUTOFF.strftime('%H:%M')})."
+   )
   cur=db.execute("""INSERT OR IGNORE INTO shadow_signals(
    signal_id,strategy_version,strategy_name,symbol,side,signal_time,signal_close,
    stop_loss,target_1,target_2,status,reason,created_at
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,'PENDING_ENTRY',?,?)""",
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
    (x["signal_id"],x["strategy_version"],x["strategy_name"],x["symbol"],x["side"],
     x["signal_time"],x["signal_close"],x["stop_loss"],x["target_1"],x["target_2"],
-    x["reason"],pd.Timestamp.now(tz=IST).isoformat()))
+    status,reason,created_at))
   count+=cur.rowcount
- return count
+  if cur.rowcount and late_entry is not None:
+   late_count+=1
+ return count,late_count
 def _entry_shadow(db:sqlite3.Connection,row:sqlite3.Row,frame:pd.DataFrame)->None:
  sig=to_ist(row["signal_time"])
  available=to_ist(row["created_at"])
@@ -284,7 +305,7 @@ def process_archive(
  tick_sizes=load_tick_size_lookup(tick_file)
  scan_now=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=IST)
  scan_now=scan_now.tz_localize(IST) if scan_now.tzinfo is None else scan_now.tz_convert(IST)
- inserted=closed=0;symbols=0;micro_inserted=0;micro_buckets=0;micro_missing_buckets=0;micro_errors=0;micro_missing_tick_sizes=0;last_archived_by_symbol={}
+ inserted=closed=0;symbols=0;micro_inserted=0;micro_late_suppressed=0;micro_buckets=0;micro_missing_buckets=0;micro_errors=0;micro_missing_tick_sizes=0;last_archived_by_symbol={}
  with sqlite3.connect(db_path,timeout=15) as db:
   db.row_factory=sqlite3.Row;ensure_shadow_schema(db)
   if archive.is_dir():
@@ -315,9 +336,12 @@ def process_archive(
        try:
         bucket_events=read_order_flow_events(bucket_path)
         micro_buckets+=1
-        micro_inserted+=_insert_microstructure_signals(
-         db,symbol,frame,bucket_events,tick_size=tick_sizes[symbol],settings=micro_settings
+        new_signals,late_signals=_insert_microstructure_signals(
+         db,symbol,frame,bucket_events,tick_size=tick_sizes[symbol],
+         settings=micro_settings,published_at=scan_now
         )
+        micro_inserted+=new_signals
+        micro_late_suppressed+=late_signals
        except (OSError,EOFError,OrderFlowError,ValueError):
         micro_errors+=1
       elif bucket_path is not None:
@@ -353,6 +377,7 @@ def process_archive(
   "microstructure_enabled":bool(micro_settings.enabled),
   "microstructure_config_error":micro_config_error,
   "microstructure_new_signals":micro_inserted,
+  "microstructure_late_signals_suppressed":micro_late_suppressed,
   "open_or_pending":int(opens),"incomplete_open":incomplete_open,**pending_result
  }
 if __name__=="__main__":

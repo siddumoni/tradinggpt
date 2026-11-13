@@ -230,3 +230,49 @@ def test_challenger_capacity_is_shared_across_atr_seed_version_boundary(tmp_path
  assert VERSION_FAMILY[new_version]==(old_version,new_version)
  assert status=="ENTRY_REJECTED"
  assert "position limit reached" in reason
+
+
+
+def test_microstructure_signal_is_expired_at_generation_when_next_entry_is_late():
+ from src.paper_strategy_lab import _late_microstructure_entry
+
+ published="2026-11-13T14:41:00+05:30"
+ late=_late_microstructure_entry("2026-11-13T14:40:00+05:30",published)
+ assert late is not None
+ assert late.isoformat()=="2026-11-13T14:45:00+05:30"
+
+ eligible=_late_microstructure_entry(
+  "2026-11-13T14:30:00+05:30","2026-11-13T14:31:00+05:30"
+ )
+ assert eligible is None
+
+
+def test_microstructure_late_entry_candidate_is_recorded_as_expired_not_pending(tmp_path):
+ from src.paper_strategy_lab import _insert_microstructure_signals
+ from src.microstructure_strategy import MicrostructureSettings
+
+ db_path=tmp_path/"paper.sqlite3"
+ with sqlite3.connect(db_path) as db:
+  db.row_factory=sqlite3.Row
+  ensure_shadow_schema(db)
+  import src.paper_strategy_lab as lab
+  original=lab.generate_microstructure_signals
+  lab.generate_microstructure_signals=lambda *a,**k:[{
+   "signal_id":"late-micro-signal","strategy_version":"micro_orderflow_price_continuation_v1",
+   "strategy_name":"Order Flow continuation","symbol":"INFY","side":"LONG",
+   "signal_time":"2026-11-13T14:40:00+05:30","signal_close":100.0,
+   "stop_loss":99.0,"target_1":102.0,"target_2":103.0,"reason":"test signal",
+  }]
+  try:
+   inserted,late=_insert_microstructure_signals(
+    db,"INFY",pd.DataFrame(),[],tick_size=0.05,
+    settings=MicrostructureSettings(),published_at="2026-11-13T14:41:00+05:30",
+   )
+  finally:
+   lab.generate_microstructure_signals=original
+  row=db.execute(
+   "SELECT status,reason,created_at FROM shadow_signals WHERE signal_id='late-micro-signal'"
+  ).fetchone()
+ assert inserted==1 and late==1
+ assert row["status"]=="EXPIRED_NO_ENTRY"
+ assert "14:45 IST" in row["reason"]

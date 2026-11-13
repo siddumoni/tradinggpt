@@ -199,7 +199,6 @@ def test_old_last_trade_time_is_not_used_as_websocket_quote_timestamp():
 
 
 def test_stale_open_position_quote_is_refreshed_from_kite_rest_snapshot():
-    from datetime import timedelta
     from src import paper_trading_service as service
 
     now = datetime.now(ZoneInfo("Asia/Kolkata"))

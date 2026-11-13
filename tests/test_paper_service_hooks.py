@@ -277,3 +277,78 @@ def test_rest_fallback_rejects_stale_quote_timestamp():
     )
     assert refreshed == 0
     assert broker.updates == []
+
+
+
+def test_websocket_capture_retains_symbols_after_they_leave_top_n_screen():
+    from src import paper_trading_service as service
+
+    class FakeBroker:
+        selected = ["AAA", "BBB"]
+        def monitored_symbols(self):
+            return list(self.selected)
+
+    class FakeWatch:
+        def open_symbols(self):
+            return []
+
+    class FakeTicker:
+        MODE_FULL = 3
+        def __init__(self):
+            self.subscribed = []
+            self.unsubscribed = []
+        def subscribe(self, tokens):
+            self.subscribed.extend(tokens)
+        def unsubscribe(self, tokens):
+            self.unsubscribed.extend(tokens)
+        def set_mode(self, mode, tokens):
+            assert mode == self.MODE_FULL
+
+    broker, watch, ticker = FakeBroker(), FakeWatch(), FakeTicker()
+    symbol_to_token = {"AAA": 1, "BBB": 2, "CCC": 3}
+    active, captured, quoted = set(), set(), set()
+
+    service._sync_websocket_subscriptions(
+        ticker, symbol_to_token, active, broker, watch, [], "nse_equity",
+        capture_symbols=captured, quote_symbols=quoted,
+    )
+    assert captured == {"AAA", "BBB"}
+    assert quoted == {"AAA", "BBB"}
+    assert active == {1, 2}
+
+    broker.selected = ["BBB", "CCC"]
+    service._sync_websocket_subscriptions(
+        ticker, symbol_to_token, active, broker, watch, [], "nse_equity",
+        capture_symbols=captured, quote_symbols=quoted,
+    )
+
+    assert captured == {"AAA", "BBB", "CCC"}
+    assert quoted == {"BBB", "CCC"}
+    assert active == {1, 2, 3}
+    assert ticker.unsubscribed == []
+    assert ticker.subscribed == [1, 2, 3]
+
+
+def test_microstructure_capture_subscription_limit_is_bounded():
+    from src import paper_trading_service as service
+
+    class FakeBroker:
+        def monitored_symbols(self):
+            return ["S500"]
+    class FakeWatch:
+        def open_symbols(self):
+            return []
+    class FakeTicker:
+        MODE_FULL = 3
+        def subscribe(self, tokens): pass
+        def unsubscribe(self, tokens): pass
+        def set_mode(self, mode, tokens): pass
+
+    symbols = {f"S{i}": i for i in range(1, service.MAX_RESEARCH_CAPTURE_SYMBOLS + 2)}
+    captured, quoted, active = set(), set(), set()
+    service._sync_websocket_subscriptions(
+        FakeTicker(), symbols, active, FakeBroker(), FakeWatch(), [], "nse_equity",
+        capture_symbols=captured, quote_symbols=quoted,
+    )
+    assert len(captured) == 1
+    assert quoted == {"S500"}

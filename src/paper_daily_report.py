@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from src.paper_broker import DEFAULT_DB, PAPER_BASELINE_VERSION, PaperBroker
 from src.watch_shadow_portfolio import WatchShadowPortfolio
 from src.candidate_outcome_tracker import CandidateOutcomeTracker
+from src.strategy_replay_audit import audit_shadow_observations
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -33,6 +34,7 @@ def generate_daily_report(
     db_path: Path = DEFAULT_DB,
     output_dir: Path = Path("reports"),
     now: datetime | None = None,
+    candle_archive_dir: Path | None = None,
 ) -> dict:
     """Write the daily Markdown/JSON/CSV report without mixing the three books."""
     current = now or datetime.now(IST)
@@ -105,8 +107,11 @@ def generate_daily_report(
     ]
     watch_excluded = [row for row in watch_trades if row["status"] == "EXCLUDED"]
     watch_open = [row for row in watch_trades if row["status"] == "OPEN"]
+    strategy_replay_audit = audit_shadow_observations(
+        shadows, candle_archive_dir or Path("data/paper_candles_kite")
+    )
 
-    def pnl(items: list[dict]) -> float:
+    def pnl(items: list[dict])
         return round(sum(float(row.get("net_pnl") or 0) for row in items), 2)
 
     challenger_strategies = []
@@ -237,6 +242,12 @@ def generate_daily_report(
                 "net_pnl": microstructure_shadow["net_pnl_today"],
                 "signals": len(microstructure_rows),
             },
+            "strategy_replay_audit": {
+                "status": strategy_replay_audit["status"],
+                "closed_trades_replayed": strategy_replay_audit["closed_trades_replayed"],
+                "closed_replays_matched": strategy_replay_audit["closed_replays_matched"],
+                "closed_replay_mismatches": strategy_replay_audit["closed_replay_mismatches"],
+            },
             "watch_shadow": {
                 "closed_trades": watch_shadow["closed_trades_today"],
                 "net_pnl": watch_shadow["net_pnl_today"],
@@ -260,6 +271,7 @@ def generate_daily_report(
         "champion_archive": champion_archive,
         "challengers": challengers,
         "microstructure_shadow": microstructure_shadow,
+        "strategy_replay_audit": strategy_replay_audit,
         "watch_shadow": watch_shadow,
         "candidate_outcomes": candidate_outcomes,
         "risk_overruns": risk_overruns,
@@ -408,6 +420,14 @@ def generate_daily_report(
         f"({item['exit_reason']})."
         for item in risk_overruns
     ) or "- No closed trade exceeded its recorded planned per-trade risk today."
+    replay_audit_lines = "\n".join(
+        f"| {version} | {stats['closed_trades']} | {stats['closed_replays_matched']} | "
+        f"{stats['closed_replay_mismatches_or_gaps']} | "
+        f"{stats['average_mfe_r'] if stats['average_mfe_r'] is not None else '—'} | "
+        f"{stats['average_mae_r'] if stats['average_mae_r'] is not None else '—'} | "
+        f"{stats['blocked_candidates']} |"
+        for version, stats in strategy_replay_audit["by_strategy"].items()
+    ) or "| No shadow observations to replay | 0 | 0 | 0 | — | — | 0 |"
 
     md = f"""# TradingGPT paper-trading daily report — {day}
 
@@ -441,6 +461,19 @@ Generated: {current.isoformat()}
 | Strategy | Symbol | Side | Status | Net P&L |
 |---|---|---|---|---:|
 {microstructure_lines}
+
+## Archived-candle replay audit — Challenger and Microstructure only
+- Audit status: {strategy_replay_audit['status']}
+- Closed shadow trades replayed: {strategy_replay_audit['closed_trades_replayed']}
+- Reproduced recorded exits: {strategy_replay_audit['closed_replays_matched']}
+- Exit mismatches: {strategy_replay_audit['closed_replay_mismatches']}
+- Rejected/expired candidates are evaluated only as counterfactual paths; no trade or P&L is created.
+
+| Strategy version | Closed | Matched exits | Mismatches / gaps | Avg MFE (R) | Avg MAE (R) | Blocked |
+|---|---:|---:|---:|---:|---:|---:|
+{replay_audit_lines}
+
+{strategy_replay_audit['note']}
 
 ## Watch-candidate shadow book
 - Virtual starting capital: INR {watch_shadow['account']['starting_capital']:,.2f}
@@ -511,8 +544,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Generate separate research-only daily paper-trading reports.")
     parser.add_argument("--db-path", type=Path, default=DEFAULT_DB)
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
+    parser.add_argument("--candle-archive-dir", type=Path, default=Path("data/paper_candles_kite"))
     args = parser.parse_args(argv)
-    print(json.dumps(generate_daily_report(args.db_path, args.output_dir), indent=2))
+    print(json.dumps(generate_daily_report(
+        args.db_path, args.output_dir, candle_archive_dir=args.candle_archive_dir
+    ), indent=2))
     return 0
 
 

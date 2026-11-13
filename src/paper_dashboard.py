@@ -219,7 +219,7 @@ td{color:#d5deec;border-bottom-color:#223147}tbody tr:hover td{background:#17263
         <section class="panel"><div class="panel-head"><div><h3>Portfolio risk usage</h3><p>Planned risk reserved by open positions.</p></div><span class="pill blue">Risk controls</span></div><div class="risk-wrap"><div class="risk-labels"><span>Used risk budget</span><strong id="champion-risk-text">—</strong></div><div class="progress"><div class="progress-fill" id="champion-risk-fill"></div></div><div class="helper" id="champion-risk-note">—</div></div><div class="stat-list" id="champion-guardrails"></div></section>
         <section class="panel"><div class="panel-head"><div><h3>Performance summary</h3><p>Calculated from closed Champion trades.</p></div><span class="pill">Closed trades only</span></div><div class="stat-list" id="champion-performance"></div></section>
       </div>
-      <section class="panel table-panel"><div class="panel-head"><div><h3>Open positions</h3><p>Both targets and after-cost reward-to-risk ratios. Net RRR includes estimated charges and slippage.</p></div><span class="pill" id="champion-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last price</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Action</th></tr></thead><tbody id="champion-open-rows"></tbody></table></div></section>
+      <section class="panel table-panel"><div class="panel-head"><div><h3>Open positions</h3><p>Both targets and after-cost reward-to-risk ratios. Net RRR includes estimated charges and slippage.</p></div><span class="pill" id="champion-open-count">0 open</span></div><div class="table-wrap"><table><thead><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Last price</th><th>Unrealised net</th><th>Stop-loss</th><th>Target 1</th><th>Target 2</th><th>Net RRR T1</th><th>Net RRR T2</th><th>Quote age</th><th>Action</th></tr></thead><tbody id="champion-open-rows"></tbody></table></div></section>
       <section class="panel table-panel"><div class="panel-head"><div><h3>Champion trade history</h3><p>Completed trades from the main virtual account. Net P&amp;L is after estimated charges and slippage.</p></div><input class="search" type="search" placeholder="Search history…" aria-label="Search Champion history" data-filter-for="champion-history-rows"></div><div class="table-wrap"><table><thead><tr><th>Exit time</th><th>Stock</th><th>Strategy</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Charges</th><th>Slippage</th><th>Net P&amp;L</th><th>Exit reason</th></tr></thead><tbody id="champion-history-rows"></tbody></table></div></section>
     </section>
 
@@ -266,6 +266,7 @@ const fmtNum=v=>{const n=val(v);return n===null||!Number.isFinite(n)?"—":n.toL
 const fmtPct=v=>{const n=val(v);return n===null||!Number.isFinite(n)?"—":n.toFixed(1)+"%";};
 const fmtRrr=v=>{const n=val(v);return n===null||!Number.isFinite(n)?"—":n.toFixed(2)+":1";};
 const fmtTime=v=>{if(!v)return "—";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString("en-IN",{hour12:false});};
+const fmtAge=v=>{const n=val(v);if(n===null||!Number.isFinite(n))return "No quote";if(n<2)return "Just now";if(n<60)return Math.round(n)+"s ago";return Math.floor(n/60)+"m "+Math.round(n%60)+"s ago";};
 const pnlClass=v=>{const n=val(v);return n===null?"":n>0?"positive":n<0?"negative":"";};
 const safeText=v=>(v===null||v===undefined||v==="")?"—":String(v);
 function goTo(name){
@@ -393,6 +394,7 @@ function render(s){
     {value:x=>fmtMoney(x.last_price)},{value:x=>fmtMoney(x.unrealized_net_pnl),cls:x=>pnlClass(x.unrealized_net_pnl)},
     {value:x=>fmtMoney(x.stop_loss)},{value:x=>fmtMoney(x.target_1)},{value:x=>fmtMoney(x.target_2)},
     {value:x=>fmtRrr(x.net_rr_t1)},{value:x=>fmtRrr(x.net_rr_t2)},
+    {value:x=>fmtAge(x.market_age_seconds),cls:x=>(val(x.market_age_seconds)??Infinity)>15?"negative":"positive"},
     {render:(td,x)=>{const button=document.createElement("button");button.type="button";button.className="btn-close";button.dataset.closeTrade=String(x.id);button.textContent="Close";button.setAttribute("aria-label","Manually close "+safeText(x.symbol)+" paper position");td.append(button);}}
   ],"No open Champion positions. A position will appear here when a qualifying simulated entry is accepted.");
   renderTable("champion-history-rows",closed,[

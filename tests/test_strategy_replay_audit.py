@@ -91,6 +91,12 @@ def test_closed_shadow_trade_replay_matches_recorded_stop_and_calculates_excursi
     assert detail["mae_points"] == pytest.approx(1.5)
     assert detail["mfe_r"] == pytest.approx(1.5)
     assert detail["mae_r"] == pytest.approx(1.5)
+    summary = result["by_strategy"]["micro_orderflow_price_continuation_v1"]
+    assert summary["recorded_wins"] == 0
+    assert summary["recorded_losses"] == 1
+    assert summary["recorded_net_pnl"] == pytest.approx(-120.0)
+    assert summary["recorded_exit_reason_counts"] == {"STOP_LOSS": 1}
+    assert summary["closed_replay_match_rate_pct"] == pytest.approx(100.0)
 
 
 def test_rejected_candidate_is_counterfactual_only_and_has_no_pnl(tmp_path):

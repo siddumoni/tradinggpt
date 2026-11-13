@@ -231,9 +231,7 @@ def _sync_websocket_subscriptions(
             "Selected/open symbols absent from Kite NSE EQ instrument list: %s", ",".join(missing)
         )
     desired_tokens = {
-        symbol_to_token[symbol]
-        for symbol in subscribed_symbols
-        if symbol in symbol_to_token
+        symbol_to_token[symbol] for symbol in subscribed_symbols if symbol in symbol_to_token
     }
     additions = sorted(desired_tokens - active_tokens)
     removals = sorted(active_tokens - desired_tokens)
@@ -314,9 +312,7 @@ def _ticker_thread(
                 and row.get("segment") == "NSE"
                 and row.get("instrument_type") == "EQ"
             }
-            initial_capture = sorted(
-                symbol for symbol in desired if symbol in symbol_to_token
-            )
+            initial_capture = sorted(symbol for symbol in desired if symbol in symbol_to_token)
             capture_symbols.update(
                 initial_capture[: max(0, MAX_RESEARCH_CAPTURE_SYMBOLS - len(capture_symbols))]
             )

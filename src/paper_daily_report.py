@@ -421,13 +421,15 @@ def generate_daily_report(
         for item in risk_overruns
     ) or "- No closed trade exceeded its recorded planned per-trade risk today."
     replay_audit_lines = "\n".join(
-        f"| {version} | {stats['closed_trades']} | {stats['closed_replays_matched']} | "
-        f"{stats['closed_replay_mismatches_or_gaps']} | "
+        f"| {version} | {stats['closed_trades']} | "
+        f"{stats['recorded_wins']}/{stats['recorded_losses']} | "
+        f"{stats['recorded_net_pnl'] if stats['recorded_net_pnl'] is not None else '—'} | "
+        f"{stats['closed_replays_matched']} | {stats['closed_replay_mismatches_or_gaps']} | "
         f"{stats['average_mfe_r'] if stats['average_mfe_r'] is not None else '—'} | "
         f"{stats['average_mae_r'] if stats['average_mae_r'] is not None else '—'} | "
         f"{stats['blocked_candidates']} |"
         for version, stats in strategy_replay_audit["by_strategy"].items()
-    ) or "| No shadow observations to replay | 0 | 0 | 0 | — | — | 0 |"
+    ) or "| No shadow observations to replay | 0 | 0/0 | — | 0 | 0 | — | — | 0 |"
 
     md = f"""# TradingGPT paper-trading daily report — {day}
 
@@ -469,8 +471,8 @@ Generated: {current.isoformat()}
 - Exit mismatches: {strategy_replay_audit['closed_replay_mismatches']}
 - Rejected/expired candidates are evaluated only as counterfactual paths; no trade or P&L is created.
 
-| Strategy version | Closed | Matched exits | Mismatches / gaps | Avg MFE (R) | Avg MAE (R) | Blocked |
-|---|---:|---:|---:|---:|---:|---:|
+| Strategy version | Closed | Wins / losses | Recorded net P&L | Matched exits | Mismatches / gaps | Avg MFE (R) | Avg MAE (R) | Blocked |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
 {replay_audit_lines}
 
 {strategy_replay_audit['note']}

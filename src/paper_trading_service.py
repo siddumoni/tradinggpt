@@ -57,9 +57,7 @@ def _parse_kite_timestamp(value, *, naive_is_local: bool) -> datetime | None:
     return stamp.astimezone(IST)
 
 
-def _websocket_quote_timestamp(
-    tick: dict, received_at: datetime
-) -> datetime | None:
+def _websocket_quote_timestamp(tick: dict, received_at: datetime) -> datetime | None:
     """Return the packet timestamp; never mistake last_trade_time for quote time."""
     saw_timestamp = False
     for key in ("exchange_timestamp", "timestamp"):
@@ -118,12 +116,11 @@ def _refresh_stale_position_quotes(
         if row.get("symbol")
     }
     symbols.update(
-        str(symbol).strip().upper()
-        for symbol in watch_shadow.open_symbols()
-        if str(symbol).strip()
+        str(symbol).strip().upper() for symbol in watch_shadow.open_symbols() if str(symbol).strip()
     )
     stale = sorted(
-        symbol for symbol in symbols
+        symbol
+        for symbol in symbols
         if symbol not in last_ws_tick_received
         or (current - last_ws_tick_received[symbol]).total_seconds() >= stale_after_seconds
     )
@@ -132,18 +129,24 @@ def _refresh_stale_position_quotes(
     try:
         quotes = provider.quotes(stale)
     except Exception:
-        LOGGER.exception("Kite REST quote fallback failed for stale open position(s): %s", ",".join(stale))
+        LOGGER.exception(
+            "Kite REST quote fallback failed for stale open position(s): %s", ",".join(stale)
+        )
         return 0
 
     refreshed = 0
     for symbol in stale:
         quote = quotes.get(f"NSE:{symbol}") if isinstance(quotes, dict) else None
         if not isinstance(quote, dict):
-            LOGGER.warning("Kite REST quote fallback returned no quote for open position %s", symbol)
+            LOGGER.warning(
+                "Kite REST quote fallback returned no quote for open position %s", symbol
+            )
             continue
         quote_time = _rest_quote_timestamp(quote, current)
         if quote_time is None:
-            LOGGER.warning("Kite REST quote fallback rejected missing/stale timestamp for %s", symbol)
+            LOGGER.warning(
+                "Kite REST quote fallback rejected missing/stale timestamp for %s", symbol
+            )
             continue
         try:
             last = float(quote.get("last_price"))
@@ -412,7 +415,9 @@ def _ticker_thread(
                             now=market_now,
                         )
                     except Exception:
-                        LOGGER.exception("Live quote fallback cycle failed; WebSocket monitoring continues.")
+                        LOGGER.exception(
+                            "Live quote fallback cycle failed; WebSocket monitoring continues."
+                        )
                     last_rest_quote_refresh = monotonic_now
                 stop.wait(4)
         except Exception:

@@ -851,6 +851,31 @@ class PaperBroker:
             raise ValueError("Market tick contains a future-dated receive or exchange timestamp.")
         closed = 0
         with self._connect() as db:
+            existing = db.execute(
+                "SELECT market_time,received_at FROM market_marks WHERE symbol=?",
+                (cleaned,),
+            ).fetchone()
+            if existing:
+                try:
+                    existing_market_time = to_ist(existing["market_time"])
+                    existing_received_at = to_ist(existing["received_at"])
+                except (TypeError, ValueError, OverflowError):
+                    existing_market_time = existing_received_at = None
+                if existing_market_time is not None and (
+                    qt < existing_market_time
+                    or (
+                        qt == existing_market_time
+                        and existing_received_at is not None
+                        and rec < existing_received_at
+                    )
+                ):
+                    LOGGER.debug(
+                        "Ignored out-of-order market quote for %s: %s is older than stored mark %s",
+                        cleaned,
+                        qt.isoformat(),
+                        existing_market_time.isoformat(),
+                    )
+                    return 0
             db.execute(
                 """INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at) VALUES(?,?,?,?,?,?)
               ON CONFLICT(symbol) DO UPDATE SET last_price=excluded.last_price,bid=excluded.bid,ask=excluded.ask,
@@ -1189,6 +1214,7 @@ class PaperBroker:
             positions = []
             unreal = 0.0
             exposure = 0.0
+            snapshot_now = datetime.now(IST)
             _, rates = load_phase2_settings()
             open_planned_risk = sum(
                 float(r["planned_net_risk_inr"] or r["risk_budget_inr"] or self.risk_per_trade)
@@ -1239,12 +1265,26 @@ class PaperBroker:
                     slippage_bps_per_side=self.slippage_bps,
                     charge_rates=rates,
                 )
+                market_received_at = mark.get("received_at") if mark else None
+                try:
+                    market_age_seconds = (
+                        max(
+                            0.0,
+                            (snapshot_now - to_ist(market_received_at)).total_seconds(),
+                        )
+                        if market_received_at
+                        else None
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    market_age_seconds = None
                 trade.update(
                     {
                         "last_price": last,
                         "unrealized_gross_pnl": gross,
                         "unrealized_net_pnl": net_mark,
                         "market_time": mark.get("market_time") if mark else None,
+                        "market_received_at": market_received_at,
+                        "market_age_seconds": market_age_seconds,
                         **rr_metrics,
                     }
                 )

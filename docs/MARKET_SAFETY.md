@@ -38,6 +38,37 @@ Only HTTPS URLs on `nseindia.com` are accepted. The snapshot date must not be in
 
 Until the snapshot is maintained from NSE's latest official surveillance files, the scan report will show the status as `NOT_AVAILABLE` (or `STALE` / `INCOMPLETE` / `INVALID`). Do not mark `complete: true` unless the snapshot genuinely covers the full required universe.
 
+### Build the local snapshot from NSE source files
+
+The repository includes `scripts/refresh_nse_surveillance.py`. It does not scrape the NSE website or infer classifications from Kite instrument metadata. Download the current files directly from NSE and verify that all five cover the same trade date and the complete published lists:
+
+| Input | Official NSE source | What it contributes |
+|---|---|---|
+| ASM CSV | https://www.nseindia.com/static/regulations/additional-surveillance-measure | ASM symbols and published stage |
+| GSM CSV | https://www.nseindia.com/static/regulations/graded-surveillance-measure | GSM symbols and published stage |
+| ESM CSV | https://www.nseindia.com/static/regulations/enhanced-surveillance-measure-esm | ESM symbols and published stage |
+| UDiFF Common Bhavcopy Final ZIP | https://www.nseindia.com/all-reports | Trade-for-trade symbols whose equity series is BE/BZ/ST/SZ |
+| Periodic Call Auction CSV | https://www.nseindia.com/market-data/stocks-in-call-auction | Periodic-call-auction symbols |
+
+The All Reports page labels the daily UDiFF Common Bhavcopy Final ZIP and provides date-specific equity reports. Use the final bhavcopy for the chosen trade date, not an older cached file. The importer supports the current UDiFF `TckrSymb` / `SctySrs` fields and the legacy `SYMBOL` / `SERIES` fields for the T2T input.
+
+Example (PowerShell):
+
+```powershell
+python -m scripts.refresh_nse_surveillance `
+  --as-of 2026-11-13 `
+  --asm-csv .local\nse-source\asm-latest.csv `
+  --gsm-csv .local\nse-source\gsm-latest.csv `
+  --esm-csv .local\nse-source\esm-latest.csv `
+  --t2t-bhavcopy .local\nse-source\BhavCopy_NSE_CM_20261113_F_0000.csv.zip `
+  --pca-csv .local\nse-source\List_sec_CA.csv `
+  --confirm-complete
+```
+
+Only use `--confirm-complete` after personally verifying that every input is the latest official complete file for `--as-of`. The script validates all inputs, records filenames and SHA-256 hashes, merges duplicate classifications by symbol, validates the generated schema and atomically writes `.local/nse_surveillance.json`. Missing files, malformed headers or a failed schema validation leave the previous snapshot untouched. It refuses to create a complete snapshot when `--confirm-complete` is absent. Do not reuse an older PCA list or bhavcopy while labelling it with today's date.
+
+The importer does not fetch files automatically because NSE download links can change and incomplete/stale downloads must not silently produce a clean snapshot. Until a verified complete set has been imported, `NOT_AVAILABLE` is the correct status.
+
 ## MIS margin status
 
 `MIS_MARGIN_ESTIMATE_AVAILABLE` means Kite returned a positive value from the read-only `order_margins` API for a hypothetical one-share MIS LIMIT calculation. It is a margin estimate, not a guarantee of eventual order acceptance or exchange eligibility. Missing, invalid, stale-quote or failed refresh results are labelled `MIS_ELIGIBILITY_UNVERIFIED` and fail the existing margin gate. No order placement, modification, cancellation or GTT method is used.

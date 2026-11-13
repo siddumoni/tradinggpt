@@ -318,13 +318,8 @@ def test_out_of_order_market_tick_cannot_overwrite_newer_position_mark(tmp_path)
         tmp_path / "paper.sqlite3",
         exit_policy=replace(load_exit_policy(), time_exit_ist="23:59"),
     )
-    signal_time = datetime.now(IST)
     broker.process_scan_report(
-        report_file(
-            tmp_path,
-            [candidate(signal_time=signal_time.isoformat())],
-            {"INFY": quote(timestamp=signal_time.isoformat())},
-        ),
+        report_file(tmp_path, [candidate()], {"INFY": quote()}),
         before_entry_callback=lambda plan: True,
     )
     received = datetime.now(IST)

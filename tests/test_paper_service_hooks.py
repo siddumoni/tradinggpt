@@ -241,7 +241,7 @@ def test_stale_open_position_quote_is_refreshed_from_kite_rest_snapshot():
 
     assert refreshed == 1
     assert provider.requested == ["TDPOWERSYS"]
-    assert broker.updates[0][0] == "TDPowersys"
+    assert broker.updates[0][0] == "TDPOWERSYS"
     assert broker.updates[0][1] == 663.10
     assert broker.updates[0][2]["bid"] == 663.05
     assert broker.updates[0][2]["ask"] == 663.15

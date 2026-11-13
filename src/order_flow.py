@@ -109,7 +109,10 @@ def normalise_kite_tick(
 
     exchange_time = _iso_datetime(tick.get("exchange_timestamp") or tick.get("timestamp"))
     last_trade_time = _iso_datetime(tick.get("last_trade_time"))
-    event_time = exchange_time or last_trade_time or receive_time.isoformat()
+    # `timestamp` is the snapshot event time used for ordering and 5-minute buckets.
+    # The last trade may be older than a fresh quote/depth update, so it must not
+    # be used as the snapshot timestamp when the exchange timestamp is absent.
+    event_time = exchange_time or receive_time.isoformat()
     last_price = _finite_float(tick.get("last_price"))
     if last_price is None or last_price <= 0:
         return None

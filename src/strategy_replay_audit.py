@@ -59,10 +59,6 @@ def _replay_exit(
     bars = _session_frame(frame, entry_ts).loc[lambda x: x.index >= entry_ts]
     if bars.empty or bars.index[0] != entry_ts:
         return "MISSING_ENTRY_BAR", None, None, "The exact eligible entry candle is absent."
-    expected = pd.date_range(bars.index[0], bars.index[-1], freq="5min")
-    if not bars.index.equals(expected):
-        return "DATA_GAP", None, None, "Archived candles are not continuous after entry."
-
     previous = None
     for stamp, bar in bars.iterrows():
         if previous is not None and stamp != previous + pd.Timedelta(minutes=5):

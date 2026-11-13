@@ -5,6 +5,7 @@ import pandas as pd
 
 from src.microstructure_strategy import (
     MicrostructureSettings,
+    _flow_metrics,
     generate_microstructure_signals,
 )
 
@@ -101,6 +102,31 @@ def test_microstructure_flow_must_match_the_completed_signal_bar():
 
     assert result == []
 
+
+def test_microstructure_bucket_delta_ignores_prior_bar_trade_timestamps():
+    frame = _candles()
+    signal_stamp = frame.index[-1].to_pydatetime()
+    events = _flow_events(signal_stamp)
+    for index, event in enumerate(events):
+        if index >= 5:
+            event["last_trade_time"] = (
+                signal_stamp - timedelta(minutes=5) + timedelta(seconds=index + 1)
+            ).isoformat()
+
+    result = _flow_metrics(
+        events,
+        symbol="SBIN",
+        bar_start=signal_stamp,
+        bar_end=signal_stamp + timedelta(minutes=5),
+        settings=MicrostructureSettings(
+            minimum_bucket_snapshots=15,
+            minimum_trade_updates=5,
+        ),
+    )
+
+    assert result is not None
+    assert result["unique_trade_updates"] == 5
+    assert result["depth_snapshot_count"] == 20
 
 def test_microstructure_rejects_sparse_or_missing_order_flow():
     frame = _candles()

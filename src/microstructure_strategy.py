@@ -177,7 +177,18 @@ def _flow_metrics(
             continue
         event_symbol = str(event.get("symbol") or "").strip().upper()
         if event_symbol == symbol.upper() and bar_start <= stamp < bar_end:
-            bucket.append(event)
+            snapshot = dict(event)
+            raw_trade_stamp = snapshot.get("last_trade_time")
+            try:
+                trade_stamp = _stamp(raw_trade_stamp) if raw_trade_stamp else None
+            except (TypeError, ValueError, OverflowError):
+                trade_stamp = None
+            # A snapshot can carry the previous trade's timestamp into a new bar.
+            # Keep that snapshot for depth/OFI, but do not count the old print in
+            # this bar's estimated trade delta or unique-trade quality gate.
+            if trade_stamp is None or not (bar_start <= trade_stamp < bar_end):
+                snapshot["last_trade_time"] = None
+            bucket.append(snapshot)
     if len(bucket) < settings.minimum_bucket_snapshots:
         return None
     try:

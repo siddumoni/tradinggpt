@@ -219,3 +219,23 @@ def test_daily_report_keeps_microstructure_strategies_in_separate_shadow_book(tm
         rows = list(csv.DictReader(handle))
     row = next(row for row in rows if row["symbol"] == "SBIN")
     assert row["track"] == "MICROSTRUCTURE_SHADOW"
+
+
+
+def test_daily_report_includes_archived_shadow_replay_audit(tmp_path):
+    now = datetime(2026, 11, 13, 16, 0, tzinfo=IST)
+    out = generate_daily_report(
+        tmp_path / "paper.sqlite3",
+        tmp_path / "reports",
+        now,
+        candle_archive_dir=tmp_path / "missing-candle-archive",
+    )
+    base = tmp_path / "reports" / "paper_daily_2026-11-13"
+    payload = json.loads(base.with_suffix(".json").read_text(encoding="utf-8"))
+    markdown = base.with_suffix(".md").read_text(encoding="utf-8")
+
+    assert payload["strategy_replay_audit"]["status"] == "ARCHIVE_NOT_AVAILABLE"
+    assert payload["summary"]["strategy_replay_audit"]["status"] == "ARCHIVE_NOT_AVAILABLE"
+    assert out["strategy_replay_audit_status"] == "ARCHIVE_NOT_AVAILABLE"
+    assert "## Archived-candle replay audit" in markdown
+    assert "Rejected/expired candidates are evaluated only as counterfactual paths" in markdown

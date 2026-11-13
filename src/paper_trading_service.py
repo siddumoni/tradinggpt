@@ -507,7 +507,9 @@ def _finalize_reports(
 
     report_result = None
     try:
-        report_result = generate_daily_report(db_path, reports, now)
+        report_result = generate_daily_report(
+            db_path, reports, now, candle_archive_dir=archive
+        )
         LOGGER.info("Daily report generated: %s", report_result["markdown_path"])
     except Exception:
         LOGGER.exception("Daily report generation failed; upload checklist will still be printed.")

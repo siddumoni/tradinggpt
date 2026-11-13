@@ -53,7 +53,7 @@ def _source_files(tmp_path: Path) -> dict[str, Path]:
 def _build(tmp_path: Path, *, confirm_complete: bool = True):
     files = _source_files(tmp_path)
     return build_snapshot(
-        as_of=date(2026, 11, 13),
+        as_of=date.today(),
         asm_csv=files["asm"],
         gsm_csv=files["gsm"],
         esm_csv=files["esm"],
@@ -68,7 +68,7 @@ def test_build_snapshot_merges_official_measures_and_preserves_stages(tmp_path):
 
     assert snapshot["schema_version"] == 1
     assert snapshot["complete"] is True
-    assert snapshot["as_of"] == "2026-11-13"
+    assert snapshot["as_of"] == date.today().isoformat()
     assert snapshot["summary"]["unique_symbols"] == 7
     assert snapshot["symbols"]["AAA"] == [
         {"measure": "ASM", "stage": "Long Term - Stage I"},
@@ -88,7 +88,7 @@ def test_write_snapshot_validates_generated_file_and_symbol_statuses(tmp_path):
     output = tmp_path / ".local" / "nse_surveillance.json"
 
     write_snapshot(snapshot, output)
-    loaded = load_surveillance_snapshot(output, as_of=date(2026, 11, 13))
+    loaded = load_surveillance_snapshot(output, as_of=date.today())
 
     assert loaded["status"] == "VALID"
     assert loaded["complete"] is True
@@ -106,7 +106,7 @@ def test_snapshot_refuses_partial_inputs_without_explicit_confirmation(tmp_path)
     files = _source_files(tmp_path)
     with pytest.raises(SurveillanceImportError, match="--confirm-complete"):
         build_snapshot(
-            as_of=date(2026, 11, 13),
+            as_of=date.today(),
             asm_csv=files["asm"],
             gsm_csv=files["gsm"],
             esm_csv=files["esm"],
@@ -121,7 +121,7 @@ def test_missing_source_file_fails_without_creating_snapshot(tmp_path):
     missing = tmp_path / "not-downloaded.csv"
     with pytest.raises(SurveillanceImportError, match="does not exist"):
         build_snapshot(
-            as_of=date(2026, 11, 13),
+            as_of=date.today(),
             asm_csv=files["asm"],
             gsm_csv=files["gsm"],
             esm_csv=files["esm"],
@@ -138,7 +138,7 @@ def test_bad_source_header_is_rejected(tmp_path):
     _write_csv(files["asm"], [{"NAME": "AAA", "ASM STAGE": "Stage I"}])
     with pytest.raises(SurveillanceImportError, match="symbol column"):
         build_snapshot(
-            as_of=date(2026, 11, 13),
+            as_of=date.today(),
             asm_csv=files["asm"],
             gsm_csv=files["gsm"],
             esm_csv=files["esm"],
@@ -156,7 +156,7 @@ def test_legacy_t2t_bhavcopy_series_columns_are_supported(tmp_path):
     ])
     files["t2t"] = legacy
     snapshot = build_snapshot(
-        as_of=date(2026, 11, 13),
+        as_of=date.today(),
         asm_csv=files["asm"],
         gsm_csv=files["gsm"],
         esm_csv=files["esm"],

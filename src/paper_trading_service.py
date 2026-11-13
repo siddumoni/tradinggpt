@@ -396,7 +396,7 @@ def _ticker_thread(
                             continue
                         if (
                             recorder is not None
-                            and symbol in capture_symbols
+                            and (symbol in capture_symbols or symbol in quote_symbols)
                             and is_regular_market_session(stamp)
                         ):
                             recorder.submit(tick, symbol=symbol, received_at=now)

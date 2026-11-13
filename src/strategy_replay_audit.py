@@ -244,18 +244,37 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
     closed = [item for item in items if item.get("recorded_status") == "CLOSED"]
     blocked = [item for item in items if item.get("recorded_status") in {"ENTRY_REJECTED", "EXPIRED_NO_ENTRY"}]
     matched = [item for item in closed if item.get("audit_status") == "MATCHED"]
+    pnl = [
+        float(item["recorded_net_pnl"])
+        for item in closed
+        if item.get("recorded_net_pnl") is not None
+        and math.isfinite(float(item["recorded_net_pnl"]))
+    ]
+    wins = sum(value > 0 for value in pnl)
+    losses = sum(value < 0 for value in pnl)
     mfe = [float(x["mfe_r"]) for x in closed if x.get("mfe_r") is not None]
     mae = [float(x["mae_r"]) for x in closed if x.get("mae_r") is not None]
     return {
         "observations": len(items),
         "closed_trades": len(closed),
+        "recorded_wins": wins,
+        "recorded_losses": losses,
+        "recorded_net_pnl": _rounded(sum(pnl), 2) if pnl else None,
+        "recorded_average_net_pnl": _rounded(sum(pnl) / len(pnl), 2) if pnl else None,
+        "recorded_exit_reason_counts": dict(Counter(
+            str(x.get("recorded_exit_reason") or "UNKNOWN") for x in closed
+        )),
         "closed_replays_matched": len(matched),
         "closed_replay_mismatches_or_gaps": len(closed) - len(matched),
+        "closed_replay_match_rate_pct": _rounded(100.0 * len(matched) / len(closed), 2) if closed else None,
         "average_mfe_r": _rounded(sum(mfe) / len(mfe)) if mfe else None,
         "average_mae_r": _rounded(sum(mae) / len(mae)) if mae else None,
         "blocked_candidates": len(blocked),
         "blocked_counterfactual_exit_counts": dict(Counter(
             str(x.get("audit_status")) for x in blocked
+        )),
+        "blocked_rejection_reason_counts": dict(Counter(
+            str(x.get("recorded_rejection_reason") or "UNSPECIFIED") for x in blocked
         )),
     }
 
@@ -337,7 +356,8 @@ def audit_shadow_observations(
         "note": (
             "Closed trades are checked against recorded entry/exit times and conservative stop-first OHLC exits. "
             "Rejected/expired candidates are evaluated only as counterfactual paths; no fill, quantity or P&L is assigned. "
-            "MFE/MAE are measured from the recorded entry reference price over entry-to-exit candles. "
+            "MFE/MAE use the full high/low range of each 5-minute candle through the exit candle; "
+            "the intrabar order of the high, low and exit is unknown, so excursions are diagnostic ranges, not executable fills. "
             "This audit does not change any strategy or Champion decisions."
         ),
     }

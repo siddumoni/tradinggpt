@@ -363,9 +363,4 @@ def audit_shadow_observations(
     }
 
 
-def _entry_levels_valid(side: str, entry: float, stop: float, target: float) -> bool:
-    if side == "LONG":
-        return stop < entry < target
-    if side == "SHORT":
-        return target < entry < stop
-    return False
+

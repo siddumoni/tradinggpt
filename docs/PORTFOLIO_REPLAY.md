@@ -11,10 +11,10 @@ This replay combines **one selected saved trade log per intended candidate strea
 The repository also provides a replay for the private `tradinggpt-research-data` archive:
 
 ```powershell
-python -m src.paper_archive_replay --archive-root ../tradinggpt-research-data --output-dir reports/paper_archive_replay
+python -m src.paper_archive_replay --archive-root ../tradinggpt-research-data --output-dir reports/paper_archive_replay --from-date 2026-11-11 --to-date 2026-11-13
 ```
 
-This replays manifested `daily/YYYY-MM-DD` folders in timestamp order. It verifies each scan/candle input against the daily SHA-256 manifest, accepts only research-only Kite scan reports that explicitly assert no broker orders, applies archived quote snapshots to open positions, and passes each completed 5-minute candle through the shared `PaperBroker` exit rules. The account starts with one shared cash/risk pool and carries realized equity across days. Output files are named with a deterministic digest of the inputs.
+This replays manifested `daily/YYYY-MM-DD` folders in timestamp order. Each selected daily report must explicitly identify the active `nse_champion_v2` version; the current archive also contains earlier, unversioned Champion days, so the date range is explicit and mixed versions fail closed. It verifies each scan/candle input against the daily SHA-256 manifest, accepts only research-only Kite scan reports that explicitly assert no broker orders, applies archived quote snapshots to open positions, and passes each completed 5-minute candle through the shared `PaperBroker` exit rules. The account starts with one shared cash/risk pool and carries realized equity across days. Output files are named with a deterministic digest of the inputs.
 
 For every symbol that has a directional candidate, the replay requires a complete 09:15–15:10 5-minute candle session. Missing bars or hash mismatches stop the run before performance is reported. If a position remains open at day end, the summary is marked `INCOMPLETE_OPEN_POSITIONS` and the position is not carried into the next day. No prices are synthesized.
 

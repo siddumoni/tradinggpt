@@ -262,7 +262,7 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
                     if high < max(open_price, low, close) or low > min(open_price, high, close):
                         raise ValueError(f"Invalid OHLC in {relative} at {stamp.isoformat()}")
                     if stamp not in expected:
-                        # Post-session bars do not participate in this replay.
+                        # Bars outside the 15:15 strategy square-off window do not participate.
                         continue
                     if stamp in seen:
                         raise ValueError(f"Duplicate candle timestamp in {relative}: {stamp}")
@@ -273,8 +273,9 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
         if missing:
             preview = ", ".join(value.strftime("%H:%M") for value in missing[:8])
             raise ValueError(
-                f"Incomplete 5-minute session for {symbol} on {day}; "
-                f"missing {len(missing)} bars beginning at {preview}"
+                f"Incomplete 09:15–15:15 strategy simulation window for {symbol} on {day}; "
+                f"expected 72 five-minute bars starting 09:15–15:10 IST, missing {len(missing)} "
+                f"beginning at {preview}"
             )
         candle_counts[symbol] = len(seen)
         candles.extend(seen.values())
@@ -593,6 +594,14 @@ def run_archive_replay(
             "requested_date_range": {
                 "from": from_date.isoformat() if from_date else None,
                 "to": to_date.isoformat() if to_date else None,
+            },
+            "simulation_window": {
+                "first_bar_start_ist": SESSION_START.isoformat(),
+                "last_bar_start_ist": LAST_BAR_START.isoformat(),
+                "bar_minutes": BAR_MINUTES,
+                "required_bars_per_symbol": len(_expected_starts(days[0].day)),
+                "square_off_time_ist": "15:15",
+                "nse_regular_close_ist": "15:30",
             },
             "scan_reports_processed": len(scan_results),
             "candidate_rows_processed": sum(item.conditional_count for day in days[:processed_days] for item in day.scan_reports),

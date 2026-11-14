@@ -78,7 +78,7 @@ def test_partial_entry_candle_stop_uses_stop_level_not_pre_entry_open(tmp_path):
         datetime(2026, 11, 5, 10, 0, tzinfo=IST),
         open_price=90.0,
         high=101.0,
-        low=97.0,
+        low=90.0,
         close=100.0,
     )
 

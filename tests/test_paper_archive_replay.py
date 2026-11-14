@@ -132,7 +132,7 @@ def test_archive_replay_rejects_mixed_champion_versions(tmp_path):
     day_dir = archive_root / "daily" / DAY.isoformat()
     daily_report_path = day_dir / "reports" / f"paper_daily_{DAY.isoformat()}.md"
     daily_report_path.write_text(
-        "## Champion account — champion_v1\\n",
+        "## Champion account — champion_v1\n",
         encoding="utf-8",
     )
     inputs = [

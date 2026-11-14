@@ -21,6 +21,7 @@ import pandas as pd
 from src.backtest import BacktestConfig, backtest_fixed_levels
 from src.indicators import add_indicators
 from src.risk_engine import load_phase2_settings
+from src.yahoo_data_fetcher import DEFAULT_INTRADAY_RESEARCH_DAYS
 from src.strategy_backtest import (
     SUPPORTED_STRATEGIES,
     candles_to_frame,
@@ -30,6 +31,7 @@ from src.strategy_backtest import (
 
 LOGGER = logging.getLogger(__name__)
 SLIPPAGE_BPS = (5.0, 8.0)
+DEFAULT_DAYS_LABEL = f"{DEFAULT_INTRADAY_RESEARCH_DAYS}d"
 
 
 
@@ -171,7 +173,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Chronological out-of-sample validation (research only).")
     parser.add_argument("--data-dir", default="reports/backtests/candle_cache", help="Directory containing saved 5-minute CSVs")
     parser.add_argument("--output-dir", default="reports/backtests/chronological_validation")
-    parser.add_argument("--days-label", default="30d", help="CSV filename suffix, e.g. 30d")
+    parser.add_argument("--days-label", default=DEFAULT_DAYS_LABEL, help="CSV filename suffix; default matches the multi-stock Yahoo cache window (e.g. 59d)")
     parser.add_argument("--train-fraction", type=float, default=0.70, help="Fraction of sessions in the earlier development partition; default 0.70")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Positive planned loss budget in INR; defaults to config/settings.yaml")
     parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")

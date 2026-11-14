@@ -947,9 +947,12 @@ class PaperBroker:
             for trade in self._open_rows(db):
                 if trade["symbol"] != cleaned:
                     continue
+                side = trade["side"]
+                stop = float(trade["stop_loss"])
+                entry_time = to_ist(trade["entry_time"])
                 decision = evaluate_ohlc_exit(
-                    side=trade["side"],
-                    stop_loss=float(trade["stop_loss"]),
+                    side=side,
+                    stop_loss=stop,
                     target_2=float(trade["target_2"]),
                     open_price=float(open_price),
                     high=float(high),
@@ -958,6 +961,40 @@ class PaperBroker:
                     bar_end_time=end.time().replace(tzinfo=None),
                     policy=self.exit_policy,
                 )
+
+                # A position opened mid-candle did not experience that candle's
+                # opening price or necessarily its full high/low path. Never
+                # award a target from the ambiguous partial candle. If its range
+                # touched the stop, use the stop level (not a pre-entry open) as
+                # the conservative outcome; otherwise wait for a full candle.
+                if end <= entry_time:
+                    continue
+                if start < entry_time:
+                    stop_hit = low <= stop if side == "LONG" else high >= stop
+                    if stop_hit:
+                        self._close_trade(
+                            db,
+                            trade,
+                            stop,
+                            "STOP_LOSS",
+                            "Partial entry candle touched the stop; target touches are ignored because OHLC does not reveal whether they occurred after entry.",
+                            end,
+                        )
+                        closed += 1
+                    elif end.time().replace(tzinfo=None) >= dtime.fromisoformat(
+                        self.exit_policy.time_exit_ist
+                    ):
+                        self._close_trade(
+                            db,
+                            trade,
+                            float(close),
+                            "TIME_SQUARE_OFF",
+                            "Closed at the configured time exit; the entry candle was partial.",
+                            end,
+                        )
+                        closed += 1
+                    continue
+
                 if decision is None:
                     continue
                 self._close_trade(

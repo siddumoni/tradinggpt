@@ -193,7 +193,7 @@ def run_validation(
     refresh_data: bool = False,
 ) -> pd.DataFrame:
     """Run all strategy/slippage combinations against each symbol's saved candles."""
-    if not 5 <= days <= 59:
+    if not 5 <= days <= MAX_INTRADAY_RESEARCH_DAYS:
         raise ValueError(f"days must be between 5 and {MAX_INTRADAY_RESEARCH_DAYS}")
     if not symbols or not strategies or not slippage_values:
         raise ValueError("symbols, strategies, and slippage_values must not be empty")

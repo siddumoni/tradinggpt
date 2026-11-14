@@ -20,6 +20,7 @@ A directory containing `*_trades.csv` files can also be passed. The tool writes 
 - For simultaneous entry timestamps, input file order and then row order decides priority. Keep that order fixed and report it when comparing runs.
 - Feed one selected baseline log per intended candidate stream. Do not include overlapping logs from alternative slippage levels or regime-filter variants as if they were independent signals.
 - The saved exit path is reused; positions are not marked to market between bars. The reported drawdown is based on realized trade outcomes and omits intratrade mark-to-market drawdown.
+- When an OHLC replay entry occurs mid-candle, the first partial candle cannot earn a target from its full high/low range. A stop touch in that candle is booked at the planned stop; the candle's open is not used to infer a gap because it may predate entry. This is deliberately conservative about favorable outcomes, but OHLC still cannot reconstruct the post-entry path or stop slippage; quote/tick data is needed for that.
 - Capital reservation is cash-only and reserves entry notional plus an estimated stop-cost buffer. It deliberately does not assume MIS leverage.
 - The loss budget is an estimate. Price gaps and actual fills can exceed the planned risk; estimated charges/slippage differ from actual contract notes.
 - This remains an offline advisory research tool. It does not place, change, or cancel orders, and its result is not proof of a tradable edge.

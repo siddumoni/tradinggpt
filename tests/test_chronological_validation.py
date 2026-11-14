@@ -1,7 +1,19 @@
+import inspect
+
 import pandas as pd
 import pytest
 
-from src.chronological_validation import make_json_safe, split_by_session
+from src.chronological_validation import (
+    DEFAULT_DAYS_LABEL,
+    make_json_safe,
+    split_by_session,
+)
+from src.multi_stock_validation import run_validation
+from src.strategy_backtest import run_slippage_sensitivity, run_yahoo_backtest
+from src.yahoo_data_fetcher import (
+    DEFAULT_INTRADAY_RESEARCH_DAYS,
+    MAX_INTRADAY_RESEARCH_DAYS,
+)
 
 
 def frame_with_sessions(count: int) -> pd.DataFrame:
@@ -33,3 +45,11 @@ def test_chronological_split_keeps_sessions_in_time_order():
 def test_non_finite_json_values_are_serialized_as_null():
     assert make_json_safe(float("inf")) is None
     assert make_json_safe({"metrics": [float("nan"), 2.0]}) == {"metrics": [None, 2.0]}
+
+
+def test_default_yahoo_windows_match_chronological_minimum_sample():
+    assert DEFAULT_INTRADAY_RESEARCH_DAYS == MAX_INTRADAY_RESEARCH_DAYS == 59
+    assert DEFAULT_DAYS_LABEL == f"{DEFAULT_INTRADAY_RESEARCH_DAYS}d"
+    assert inspect.signature(run_yahoo_backtest).parameters["days"].default == DEFAULT_INTRADAY_RESEARCH_DAYS
+    assert inspect.signature(run_slippage_sensitivity).parameters["days"].default == DEFAULT_INTRADAY_RESEARCH_DAYS
+    assert inspect.signature(run_validation).parameters["days"].default == DEFAULT_INTRADAY_RESEARCH_DAYS

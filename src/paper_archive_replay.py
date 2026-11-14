@@ -490,12 +490,6 @@ def run_archive_replay(
                     max_age_seconds=quote_mark_max_age_seconds,
                 )
                 result = broker.process_scan_report(scan.path)
-                marks_after = _apply_quote_marks(
-                    broker,
-                    report.get("market_snapshots"),
-                    scan.as_of,
-                    max_age_seconds=quote_mark_max_age_seconds,
-                )
                 scan_results.append({
                     "date": day_data.day.isoformat(),
                     "scan_file": scan.path.name,
@@ -505,7 +499,7 @@ def run_archive_replay(
                     "rejected": result["rejected"],
                     "neutral": result["neutral"],
                     "allocation_order": result["allocation_order"],
-                    "quote_marks_updated": sorted(set(marks_before + marks_after)),
+                    "quote_marks_updated": marks_before,
                 })
 
             clock.current = datetime.combine(

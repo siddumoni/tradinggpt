@@ -23,6 +23,7 @@ from src.paper_broker import PAPER_BASELINE_VERSION, PaperBroker, to_ist
 
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
+REPLAY_ENGINE_VERSION = 1
 SESSION_START = time(9, 15)
 LAST_BAR_START = time(15, 10)
 DIRECTIONAL_ACTIONS = {"CONDITIONAL_BUY", "CONDITIONAL_SHORT"}
@@ -160,7 +161,12 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
         for item in listed
         if isinstance(item, dict) and item.get("path")
     }
-    hashes: list[tuple[str, str]] = []
+    hashes: list[tuple[str, str]] = [
+        (
+            manifest_path.resolve().relative_to(archive_root.resolve()).as_posix(),
+            hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        )
+    ]
     daily_report_path = day_dir / "reports" / f"paper_daily_{day.isoformat()}.md"
     relative, digest = _verify_input(daily_report_path, archive_root, manifest_entries)
     hashes.append((relative, digest))
@@ -428,8 +434,35 @@ def run_archive_replay(
         raise ValueError("Replay output must be outside the source archive")
     days = _load_days(archive_root, from_date=from_date, to_date=to_date)
     input_hashes = sorted({item for day in days for item in day.hashes})
+    input_digest = hashlib.sha256(
+        "".join(f"{path}:{digest}\\n" for path, digest in input_hashes).encode("utf-8")
+    ).hexdigest()
+    effective_portfolio_risk = (
+        max_portfolio_risk if max_portfolio_risk is not None else risk_per_trade * max_open_positions
+    )
+    run_settings = {
+        "initial_capital": initial_capital,
+        "risk_per_trade": risk_per_trade,
+        "max_daily_loss": max_daily_loss,
+        "max_open_positions": max_open_positions,
+        "max_portfolio_risk": effective_portfolio_risk,
+        "slippage_bps": slippage_bps,
+        "minimum_net_rr": minimum_net_rr,
+        "quote_mark_max_age_seconds": quote_mark_max_age_seconds,
+    }
+    run_identity = {
+        "input_sha256": input_digest,
+        "replay_engine_version": REPLAY_ENGINE_VERSION,
+        "strategy_version": PAPER_BASELINE_VERSION,
+        "selected_dates": [item.day.isoformat() for item in days],
+        "requested_date_range": {
+            "from": from_date.isoformat() if from_date else None,
+            "to": to_date.isoformat() if to_date else None,
+        },
+        "account_settings": run_settings,
+    }
     run_digest = hashlib.sha256(
-        "".join(f"{path}:{digest}\n" for path, digest in input_hashes).encode("utf-8")
+        json.dumps(run_identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()
     output_dir.mkdir(parents=True, exist_ok=True)
     clock = ReplayClock(datetime.combine(days[0].day, SESSION_START, tzinfo=IST))
@@ -545,7 +578,8 @@ def run_archive_replay(
             "research_only": True,
             "orders_sent_to_broker": False,
             "input_archive": str(archive_root),
-            "input_sha256": run_digest,
+            "input_sha256": input_digest,
+            "replay_engine_version": REPLAY_ENGINE_VERSION,
             "days_available": len(days),
             "days_processed": processed_days,
             "strategy_version": PAPER_BASELINE_VERSION,
@@ -561,7 +595,7 @@ def run_archive_replay(
                 "risk_per_trade": risk_per_trade,
                 "max_daily_loss": max_daily_loss,
                 "max_open_positions": max_open_positions,
-                "max_portfolio_risk": max_portfolio_risk if max_portfolio_risk is not None else risk_per_trade * max_open_positions,
+                "max_portfolio_risk": effective_portfolio_risk,
                 "slippage_bps_per_side": slippage_bps,
                 "minimum_net_rr": minimum_net_rr,
                 "quote_mark_max_age_seconds": quote_mark_max_age_seconds,

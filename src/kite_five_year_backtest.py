@@ -177,7 +177,12 @@ def run_backtests(
     # Exclude today's potentially incomplete session; session filter also removes
     # exchange holidays, partial first/last days, missing bars and malformed candles.
     end = datetime.combine(current.date() - timedelta(days=1), time(23, 59, 59), tzinfo=IST)
-    start = datetime.combine(date(end.year - years, end.month, min(end.day, 28)), time(0, 0), tzinfo=IST)
+    try:
+        start_date = end.date().replace(year=end.year - years)
+    except ValueError:
+        # A 29-Feb end date maps to 28-Feb in a non-leap start year.
+        start_date = end.date().replace(year=end.year - years, day=28)
+    start = datetime.combine(start_date, time(0, 0), tzinfo=IST)
     client = market_data or KiteMarketData.from_cached_session()
     instruments = client.instruments()
     by_symbol = {

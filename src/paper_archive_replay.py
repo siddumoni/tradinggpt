@@ -600,7 +600,7 @@ def run_archive_replay(
                 "last_bar_start_ist": LAST_BAR_START.isoformat(),
                 "bar_minutes": BAR_MINUTES,
                 "required_bars_per_symbol": len(_expected_starts(days[0].day)),
-                "square_off_time_ist": "15:15",
+                "square_off_time_ist": broker.exit_policy.time_exit_ist,
                 "nse_regular_close_ist": "15:30",
             },
             "scan_reports_processed": len(scan_results),

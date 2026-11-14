@@ -118,6 +118,9 @@ def test_archive_replay_uses_shared_account_and_only_post_entry_target(tmp_path)
     assert summary["closed_trades"] == 1
     assert summary["net_pnl"] > 0
     assert summary["scan_reports_processed"] == 1
+    assert summary["simulation_window"]["required_bars_per_symbol"] == 72
+    assert summary["simulation_window"]["square_off_time_ist"] == "15:15"
+    assert summary["simulation_window"]["nse_regular_close_ist"] == "15:30"
     assert Path(summary["summary_path"]).is_file()
     assert Path(summary["trades_path"]).is_file()
 

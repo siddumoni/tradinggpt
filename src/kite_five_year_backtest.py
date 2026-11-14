@@ -29,7 +29,7 @@ DEFAULT_YEARS = 5
 MAX_KITE_INTRADAY_CHUNK_DAYS = 60
 DEFAULT_SYMBOLS = ("RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY")
 DEFAULT_STRATEGIES = ("vwap_trend", "vwap_pullback")
-PROGRESS_LINE_WIDTH = 180
+PROGRESS_LINE_WIDTH = 118
 
 
 def _format_duration(seconds: float) -> str:
@@ -53,7 +53,8 @@ def _write_progress_line(message: str, *, enabled: bool = True) -> None:
     """Rewrite one console line without adding thousands of progress log rows."""
     if not enabled:
         return
-    sys.stdout.write("\r" + message[:PROGRESS_LINE_WIDTH].ljust(PROGRESS_LINE_WIDTH))
+    line = message[: PROGRESS_LINE_WIDTH - 1]
+    sys.stdout.write("\r" + line.ljust(PROGRESS_LINE_WIDTH - 1))
     sys.stdout.flush()
 
 
@@ -300,11 +301,10 @@ def run_backtests(
             remaining_seconds = average_chunk_seconds * max(0, chunk_total - chunk_number)
             percent = 100.0 * chunk_number / chunk_total if chunk_total else 100.0
             message = (
-                f"  {symbol} download {_progress_bar(chunk_number, chunk_total, 18)} "
-                f"{chunk_number}/{chunk_total} ({percent:5.1f}%) | "
-                f"{row_count:,} candles | elapsed {_format_duration(elapsed)} "
-                f"| ETA {_format_duration(remaining_seconds)} | "
-                f"{chunk_start:%Y-%m-%d} to {chunk_end:%Y-%m-%d}"
+                f"  {symbol} download {_progress_bar(chunk_number, chunk_total, 12)} "
+                f"{chunk_number}/{chunk_total} ({percent:4.0f}%) | "
+                f"{row_count:,} rows | elapsed {_format_duration(elapsed)} "
+                f"| ETA {_format_duration(remaining_seconds)}"
             )
             _write_progress_line(message, enabled=progress)
 

@@ -42,7 +42,7 @@ def _archive(tmp_path: Path, *, missing_bar: str | None = None) -> Path:
     scan_dir.mkdir(parents=True)
     candle_dir.mkdir(parents=True)
 
-    scan_time = datetime(2026, 11, 5, 10, 2, 5, tzinfo=IST)
+    scan_time = datetime(2026, 11, 13, 10, 2, 5, tzinfo=IST)
     scan = {
         "status": "RESEARCH_SCAN_ONLY",
         "as_of": scan_time.isoformat(),
@@ -102,7 +102,7 @@ def _archive(tmp_path: Path, *, missing_bar: str | None = None) -> Path:
     report_dir.mkdir()
     daily_report_path = report_dir / f"paper_daily_{DAY.isoformat()}.md"
     daily_report_path.write_text(
-        "## Champion account — nse_champion_v2\\n",
+        "## Champion account — nse_champion_v2\n",
         encoding="utf-8",
     )
     _manifest(archive_root, day_dir, [scan_path, candle_path, daily_report_path])

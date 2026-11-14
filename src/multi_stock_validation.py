@@ -23,7 +23,11 @@ import pandas as pd
 
 from src.backtest import BacktestConfig
 from src.strategy_backtest import backtest_strategy, candles_to_frame, SUPPORTED_STRATEGIES
-from src.yahoo_data_fetcher import YahooFinanceMarketData
+from src.yahoo_data_fetcher import (
+    DEFAULT_INTRADAY_RESEARCH_DAYS,
+    MAX_INTRADAY_RESEARCH_DAYS,
+    YahooFinanceMarketData,
+)
 from src.risk_engine import load_phase2_settings
 
 LOGGER = logging.getLogger(__name__)
@@ -179,7 +183,7 @@ def filter_complete_sessions(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 def run_validation(
     symbols: tuple[str, ...] = DEFAULT_SYMBOLS,
     strategies: tuple[str, ...] = DEFAULT_STRATEGIES,
-    days: int = 30,
+    days: int = DEFAULT_INTRADAY_RESEARCH_DAYS,
     output_dir: str | Path = "reports/backtests",
     risk_per_trade: float | None = None,
     minimum_net_risk_reward: float | None = None,
@@ -190,7 +194,7 @@ def run_validation(
 ) -> pd.DataFrame:
     """Run all strategy/slippage combinations against each symbol's saved candles."""
     if not 5 <= days <= 59:
-        raise ValueError("days must be between 5 and 59")
+        raise ValueError(f"days must be between 5 and {MAX_INTRADAY_RESEARCH_DAYS}")
     if not symbols or not strategies or not slippage_values:
         raise ValueError("symbols, strategies, and slippage_values must not be empty")
     invalid = set(strategies).difference(SUPPORTED_STRATEGIES)
@@ -388,7 +392,7 @@ def main() -> None:
     )
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS))
     parser.add_argument("--strategies", default=",".join(DEFAULT_STRATEGIES))
-    parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--days", type=int, default=DEFAULT_INTRADAY_RESEARCH_DAYS, help="Calendar-day history window (maximum supported by this Yahoo research workflow).")
     parser.add_argument("--output-dir", default="reports/backtests")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Positive planned loss budget in INR; defaults to config/settings.yaml")
     parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")

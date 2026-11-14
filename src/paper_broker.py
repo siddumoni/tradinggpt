@@ -977,7 +977,11 @@ class PaperBroker:
                             trade,
                             stop,
                             "STOP_LOSS",
-                            "Partial entry candle touched the stop; target touches are ignored because OHLC does not reveal whether they occurred after entry.",
+                            (
+                                "Partial entry candle touched the stop; target touches are "
+                                "ignored because OHLC does not reveal whether they occurred "
+                                "after entry."
+                            ),
                             end,
                         )
                         closed += 1

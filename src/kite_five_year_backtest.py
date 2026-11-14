@@ -8,9 +8,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import date, datetime, time, timedelta
+import sys
+from datetime import datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from time import perf_counter
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -27,6 +29,51 @@ DEFAULT_YEARS = 5
 MAX_KITE_INTRADAY_CHUNK_DAYS = 60
 DEFAULT_SYMBOLS = ("RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY")
 DEFAULT_STRATEGIES = ("vwap_trend", "vwap_pullback")
+PROGRESS_LINE_WIDTH = 118
+
+
+def _format_duration(seconds: float) -> str:
+    """Format elapsed seconds as a readable H:MM:SS duration."""
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+
+
+def _progress_bar(completed: int, total: int, width: int = 24) -> str:
+    """Return a dependency-free ASCII progress bar for Windows PowerShell."""
+    if total <= 0:
+        return "[" + ("-" * width) + "]"
+    fraction = min(1.0, max(0.0, completed / total))
+    filled = int(width * fraction)
+    return f"[{'#' * filled}{'-' * (width - filled)}]"
+
+
+def _write_progress_line(message: str, *, enabled: bool = True) -> None:
+    """Rewrite one console line without adding thousands of progress log rows."""
+    if not enabled:
+        return
+    line = message[: PROGRESS_LINE_WIDTH - 1]
+    sys.stdout.write("\r" + line.ljust(PROGRESS_LINE_WIDTH - 1))
+    sys.stdout.flush()
+
+
+def _overall_progress_message(
+    completed: int,
+    total: int,
+    started_at: float,
+    last_symbol: str,
+    last_status: str,
+) -> str:
+    elapsed = perf_counter() - started_at
+    average_per_stock = elapsed / completed if completed else 0.0
+    eta = average_per_stock * max(0, total - completed) if completed else 0.0
+    percent = (100.0 * completed / total) if total else 100.0
+    return (
+        f"Stocks {_progress_bar(completed, total)} {completed}/{total} "
+        f"({percent:5.1f}%) | elapsed {_format_duration(elapsed)} "
+        f"| ETA {_format_duration(eta)} | last {last_symbol}: {last_status}"
+    )
 
 
 def _as_ist(value: datetime) -> datetime:
@@ -82,16 +129,31 @@ def fetch_five_year_candles(
     instrument_token: int,
     start: datetime,
     end: datetime,
+    *,
+    progress_callback: Callable[[int, int, int, float, datetime, datetime], None] | None = None,
 ) -> pd.DataFrame:
-    """Download 5-minute candles in conservative 60-calendar-day API chunks."""
+    """Download 5-minute candles in chunks and report per-stock download progress."""
+    chunks = list(iter_kite_chunks(start, end))
     pieces = []
-    for chunk_start, chunk_end in iter_kite_chunks(start, end):
-        LOGGER.info("Kite 5minute request token=%s from=%s to=%s", instrument_token, chunk_start, chunk_end)
+    rows_downloaded = 0
+    download_started = perf_counter()
+    for chunk_number, (chunk_start, chunk_end) in enumerate(chunks, start=1):
         rows = market_data.historical_candles(
             int(instrument_token), chunk_start, chunk_end, "5minute"
         )
         if rows:
-            pieces.append(_normalise_candles(rows))
+            normalised = _normalise_candles(rows)
+            pieces.append(normalised)
+            rows_downloaded += len(normalised)
+        if progress_callback is not None:
+            progress_callback(
+                chunk_number,
+                len(chunks),
+                rows_downloaded,
+                perf_counter() - download_started,
+                chunk_start,
+                chunk_end,
+            )
     if not pieces:
         raise DataFetchError(f"Kite returned no 5-minute candles for instrument token {instrument_token}")
     return _normalise_candles(
@@ -107,6 +169,7 @@ def load_or_fetch_symbol(
     cache_dir: Path,
     *,
     refresh: bool = False,
+    progress_callback: Callable[[int, int, int, float, datetime, datetime], None] | None = None,
 ) -> tuple[pd.DataFrame, Path, str]:
     symbol = str(instrument["tradingsymbol"]).upper()
     token = int(instrument["instrument_token"])
@@ -136,7 +199,9 @@ def load_or_fetch_symbol(
                 return cached.sort_index(), cache_path, "cache_hit"
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             LOGGER.warning("Ignoring invalid Kite cache for %s", symbol)
-    frame = fetch_five_year_candles(market_data, token, start, end)
+    frame = fetch_five_year_candles(
+        market_data, token, start, end, progress_callback=progress_callback
+    )
     saved = frame.copy()
     saved.index.name = "date"
     temp_csv = cache_path.with_suffix(".csv.tmp")
@@ -164,6 +229,7 @@ def run_backtests(
     refresh_data: bool = False,
     market_data: KiteMarketData | None = None,
     now: datetime | None = None,
+    progress: bool = True,
 ) -> pd.DataFrame:
     if years < 1 or years > 5:
         raise ValueError("years must be between 1 and 5 for this five-year research workflow")
@@ -193,25 +259,106 @@ def run_backtests(
     cache_dir = out / "candle_cache"
     out.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
-    for raw_symbol in symbols:
+    overall_started = perf_counter()
+    completed_symbols = 0
+    total_symbols = len(symbols)
+
+    def update_overall(symbol: str, status: str) -> None:
+        if progress:
+            _write_progress_line(
+                _overall_progress_message(
+                    completed_symbols, total_symbols, overall_started, symbol, status
+                ),
+                enabled=True,
+            )
+
+    for symbol_number, raw_symbol in enumerate(symbols, start=1):
         symbol = raw_symbol.strip().upper()
+        stock_started = perf_counter()
+        if progress:
+            print()
+            print(f"[{symbol_number:02d}/{total_symbols:02d}] {symbol}: starting")
+
         instrument = by_symbol.get(symbol)
         if instrument is None:
-            rows.append({"symbol": symbol, "error": "Not found as an eligible NSE cash-equity instrument in current Kite instrument dump"})
+            error = "Not found as an eligible NSE cash-equity instrument in current Kite instrument dump"
+            rows.append({"symbol": symbol, "error": error, "cache_status": "not_found"})
+            if progress:
+                print(f"  {symbol}: SKIPPED - {error}")
+            completed_symbols += 1
+            update_overall(symbol, "SKIPPED")
             continue
+
+        def show_download_progress(
+            chunk_number: int,
+            chunk_total: int,
+            row_count: int,
+            elapsed: float,
+            chunk_start: datetime,
+            chunk_end: datetime,
+        ) -> None:
+            average_chunk_seconds = elapsed / chunk_number if chunk_number else 0.0
+            remaining_seconds = average_chunk_seconds * max(0, chunk_total - chunk_number)
+            percent = 100.0 * chunk_number / chunk_total if chunk_total else 100.0
+            message = (
+                f"  {symbol} download {_progress_bar(chunk_number, chunk_total, 12)} "
+                f"{chunk_number}/{chunk_total} ({percent:4.0f}%) | "
+                f"{row_count:,} rows | elapsed {_format_duration(elapsed)} "
+                f"| ETA {_format_duration(remaining_seconds)}"
+            )
+            _write_progress_line(message, enabled=progress)
+
         try:
             raw, cache_path, cache_status = load_or_fetch_symbol(
-                client, instrument, start, end, cache_dir, refresh=refresh_data
+                client,
+                instrument,
+                start,
+                end,
+                cache_dir,
+                refresh=refresh_data,
+                progress_callback=show_download_progress if progress else None,
             )
+            if progress:
+                if cache_status == "cache_hit":
+                    print(
+                        f"  {symbol}: CACHE HIT - {len(raw):,} candles loaded; "
+                        "historical download skipped"
+                    )
+                else:
+                    print()
+                    print(f"  {symbol}: DOWNLOAD COMPLETE - {len(raw):,} candles saved")
             frame, quality = filter_complete_sessions(raw)
             if frame.empty:
-                raise DataFetchError("No complete, valid 5-minute NSE sessions remain after quality filtering")
+                raise DataFetchError(
+                    "No complete, valid 5-minute NSE sessions remain after quality filtering"
+                )
+            if progress:
+                print(
+                    f"  {symbol}: DATA CHECK - {quality['sessions_kept']:,} complete sessions, "
+                    f"{quality['sessions_excluded']:,} excluded, "
+                    f"{quality['missing_bars_total']:,} missing bars"
+                )
         except Exception as exc:
+            if progress:
+                print()
+                print(f"  {symbol}: ERROR - {exc}")
             LOGGER.exception("Kite history failed for %s", symbol)
             rows.append({"symbol": symbol, "error": str(exc), "cache_status": "error"})
+            completed_symbols += 1
+            update_overall(symbol, "ERROR")
             continue
+
+        strategy_total = len(strategies) * 2
+        strategy_number = 0
         for strategy in strategies:
             for slippage in (5.0, 8.0):
+                strategy_number += 1
+                if progress:
+                    _write_progress_line(
+                        f"  {symbol} backtest {strategy_number}/{strategy_total}: "
+                        f"{strategy} at {slippage:g} bps per side",
+                        enabled=True,
+                    )
                 try:
                     config = BacktestConfig(
                         initial_capital=configured.capital_inr,
@@ -248,12 +395,28 @@ def run_backtests(
                         trades.to_csv(trade_path, index=False)
                         rows[-1]["trades_csv"] = str(trade_path)
                 except Exception as exc:
-                    LOGGER.exception("Backtest failed for %s %s at %.1f bps", symbol, strategy, slippage)
+                    LOGGER.exception(
+                        "Backtest failed for %s %s at %.1f bps", symbol, strategy, slippage
+                    )
                     rows.append({
-                        "symbol": symbol, "strategy": strategy,
+                        "symbol": symbol,
+                        "strategy": strategy,
                         "slippage_bps_per_side": slippage,
-                        "data_provider": "zerodha_kite", "error": str(exc),
+                        "data_provider": "zerodha_kite",
+                        "error": str(exc),
                     })
+        stock_elapsed = perf_counter() - stock_started
+        if progress:
+            print()
+            print(
+                f"  {symbol}: FINISHED in {_format_duration(stock_elapsed)} "
+                f"(download status: {cache_status})"
+            )
+        completed_symbols += 1
+        update_overall(symbol, "DONE")
+
+    if progress:
+        print()
     result = pd.DataFrame(rows)
     stamp = datetime.now(IST).strftime("%Y%m%d_%H%M%S")
     report = out / f"kite_five_year_backtest_{stamp}.csv"
@@ -274,6 +437,11 @@ def main() -> None:
     parser.add_argument("--years", type=int, default=5)
     parser.add_argument("--output-dir", default="reports/backtests/kite_5y")
     parser.add_argument("--refresh-data", action="store_true")
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the PowerShell progress bars and ETA display",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     run_backtests(
@@ -282,6 +450,7 @@ def main() -> None:
         years=args.years,
         output_dir=args.output_dir,
         refresh_data=args.refresh_data,
+        progress=not args.no_progress,
     )
 
 

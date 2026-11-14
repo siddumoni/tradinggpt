@@ -15,6 +15,16 @@ Refresh the historical cache explicitly:
 
     python -m src.kite_five_year_backtest --years 5 --refresh-data
 
+The runner displays two PowerShell progress indicators by default:
+- Per-stock download progress, including completed 60-calendar-day Kite requests, candle rows received, elapsed time and an estimated time remaining for that symbol.
+- Overall stock progress, including completed/total symbols, elapsed time and an estimated time remaining for the full run. Each stock also reports whether its candles were downloaded or loaded from cache.
+
+Disable the console progress display when needed:
+
+    python -m src.kite_five_year_backtest --years 5 --no-progress
+
+ETA is an estimate based on completed chunks or completed stocks; Kite response times, retries, cache hits and backtest duration can change the actual remaining time. Cached symbols are reported as cache hits and skip historical downloading.
+
 ## Data and safeguards
 
 - Uses Kite's authenticated, read-only historical-data endpoint and current NSE instrument dump to resolve cash-equity tokens.

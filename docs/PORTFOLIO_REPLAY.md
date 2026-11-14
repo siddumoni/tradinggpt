@@ -6,6 +6,20 @@ The individual backtests each use their own capital budget. Adding their P&L doe
 
 This replay combines **one selected saved trade log per intended candidate stream** and applies one capital pool chronologically. It closes positions from prior simulated trades as their saved exit times are reached, reserves capital for active position notional plus a stop-cost buffer, scales quantity down to respect both available capital and the per-trade risk budget, blocks overlapping positions in the same symbol, and records any candidate it must reject. It recalculates P&L at the allocated quantity with the selected slippage and the configured transaction-charge estimate.
 
+## Replay archived scanner decisions through the paper account
+
+The repository also provides a replay for the private `tradinggpt-research-data` archive:
+
+```powershell
+python -m src.paper_archive_replay --archive-root ../tradinggpt-research-data --output-dir reports/paper_archive_replay
+```
+
+This replays manifested `daily/YYYY-MM-DD` folders in timestamp order. It verifies each scan/candle input against the daily SHA-256 manifest, accepts only research-only Kite scan reports that explicitly assert no broker orders, applies archived quote snapshots to open positions, and passes each completed 5-minute candle through the shared `PaperBroker` exit rules. The account starts with one shared cash/risk pool and carries realized equity across days. Output files are named with a deterministic digest of the inputs.
+
+For every symbol that has a directional candidate, the replay requires a complete 09:15–15:10 5-minute candle session. Missing bars or hash mismatches stop the run before performance is reported. If a position remains open at day end, the summary is marked `INCOMPLETE_OPEN_POSITIONS` and the position is not carried into the next day. No prices are synthesized.
+
+Archived scanner snapshots preserve the point-in-time candidate ranking and quote checks for those recorded sessions. Candle-close marks between scans use the candle close for both bid and ask; this is an explicit approximation. The replay is therefore a reproducible paper-archive portfolio replay, not a multi-year historical strategy backtest, live-fill calibration, or evidence of profitability. Its sample is limited to the dates actually present in the archive.
+
 ## PowerShell
 
 ```powershell

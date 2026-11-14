@@ -71,7 +71,7 @@ The dashboard is local to your computer. The Champion account is kept separate f
 
 - [Delivery phases](docs/PHASES.md) — project milestones and progress.
 - [Phase 6 readiness](docs/PHASE6_READINESS.md) — what must be proven before promotion.
-- [Research protocol](docs/RESEARCH_PROTOCOL.md) — how to compare strategies fairly.
+- [Research protocol](docs/RESEARCH_PROTOCOL.md) — [Kite five-year backtesting](docs/KITE_FIVE_YEAR_BACKTEST.md) — how to compare strategies fairly.
 - [Market safety](docs/MARKET_SAFETY.md) and [NSE scanner guide](docs/NSE_UNIVERSE_SCANNER.md) — stock filters and safety checks.
 - [Paper portfolio allocation](docs/PAPER_PORTFOLIO_ALLOCATION.md) — virtual capital and risk controls.
 - [Results](docs/RESULTS.md) and [performance statistics](docs/PERFORMANCE_STATS.md) — how results are measured.

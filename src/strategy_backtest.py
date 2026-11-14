@@ -28,7 +28,11 @@ from src.execution_model import build_structural_stop, session_aware_atr
 from src.strategies.signal_planner import plan_atr_levels
 from src.strategies.vwap_pullback import vwap_pullback_signal
 from src.strategies.vwap_trend import vwap_trend_signal
-from src.yahoo_data_fetcher import YahooFinanceMarketData
+from src.yahoo_data_fetcher import (
+    DEFAULT_INTRADAY_RESEARCH_DAYS,
+    MAX_INTRADAY_RESEARCH_DAYS,
+    YahooFinanceMarketData,
+)
 from src.risk_engine import load_phase2_settings
 
 LOGGER = logging.getLogger(__name__)
@@ -378,7 +382,7 @@ def backtest_strategy(
 def run_yahoo_backtest(
     symbol: str,
     strategy_name: str,
-    days: int = 30,
+    days: int = DEFAULT_INTRADAY_RESEARCH_DAYS,
     output_dir: str | Path = "reports/backtests",
     risk_per_trade: float | None = None,
     minimum_net_risk_reward: float | None = None,
@@ -387,8 +391,8 @@ def run_yahoo_backtest(
     slippage_bps_per_side: float | None = None,
 ) -> dict:
     """Fetch historical 5-minute Yahoo candles, run one strategy and save CSV/JSON."""
-    if days < 5 or days > 59:
-        raise ValueError("days must be between 5 and 59 for this intraday research workflow")
+    if days < 5 or days > MAX_INTRADAY_RESEARCH_DAYS:
+        raise ValueError(f"days must be between 5 and {MAX_INTRADAY_RESEARCH_DAYS} for this intraday research workflow")
     configured_risk, charge_rates = load_phase2_settings()
     policy = load_exit_policy()
     if target_atr_multiple is not None:
@@ -465,15 +469,15 @@ def run_yahoo_backtest(
 
 
 def run_slippage_sensitivity(
-    symbol: str, strategy_name: str, days: int = 30,
+    symbol: str, strategy_name: str, days: int = DEFAULT_INTRADAY_RESEARCH_DAYS,
     output_dir: str | Path = "reports/backtests", risk_per_trade: float | None = None,
     minimum_net_risk_reward: float | None = None, target_atr_multiple: float | None = None,
     reject_nontrending_regimes: bool = False,
     slippage_values: tuple[float, ...] = (5.0, 8.0),
 ) -> pd.DataFrame:
     """Compare slippage assumptions using one identical downloaded candle dataset."""
-    if days < 5 or days > 59:
-        raise ValueError("days must be between 5 and 59 for this intraday research workflow")
+    if days < 5 or days > MAX_INTRADAY_RESEARCH_DAYS:
+        raise ValueError(f"days must be between 5 and {MAX_INTRADAY_RESEARCH_DAYS} for this intraday research workflow")
     configured_risk, charge_rates = load_phase2_settings()
     policy = load_exit_policy()
     if target_atr_multiple is not None:
@@ -551,7 +555,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Backtest an advisory-only intraday strategy on Yahoo Finance historical candles.")
     parser.add_argument("--symbol", required=True, help="NSE symbol, e.g. RELIANCE")
     parser.add_argument("--strategy", choices=SUPPORTED_STRATEGIES, required=True)
-    parser.add_argument("--days", type=int, default=30, help="Calendar-day lookback (5–59)")
+    parser.add_argument("--days", type=int, default=DEFAULT_INTRADAY_RESEARCH_DAYS, help="Calendar-day lookback (5–59; default uses the maximum supported short-term window)")
     parser.add_argument("--output-dir", default="reports/backtests")
     parser.add_argument("--risk-per-trade", type=float, default=None, help="Planned loss budget per trade in INR; defaults to config/settings.yaml")
     parser.add_argument("--min-net-rr", type=float, default=None, help="Minimum net reward/risk; defaults to config/settings.yaml")

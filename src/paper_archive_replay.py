@@ -438,7 +438,9 @@ def run_archive_replay(
         "".join(f"{path}:{digest}\n" for path, digest in input_hashes).encode("utf-8")
     ).hexdigest()
     effective_portfolio_risk = (
-        max_portfolio_risk if max_portfolio_risk is not None else risk_per_trade * max_open_positions
+        max_portfolio_risk
+        if max_portfolio_risk is not None
+        else risk_per_trade * max_open_positions
     )
     run_settings = {
         "initial_capital": initial_capital,
@@ -462,7 +464,12 @@ def run_archive_replay(
         "account_settings": run_settings,
     }
     run_digest = hashlib.sha256(
-        json.dumps(run_identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        json.dumps(
+            run_identity,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     ).hexdigest()
     output_dir.mkdir(parents=True, exist_ok=True)
     clock = ReplayClock(datetime.combine(days[0].day, SESSION_START, tzinfo=IST))

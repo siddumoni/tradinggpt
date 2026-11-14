@@ -75,6 +75,16 @@ def _signal_key(candidate: dict[str, Any]) -> str:
     return hashlib.sha256(raw.upper().encode("utf-8")).hexdigest()[:32]
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back and release file handles when a connection context exits."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class PaperBroker:
     """SQLite-backed virtual account. It never submits real brokerage orders."""
 
@@ -92,6 +102,7 @@ class PaperBroker:
         max_entry_quote_age_seconds: float = MAX_ENTRY_QUOTE_AGE_SECONDS,
         max_portfolio_risk_inr: float | None = None,
         exit_policy: ExitPolicy | None = None,
+        clock: Callable[[], datetime] | None = None,
     ):
         for label, value in (
             ("initial_capital", initial_capital),
@@ -111,6 +122,7 @@ class PaperBroker:
             or not 0 <= float(stop_gap_risk_reserve_pct) < 1
         ):
             raise ValueError("stop_gap_risk_reserve_pct must be in [0, 1)")
+        self._clock = clock or (lambda: datetime.now(IST))
         self.db_path = Path(db_path)
         self.initial_capital = float(initial_capital)
         self.risk_per_trade = float(risk_per_trade)
@@ -134,8 +146,12 @@ class PaperBroker:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    def _now(self) -> datetime:
+        current = self._clock()
+        return current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
+
     def _connect(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self.db_path, timeout=15)
+        c = sqlite3.connect(self.db_path, timeout=15, factory=_ClosingConnection)
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA foreign_keys=ON")
         c.execute("PRAGMA busy_timeout=15000")
@@ -188,7 +204,7 @@ class PaperBroker:
             db.execute(
                 "UPDATE trades SET planned_net_risk_inr=risk_budget_inr WHERE status='OPEN' AND planned_net_risk_inr=0"
             )
-            now = datetime.now(IST).isoformat()
+            now = self._now().isoformat()
             db.execute(
                 "INSERT OR IGNORE INTO account(id,starting_capital,created_at) VALUES(1,?,?)",
                 (self.initial_capital, now),
@@ -317,7 +333,7 @@ class PaperBroker:
         event_key=None,
         at=None,
     ):
-        t = at or datetime.now(IST)
+        t = at or self._now()
         t = t.replace(tzinfo=IST) if t.tzinfo is None else t.astimezone(IST)
         db.execute(
             "INSERT OR IGNORE INTO events(event_time,event_type,severity,symbol,message,details_json,event_key) VALUES(?,?,?,?,?,?,?)",
@@ -459,7 +475,7 @@ class PaperBroker:
                     """INSERT INTO paper_universe_watchlist(id,symbols_json,universe_mode,scan_as_of,updated_at)
                   VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET symbols_json=excluded.symbols_json,
                   universe_mode=excluded.universe_mode,scan_as_of=excluded.scan_as_of,updated_at=excluded.updated_at""",
-                    (_json(tracked_symbols), universe_mode, as_of, datetime.now(IST).isoformat()),
+                    (_json(tracked_symbols), universe_mode, as_of, self._now().isoformat()),
                 )
                 self._event(
                     db,
@@ -605,7 +621,7 @@ class PaperBroker:
         qtime = snapshot.get("timestamp") or snapshot.get("last_trade_time")
         if not qtime:
             raise _RejectedSignal("Quote timestamp is missing; fail-closed paper entry.")
-        age = (datetime.now(IST) - to_ist(qtime)).total_seconds()
+        age = (self._now() - to_ist(qtime)).total_seconds()
         if age < -2 or age > self.max_entry_quote_age_seconds:
             raise _RejectedSignal(f"Entry quote is stale or future-dated ({age:.1f}s old).")
         try:
@@ -643,7 +659,7 @@ class PaperBroker:
             )
         if any(r["symbol"] == symbol for r in opens):
             raise _RejectedSignal("A paper position is already open for this symbol.")
-        now = datetime.now(IST)
+        now = self._now()
         day_net = self._today_net_pnl(db, now)
         if day_net <= -self.max_daily_loss:
             raise _RejectedSignal(f"Daily paper loss limit reached ({day_net:.2f} INR).")
@@ -739,12 +755,12 @@ class PaperBroker:
                 raise _RejectedSignal(
                     "Pre-entry Telegram trade-plan alert was not delivered; paper entry withheld."
                 )
-            post_alert_age = (datetime.now(IST) - to_ist(qtime)).total_seconds()
+            post_alert_age = (self._now() - to_ist(qtime)).total_seconds()
             if post_alert_age < -2 or post_alert_age > self.max_entry_quote_age_seconds:
                 raise _RejectedSignal(
                     f"Entry quote became stale during Telegram alert delivery ({post_alert_age:.1f}s old)."
                 )
-            now = datetime.now(IST)
+            now = self._now()
         try:
             db.execute(
                 """INSERT INTO trades(
@@ -779,7 +795,7 @@ class PaperBroker:
             raise _RejectedSignal("Duplicate signal already processed.") from exc
         # Preserve the verified entry snapshot as the initial liquidation mark.
         # A later live tick will replace it; manual exits still require a fresh mark.
-        received_at = datetime.now(IST)
+        received_at = self._now()
         db.execute(
             """INSERT INTO market_marks(symbol,last_price,bid,ask,market_time,received_at)
           VALUES(?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
@@ -842,11 +858,11 @@ class PaperBroker:
             return p if math.isfinite(p) and p > 0 else last
 
         bid_value, ask_value = opt(bid), opt(ask)
-        qt = market_time or datetime.now(IST)
+        qt = market_time or self._now()
         qt = qt.replace(tzinfo=IST) if qt.tzinfo is None else qt.astimezone(IST)
-        rec = received_at or datetime.now(IST)
+        rec = received_at or self._now()
         rec = rec.replace(tzinfo=IST) if rec.tzinfo is None else rec.astimezone(IST)
-        local_now = datetime.now(IST)
+        local_now = self._now()
         if (rec - local_now).total_seconds() > 2 or (qt - rec).total_seconds() > 2:
             raise ValueError("Market tick contains a future-dated receive or exchange timestamp.")
         closed = 0
@@ -947,9 +963,12 @@ class PaperBroker:
             for trade in self._open_rows(db):
                 if trade["symbol"] != cleaned:
                     continue
+                side = trade["side"]
+                stop = float(trade["stop_loss"])
+                entry_time = to_ist(trade["entry_time"])
                 decision = evaluate_ohlc_exit(
-                    side=trade["side"],
-                    stop_loss=float(trade["stop_loss"]),
+                    side=side,
+                    stop_loss=stop,
                     target_2=float(trade["target_2"]),
                     open_price=float(open_price),
                     high=float(high),
@@ -958,6 +977,44 @@ class PaperBroker:
                     bar_end_time=end.time().replace(tzinfo=None),
                     policy=self.exit_policy,
                 )
+
+                # A position opened mid-candle did not experience that candle's
+                # opening price or necessarily its full high/low path. Never
+                # award a target from the ambiguous partial candle. If its range
+                # touched the stop, use the stop level (not a pre-entry open) as
+                # the conservative outcome; otherwise wait for a full candle.
+                if end <= entry_time:
+                    continue
+                if start < entry_time:
+                    stop_hit = low <= stop if side == "LONG" else high >= stop
+                    if stop_hit:
+                        self._close_trade(
+                            db,
+                            trade,
+                            stop,
+                            "STOP_LOSS",
+                            (
+                                "Partial entry candle touched the stop; target touches are "
+                                "ignored because OHLC does not reveal whether they occurred "
+                                "after entry."
+                            ),
+                            end,
+                        )
+                        closed += 1
+                    elif end.time().replace(tzinfo=None) >= dtime.fromisoformat(
+                        self.exit_policy.time_exit_ist
+                    ):
+                        self._close_trade(
+                            db,
+                            trade,
+                            float(close),
+                            "TIME_SQUARE_OFF",
+                            "Closed at the configured time exit; the entry candle was partial.",
+                            end,
+                        )
+                        closed += 1
+                    continue
+
                 if decision is None:
                     continue
                 self._close_trade(
@@ -969,7 +1026,7 @@ class PaperBroker:
     def square_off_due_positions(
         self, now: datetime | None = None, *, max_quote_age_seconds: float = 60.0
     ) -> int:
-        current = now or datetime.now(IST)
+        current = now or self._now()
         current = current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
         if current.time().replace(tzinfo=None) < dtime.fromisoformat(
             self.exit_policy.time_exit_ist
@@ -1027,7 +1084,7 @@ class PaperBroker:
             raise ValueError("trade_id must be a positive integer")
         if not math.isfinite(float(max_quote_age_seconds)) or max_quote_age_seconds <= 0:
             raise ValueError("max_quote_age_seconds must be finite and positive")
-        current = datetime.now(IST)
+        current = self._now()
         with self._connect() as db:
             trade = db.execute("SELECT * FROM trades WHERE id=?", (int(trade_id),)).fetchone()
             if trade is None:
@@ -1186,7 +1243,7 @@ class PaperBroker:
     def record_research_observations(
         self, observations: list[dict[str, Any]], *, observed_at: datetime | None = None
     ) -> None:
-        current = observed_at or datetime.now(IST)
+        current = observed_at or self._now()
         current = current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
         with self._connect() as db:
             for item in observations:
@@ -1214,7 +1271,7 @@ class PaperBroker:
             positions = []
             unreal = 0.0
             exposure = 0.0
-            snapshot_now = datetime.now(IST)
+            snapshot_now = self._now()
             _, rates = load_phase2_settings()
             open_planned_risk = sum(
                 float(r["planned_net_risk_inr"] or r["risk_budget_inr"] or self.risk_per_trade)
@@ -1306,7 +1363,7 @@ class PaperBroker:
                 dd = max(dd, peak - equity)
             # These aggregates are reporting-only. Count unique actionable Champion
             # signal IDs, not neutral NO_TRADE/WATCH_CANDIDATE scan outcomes.
-            today = datetime.now(IST).date().isoformat()
+            today = self._now().date().isoformat()
             accepted_signal_ids = {
                 str(row["signal_id"])
                 for row in db.execute(
@@ -1480,7 +1537,7 @@ class PaperBroker:
                 for r in db.execute("SELECT * FROM strategy_registry ORDER BY track,strategy_name")
             ]
             account_row = db.execute("SELECT created_at FROM account WHERE id=1").fetchone()
-            today = self._today_net_pnl(db, datetime.now(IST))
+            today = self._today_net_pnl(db, self._now())
             return {
                 "research_only": True,
                 "orders_sent_to_broker": False,
@@ -1520,7 +1577,7 @@ class PaperBroker:
                 "strategies": strategies,
                 "strategy_registry": registry,
                 "events": events,
-                "updated_at": datetime.now(IST).isoformat(),
+                "updated_at": self._now().isoformat(),
             }
 
 

@@ -6,7 +6,7 @@ submitted. Yahoo Finance is an unofficial source; validate candle coverage befor
 interpreting results.
 
 Run from the repository root:
-    python -m src.multi_stock_validation --days 30
+    python -m src.multi_stock_validation --days 59
 
 The file should be placed at src/multi_stock_validation.py.
 """

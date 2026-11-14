@@ -11,6 +11,7 @@ import csv
 import hashlib
 import json
 import math
+import re
 import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from src.paper_broker import PaperBroker, to_ist
+from src.paper_broker import PAPER_BASELINE_VERSION, PaperBroker, to_ist
 
 IST = ZoneInfo("Asia/Kolkata")
 BAR_MINUTES = 5
@@ -87,6 +88,7 @@ class DayInputs:
     candle_counts: dict[str, int]
     conditional_candidates: int
     conditional_symbols: tuple[str, ...]
+    strategy_version: str
 
 
 def _positive_number(value: Any, *, label: str) -> float:
@@ -159,6 +161,26 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
         if isinstance(item, dict) and item.get("path")
     }
     hashes: list[tuple[str, str]] = []
+    daily_report_path = day_dir / "reports" / f"paper_daily_{day.isoformat()}.md"
+    relative, digest = _verify_input(daily_report_path, archive_root, manifest_entries)
+    hashes.append((relative, digest))
+    daily_report = daily_report_path.read_text(encoding="utf-8-sig")
+    version_matches = re.findall(
+        r"^## Champion account\\s+—\\s+([A-Za-z0-9_]+)\\s*$",
+        daily_report,
+        flags=re.MULTILINE,
+    )
+    if len(version_matches) != 1:
+        raise ValueError(
+            f"Daily report for {day} must explicitly pin the Champion strategy version; "
+            "select a date range with versioned reports."
+        )
+    strategy_version = version_matches[0]
+    if strategy_version != PAPER_BASELINE_VERSION:
+        raise ValueError(
+            f"Archive day {day} uses {strategy_version}, but this code replays "
+            f"{PAPER_BASELINE_VERSION}; select a matching date range."
+        )
     scan_paths = sorted((day_dir / "scans").glob("phase6_scan_*.json"))
     if not scan_paths:
         raise ValueError(f"No archived phase6 scan reports in {day_dir / 'scans'}")
@@ -260,18 +282,35 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
         candle_counts=candle_counts,
         conditional_candidates=conditional_candidates,
         conditional_symbols=tuple(sorted(required_symbols)),
+        strategy_version=strategy_version,
     )
 
 
-def _load_days(archive_root: Path) -> list[DayInputs]:
+def _load_days(
+    archive_root: Path,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> list[DayInputs]:
+    if from_date and to_date and from_date > to_date:
+        raise ValueError("from_date must be earlier than or equal to to_date")
     daily_root = archive_root / "daily"
     if not daily_root.is_dir():
         raise ValueError(f"Expected a daily/ directory below {archive_root}")
     day_dirs = sorted(path for path in daily_root.iterdir() if path.is_dir())
     prepared = []
     for day_dir in day_dirs:
-        if (day_dir / "manifest.json").is_file():
-            prepared.append(_prepare_day(day_dir, archive_root))
+        if not (day_dir / "manifest.json").is_file():
+            continue
+        try:
+            day = date.fromisoformat(day_dir.name)
+        except ValueError as exc:
+            raise ValueError(f"Invalid daily archive folder {day_dir.name}") from exc
+        if from_date and day < from_date:
+            continue
+        if to_date and day > to_date:
+            continue
+        prepared.append(_prepare_day(day_dir, archive_root))
     if not prepared:
         raise ValueError(f"No manifested research days found below {daily_root}")
     return prepared
@@ -379,13 +418,15 @@ def run_archive_replay(
     slippage_bps: float = 5.0,
     minimum_net_rr: float = 1.5,
     quote_mark_max_age_seconds: float = 360.0,
+    from_date: date | None = None,
+    to_date: date | None = None,
 ) -> dict[str, Any]:
     """Replay manifested daily scanner archives through PaperBroker chronologically."""
     archive_root = Path(archive_root).resolve()
     output_dir = Path(output_dir).resolve()
     if archive_root == output_dir or archive_root in output_dir.parents:
         raise ValueError("Replay output must be outside the source archive")
-    days = _load_days(archive_root)
+    days = _load_days(archive_root, from_date=from_date, to_date=to_date)
     input_hashes = sorted({item for day in days for item in day.hashes})
     run_digest = hashlib.sha256(
         "".join(f"{path}:{digest}\n" for path, digest in input_hashes).encode("utf-8")
@@ -513,6 +554,11 @@ def run_archive_replay(
             "input_sha256": run_digest,
             "days_available": len(days),
             "days_processed": processed_days,
+            "strategy_version": PAPER_BASELINE_VERSION,
+            "requested_date_range": {
+                "from": from_date.isoformat() if from_date else None,
+                "to": to_date.isoformat() if to_date else None,
+            },
             "scan_reports_processed": len(scan_results),
             "candidate_rows_processed": sum(item.conditional_count for day in days[:processed_days] for item in day.scan_reports),
             "candidate_symbols_checked": sorted({symbol for day in days[:processed_days] for symbol in day.conditional_symbols}),
@@ -556,6 +602,8 @@ def main() -> None:
     parser.add_argument("--slippage-bps", type=float, default=5.0)
     parser.add_argument("--minimum-net-rr", type=float, default=1.5)
     parser.add_argument("--quote-mark-max-age-seconds", type=float, default=360.0)
+    parser.add_argument("--from-date", type=date.fromisoformat)
+    parser.add_argument("--to-date", type=date.fromisoformat)
     args = parser.parse_args()
     summary = run_archive_replay(
         args.archive_root,
@@ -568,6 +616,8 @@ def main() -> None:
         slippage_bps=args.slippage_bps,
         minimum_net_rr=args.minimum_net_rr,
         quote_mark_max_age_seconds=args.quote_mark_max_age_seconds,
+        from_date=args.from_date,
+        to_date=args.to_date,
     )
     print(json.dumps({
         "status": summary["status"],

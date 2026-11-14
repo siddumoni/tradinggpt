@@ -127,6 +127,30 @@ def test_archive_replay_uses_shared_account_and_only_post_entry_target(tmp_path)
     assert trade["exit_time"].startswith("2026-11-13T10:10:00")
 
 
+def test_archive_replay_rejects_mixed_champion_versions(tmp_path):
+    archive_root = _archive(tmp_path)
+    day_dir = archive_root / "daily" / DAY.isoformat()
+    daily_report_path = day_dir / "reports" / f"paper_daily_{DAY.isoformat()}.md"
+    daily_report_path.write_text(
+        "## Champion account — champion_v1\\n",
+        encoding="utf-8",
+    )
+    inputs = [
+        *sorted((day_dir / "scans").glob("phase6_scan_*.json")),
+        *sorted((day_dir / "candles").glob("*.csv")),
+        daily_report_path,
+    ]
+    _manifest(archive_root, day_dir, inputs)
+
+    with pytest.raises(ValueError, match="uses champion_v1"):
+        run_archive_replay(
+            archive_root,
+            tmp_path / "output",
+            from_date=DAY,
+            to_date=DAY,
+        )
+
+
 def test_archive_replay_fails_closed_on_missing_candle(tmp_path):
     archive_root = _archive(tmp_path, missing_bar="10:05")
 

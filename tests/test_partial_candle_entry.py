@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -11,7 +11,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _open_trade(broker: PaperBroker, entry_time: datetime) -> None:
-    signal_time = entry_time.replace(minute=entry_time.minute - 5)
+    signal_time = entry_time - timedelta(minutes=5)
     with broker._connect() as db:
         db.execute(
             """INSERT INTO trades(

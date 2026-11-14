@@ -17,6 +17,10 @@ LOGGER = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 YAHOO_INTERVALS = {"5minute": "5m", "15minute": "15m", "day": "1d"}
 
+# Shared cap for the project's Yahoo-based intraday research workflows.
+MAX_INTRADAY_RESEARCH_DAYS = 59
+DEFAULT_INTRADAY_RESEARCH_DAYS = MAX_INTRADAY_RESEARCH_DAYS
+
 
 class YahooFinanceMarketData:
     """Fetch OHLCV candles for NSE symbols using Yahoo Finance's ``.NS`` tickers."""

@@ -435,7 +435,7 @@ def run_archive_replay(
     days = _load_days(archive_root, from_date=from_date, to_date=to_date)
     input_hashes = sorted({item for day in days for item in day.hashes})
     input_digest = hashlib.sha256(
-        "".join(f"{path}:{digest}\\n" for path, digest in input_hashes).encode("utf-8")
+        "".join(f"{path}:{digest}\n" for path, digest in input_hashes).encode("utf-8")
     ).hexdigest()
     effective_portfolio_risk = (
         max_portfolio_risk if max_portfolio_risk is not None else risk_per_trade * max_open_positions

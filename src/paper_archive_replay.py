@@ -166,7 +166,7 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
     hashes.append((relative, digest))
     daily_report = daily_report_path.read_text(encoding="utf-8-sig")
     version_matches = re.findall(
-        r"^## Champion account\\s+—\\s+([A-Za-z0-9_]+)\\s*$",
+        r"^## Champion account\s+—\s+([A-Za-z0-9_]+)\s*$",
         daily_report,
         flags=re.MULTILINE,
     )

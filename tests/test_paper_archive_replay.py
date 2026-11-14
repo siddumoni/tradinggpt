@@ -178,5 +178,5 @@ def test_replay_output_identity_includes_assumptions(tmp_path):
 def test_archive_replay_fails_closed_on_missing_candle(tmp_path):
     archive_root = _archive(tmp_path, missing_bar="10:05")
 
-    with pytest.raises(ValueError, match="Incomplete 5-minute session"):
+    with pytest.raises(ValueError, match="Incomplete 09:15–15:15 strategy simulation window"):
         run_archive_replay(archive_root, tmp_path / "output")

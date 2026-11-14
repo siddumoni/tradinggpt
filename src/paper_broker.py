@@ -75,6 +75,16 @@ def _signal_key(candidate: dict[str, Any]) -> str:
     return hashlib.sha256(raw.upper().encode("utf-8")).hexdigest()[:32]
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back and release file handles when a connection context exits."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class PaperBroker:
     """SQLite-backed virtual account. It never submits real brokerage orders."""
 
@@ -141,7 +151,7 @@ class PaperBroker:
         return current.replace(tzinfo=IST) if current.tzinfo is None else current.astimezone(IST)
 
     def _connect(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self.db_path, timeout=15)
+        c = sqlite3.connect(self.db_path, timeout=15, factory=_ClosingConnection)
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA foreign_keys=ON")
         c.execute("PRAGMA busy_timeout=15000")

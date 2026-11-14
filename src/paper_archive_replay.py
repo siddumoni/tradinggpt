@@ -53,7 +53,7 @@ TRADE_COLUMNS = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclass
 class ReplayClock:
     """Mutable-by-assignment event clock injected into the virtual broker."""
 
@@ -233,13 +233,8 @@ def _prepare_day(day_dir: Path, archive_root: Path) -> DayInputs:
                         raise ValueError(f"Invalid volume in {relative}")
                     if high < max(open_price, low, close) or low > min(open_price, high, close):
                         raise ValueError(f"Invalid OHLC in {relative} at {stamp.isoformat()}")
-                    if stamp.time().replace(tzinfo=None) not in (
-                        SESSION_START,
-                    ) and stamp not in expected:
-                        # Archive files may include post-session bars; they do not
-                        # participate in this intraday replay.
-                        continue
                     if stamp not in expected:
+                        # Post-session bars do not participate in this replay.
                         continue
                     if stamp in seen:
                         raise ValueError(f"Duplicate candle timestamp in {relative}: {stamp}")
@@ -537,13 +532,13 @@ def run_archive_replay(
         }
         report_path = output_dir / f"paper_archive_replay_{run_digest[:16]}.json"
         trades_path = output_dir / f"paper_archive_replay_{run_digest[:16]}_trades.csv"
+        summary["summary_path"] = str(report_path)
+        summary["trades_path"] = str(trades_path)
         report_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         with trades_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=TRADE_COLUMNS, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(trades)
-        summary["summary_path"] = str(report_path)
-        summary["trades_path"] = str(trades_path)
         return summary
 
 

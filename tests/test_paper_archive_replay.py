@@ -151,6 +151,30 @@ def test_archive_replay_rejects_mixed_champion_versions(tmp_path):
         )
 
 
+def test_replay_output_identity_includes_assumptions(tmp_path):
+    archive_root = _archive(tmp_path)
+    output_dir = tmp_path / "output"
+
+    baseline = run_archive_replay(
+        archive_root,
+        output_dir,
+        from_date=DAY,
+        to_date=DAY,
+    )
+    higher_slippage = run_archive_replay(
+        archive_root,
+        output_dir,
+        slippage_bps=10.0,
+        from_date=DAY,
+        to_date=DAY,
+    )
+
+    assert baseline["input_sha256"] == higher_slippage["input_sha256"]
+    assert baseline["run_id"] != higher_slippage["run_id"]
+    assert baseline["summary_path"] != higher_slippage["summary_path"]
+    assert baseline["trades_path"] != higher_slippage["trades_path"]
+
+
 def test_archive_replay_fails_closed_on_missing_candle(tmp_path):
     archive_root = _archive(tmp_path, missing_bar="10:05")
 

@@ -10,7 +10,7 @@ import pytest
 from src.paper_archive_replay import run_archive_replay
 
 IST = ZoneInfo("Asia/Kolkata")
-DAY = date(2026, 11, 5)
+DAY = date(2026, 11, 13)
 
 
 def _manifest(archive_root: Path, day_dir: Path, inputs: list[Path]) -> None:
@@ -56,7 +56,7 @@ def _archive(tmp_path: Path, *, missing_bar: str | None = None) -> Path:
             "strategy": "vwap_trend",
             "confidence": 80,
             "market_regime": "BULLISH",
-            "signal_time": "2026-11-05T09:55:00+05:30",
+            "signal_time": "2026-11-13T09:55:00+05:30",
             "reference_entry": 100.0,
             "stop_loss": 98.0,
             "target_1": 104.0,
@@ -71,12 +71,12 @@ def _archive(tmp_path: Path, *, missing_bar: str | None = None) -> Path:
                 "last_price": 100.0,
                 "bid": 99.99,
                 "ask": 100.01,
-                "timestamp": "2026-11-05T10:02:03+05:30",
+                "timestamp": "2026-11-13T10:02:03+05:30",
                 "verified_live": True,
             },
         },
     }
-    scan_path = scan_dir / "phase6_scan_20261105_100205.json"
+    scan_path = scan_dir / "phase6_scan_20261113_100205.json"
     scan_path.write_text(json.dumps(scan), encoding="utf-8")
 
     candle_path = candle_dir / "INFY.csv"
@@ -98,13 +98,20 @@ def _archive(tmp_path: Path, *, missing_bar: str | None = None) -> Path:
                 writer.writerow([stamp.isoformat(), *values, 1000, "kite"])
             stamp += timedelta(minutes=5)
 
-    _manifest(archive_root, day_dir, [scan_path, candle_path])
+    report_dir = day_dir / "reports"
+    report_dir.mkdir()
+    daily_report_path = report_dir / f"paper_daily_{DAY.isoformat()}.md"
+    daily_report_path.write_text(
+        "## Champion account — nse_champion_v2\\n",
+        encoding="utf-8",
+    )
+    _manifest(archive_root, day_dir, [scan_path, candle_path, daily_report_path])
     return archive_root
 
 
 def test_archive_replay_uses_shared_account_and_only_post_entry_target(tmp_path):
     archive_root = _archive(tmp_path)
-    summary = run_archive_replay(archive_root, tmp_path / "output")
+    summary = run_archive_replay(archive_root, tmp_path / "output", from_date=DAY, to_date=DAY)
 
     assert summary["status"] == "COMPLETE"
     assert summary["days_processed"] == 1
@@ -117,7 +124,7 @@ def test_archive_replay_uses_shared_account_and_only_post_entry_target(tmp_path)
     with Path(summary["trades_path"]).open(encoding="utf-8", newline="") as handle:
         trade = next(csv.DictReader(handle))
     assert trade["exit_reason"] == "TARGET_2"
-    assert trade["exit_time"].startswith("2026-11-05T10:10:00")
+    assert trade["exit_time"].startswith("2026-11-13T10:10:00")
 
 
 def test_archive_replay_fails_closed_on_missing_candle(tmp_path):
